@@ -1,0 +1,38 @@
+[package]
+name = "wml2viewer"
+version = "0.0.13-beta3"
+edition = "2024"
+
+license = "MIT"
+description = "Minimal native image viewer built with egui and wml2"
+authors = ["MITH@mmk"]
+publish = false
+
+[dependencies]
+eframe = "0.33"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+wml2 = { version = "0.0.19", features = ["multithread"] }
+directories = "6.0.0"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+encoding_rs = "0.8"
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Memory"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Imaging", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_UI_Shell"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+[build-dependencies]
+winres = "0.1"
+
+[dev-dependencies]
+filetime = "0.2"
+
+[patch.crates-io]
+wml2 = { path = "../wml2/wml2" }

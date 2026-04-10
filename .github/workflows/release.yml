@@ -1,0 +1,52 @@
+name: viewer
+
+on:
+  push:
+    tags:
+      - "wml*"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: build wml2viewer
+        run: cargo build --release
+
+      - name: zip (windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          mkdir dist
+          copy README.* dist/
+          copy LICENSE dist/
+          copy resources/help.html dist/
+          copy target/release/wml2viewer.exe dist/
+          Compress-Archive -Path dist/* -DestinationPath dist/wml2viewer-windows.zip
+        shell: pwsh
+
+      - name: zip (unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir dist
+          cp target/release/wml2viewer dist/
+          cp README.* dist/
+          cp LICENSE dist/
+          cp resources/help.html dist/
+          zip dist/wml2viewer-${{ matrix.os }}.zip dist/*
+
+      - name: create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
