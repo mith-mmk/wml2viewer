@@ -7,7 +7,9 @@ use crate::ui::menu::fileviewer::state::{FilerEntry, FilerMetadata, FilerSortFie
 use std::fs;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 use std::thread;
 
 pub(crate) enum FilerCommand {
@@ -47,6 +49,7 @@ pub(crate) enum FilerResult {
 pub(crate) fn spawn_filer_worker() -> (Sender<FilerCommand>, Receiver<FilerResult>) {
     let (command_tx, command_rx) = mpsc::channel::<FilerCommand>();
     let (result_tx, result_rx) = mpsc::channel::<FilerResult>();
+    let latest_request_id = Arc::new(AtomicU64::new(0));
 
     thread::spawn(move || {
         while let Ok(command) = command_rx.recv() {
@@ -68,11 +71,14 @@ pub(crate) fn spawn_filer_worker() -> (Sender<FilerCommand>, Receiver<FilerResul
                     extension_filter,
                     name_sort_mode,
                 } => {
+                    latest_request_id.store(request_id, Ordering::Relaxed);
                     let result_tx = result_tx.clone();
+                    let latest_request_id = latest_request_id.clone();
                     thread::spawn(move || {
                         let result = catch_unwind(AssertUnwindSafe(|| {
                             scan_directory_request(
                                 &result_tx,
+                                &latest_request_id,
                                 request_id,
                                 dir.clone(),
                                 sort,
@@ -90,6 +96,9 @@ pub(crate) fn spawn_filer_worker() -> (Sender<FilerCommand>, Receiver<FilerResul
                             Ok(entries) => entries,
                             Err(_) => Vec::new(),
                         };
+                        if request_is_stale(&latest_request_id, request_id) {
+                            return;
+                        }
                         let _ = result_tx.send(FilerResult::Snapshot {
                             request_id,
                             directory: dir,
@@ -107,6 +116,7 @@ pub(crate) fn spawn_filer_worker() -> (Sender<FilerCommand>, Receiver<FilerResul
 
 fn scan_directory_request(
     result_tx: &Sender<FilerResult>,
+    latest_request_id: &AtomicU64,
     request_id: u64,
     dir: PathBuf,
     sort: NavigationSortOption,
@@ -119,6 +129,9 @@ fn scan_directory_request(
     extension_filter: String,
     name_sort_mode: NameSortMode,
 ) -> Vec<FilerEntry> {
+    if request_is_stale(latest_request_id, request_id) {
+        return Vec::new();
+    }
     let _ = result_tx.send(FilerResult::Reset {
         request_id,
         directory: dir.clone(),
@@ -127,6 +140,7 @@ fn scan_directory_request(
 
     let collected = collect_browser_entries(
         result_tx,
+        latest_request_id,
         request_id,
         &dir,
         sort,
@@ -134,6 +148,9 @@ fn scan_directory_request(
         &filter_text,
         &extension_filter,
     );
+    if request_is_stale(latest_request_id, request_id) {
+        return Vec::new();
+    }
 
     let mut entries = collected
         .into_iter()
@@ -151,6 +168,7 @@ fn scan_directory_request(
 
 fn collect_browser_entries(
     result_tx: &Sender<FilerResult>,
+    latest_request_id: &AtomicU64,
     request_id: u64,
     dir: &std::path::Path,
     sort: NavigationSortOption,
@@ -162,6 +180,9 @@ fn collect_browser_entries(
         let mut collected = Vec::new();
         let mut preview_chunk = Vec::new();
         for path in list_browser_entries(dir, sort) {
+            if request_is_stale(latest_request_id, request_id) {
+                return Vec::new();
+            }
             let preview_entry = build_preview_entry(path.clone(), archive_as_container_in_sort);
             if !matches_filters(&preview_entry, filter_text, extension_filter) {
                 continue;
@@ -169,6 +190,9 @@ fn collect_browser_entries(
             collected.push(path);
             preview_chunk.push(preview_entry);
             if preview_chunk.len() >= 64 {
+                if request_is_stale(latest_request_id, request_id) {
+                    return Vec::new();
+                }
                 let _ = result_tx.send(FilerResult::Append {
                     request_id,
                     entries: std::mem::take(&mut preview_chunk),
@@ -176,6 +200,9 @@ fn collect_browser_entries(
             }
         }
         if !preview_chunk.is_empty() {
+            if request_is_stale(latest_request_id, request_id) {
+                return Vec::new();
+            }
             let _ = result_tx.send(FilerResult::Append {
                 request_id,
                 entries: preview_chunk,
@@ -191,6 +218,9 @@ fn collect_browser_entries(
 
     let mut preview_chunk = Vec::new();
     for entry in read_dir.filter_map(Result::ok) {
+        if request_is_stale(latest_request_id, request_id) {
+            return Vec::new();
+        }
         let Some(path) = browser_entry_path_from_dir_entry(&entry) else {
             continue;
         };
@@ -201,6 +231,9 @@ fn collect_browser_entries(
         collected.push(path);
         preview_chunk.push(preview_entry);
         if preview_chunk.len() >= 64 {
+            if request_is_stale(latest_request_id, request_id) {
+                return Vec::new();
+            }
             let _ = result_tx.send(FilerResult::Append {
                 request_id,
                 entries: std::mem::take(&mut preview_chunk),
@@ -208,12 +241,19 @@ fn collect_browser_entries(
         }
     }
     if !preview_chunk.is_empty() {
+        if request_is_stale(latest_request_id, request_id) {
+            return Vec::new();
+        }
         let _ = result_tx.send(FilerResult::Append {
             request_id,
             entries: preview_chunk,
         });
     }
     collected
+}
+
+fn request_is_stale(latest_request_id: &AtomicU64, request_id: u64) -> bool {
+    latest_request_id.load(Ordering::Relaxed) != request_id
 }
 
 fn build_filer_entry(path: PathBuf, archive_as_container_in_sort: bool) -> FilerEntry {
@@ -346,6 +386,7 @@ fn compare_name(left: &str, right: &str, mode: NameSortMode) -> std::cmp::Orderi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicU64;
 
     #[test]
     fn natural_sort_orders_numeric_suffixes() {
@@ -423,5 +464,13 @@ mod tests {
 
         assert_eq!(entries[0].label, "b");
         assert_eq!(entries[1].label, "a");
+    }
+
+    #[test]
+    fn request_is_stale_only_for_non_latest_request() {
+        let latest_request_id = AtomicU64::new(42);
+
+        assert!(!request_is_stale(&latest_request_id, 42));
+        assert!(request_is_stale(&latest_request_id, 41));
     }
 }

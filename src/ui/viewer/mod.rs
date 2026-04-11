@@ -189,6 +189,8 @@ enum BenchAction {
     OpenSubfiler,
     BrowseParentDirectory,
     BrowseFirstContainer,
+    BrowseSiblingContainer,
+    BrowseRandomContainer,
     SelectNeighborFromFiler,
 }
 
@@ -197,6 +199,7 @@ struct BenchAutomationState {
     actions: Vec<BenchAction>,
     next_index: usize,
     next_action_at: Instant,
+    random_state: u64,
 }
 
 #[derive(Clone)]
@@ -242,6 +245,29 @@ fn should_prioritize_companion_preload(
 
 fn bench_automation_plan(name: Option<&str>) -> (&'static str, Vec<BenchAction>) {
     match name {
+        Some("zip_to_zip_random") => (
+            "zip_to_zip_random",
+            vec![
+                BenchAction::BrowseParentDirectory,
+                BenchAction::BrowseRandomContainer,
+                BenchAction::RefreshFiler,
+                BenchAction::BrowseParentDirectory,
+                BenchAction::BrowseRandomContainer,
+                BenchAction::RefreshFiler,
+                BenchAction::BrowseParentDirectory,
+                BenchAction::BrowseRandomContainer,
+            ],
+        ),
+        Some("zip_to_zip") => (
+            "zip_to_zip",
+            vec![
+                BenchAction::BrowseParentDirectory,
+                BenchAction::BrowseSiblingContainer,
+                BenchAction::RefreshFiler,
+                BenchAction::BrowseParentDirectory,
+                BenchAction::BrowseSiblingContainer,
+            ],
+        ),
         Some("filer_refresh_race") => (
             "filer_refresh_race",
             vec![
@@ -577,6 +603,7 @@ impl ViewerApp {
                 actions: bench_actions,
                 next_index: 0,
                 next_action_at: Instant::now() + Duration::from_millis(250),
+                random_state: 0x5eed_cafe_d15c_a11e,
             }),
         };
 
@@ -1926,6 +1953,68 @@ impl ViewerApp {
             })
     }
 
+    fn bench_sibling_container_path(&self) -> Option<PathBuf> {
+        let current_branch = navigation_branch_path(&self.current_navigation_path);
+        let containers = self
+            .filer
+            .entries
+            .iter()
+            .filter(|entry| entry.is_container)
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>();
+        let current_index = containers
+            .iter()
+            .position(|path| current_branch.as_ref() == Some(path));
+
+        current_index
+            .and_then(|index| containers.get(index + 1).cloned())
+            .or_else(|| {
+                current_index
+                    .and_then(|index| index.checked_sub(1))
+                    .and_then(|index| containers.get(index).cloned())
+            })
+            .or_else(|| {
+                containers
+                    .iter()
+                    .find(|path| current_branch.as_ref() != Some(*path))
+                    .cloned()
+            })
+    }
+
+    fn bench_container_entry_by_path(&self, path: &Path) -> Option<crate::ui::menu::fileviewer::state::FilerEntry> {
+        self.filer
+            .entries
+            .iter()
+            .find(|entry| entry.is_container && entry.path == path)
+            .cloned()
+    }
+
+    fn next_bench_random_index(&mut self, upper_bound: usize) -> Option<usize> {
+        if upper_bound == 0 {
+            return None;
+        }
+        let state = self.bench_automation.as_mut()?;
+        state.random_state = state
+            .random_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1);
+        Some(((state.random_state >> 32) as usize) % upper_bound)
+    }
+
+    fn bench_random_container_path(&mut self) -> Option<PathBuf> {
+        let current_branch = navigation_branch_path(&self.current_navigation_path);
+        let containers = self
+            .filer
+            .entries
+            .iter()
+            .filter(|entry| entry.is_container)
+            .map(|entry| entry.path.clone())
+            .filter(|path| current_branch.as_ref() != Some(path))
+            .collect::<Vec<_>>();
+        let index = self.next_bench_random_index(containers.len())?;
+        containers.get(index).cloned()
+    }
+
     fn run_bench_action(&mut self, action: BenchAction) -> bool {
         match action {
             BenchAction::Reload => {
@@ -1997,7 +2086,30 @@ impl ViewerApp {
                 else {
                     return false;
                 };
-                self.request_filer_directory(path, None);
+                let Some(entry) = self.bench_container_entry_by_path(&path) else {
+                    return false;
+                };
+                self.bench_activate_filer_entry(entry);
+                true
+            }
+            BenchAction::BrowseSiblingContainer => {
+                let Some(path) = self.bench_sibling_container_path() else {
+                    return false;
+                };
+                let Some(entry) = self.bench_container_entry_by_path(&path) else {
+                    return false;
+                };
+                self.bench_activate_filer_entry(entry);
+                true
+            }
+            BenchAction::BrowseRandomContainer => {
+                let Some(path) = self.bench_random_container_path() else {
+                    return false;
+                };
+                let Some(entry) = self.bench_container_entry_by_path(&path) else {
+                    return false;
+                };
+                self.bench_activate_filer_entry(entry);
                 true
             }
             BenchAction::SelectNeighborFromFiler => {
@@ -3576,5 +3688,21 @@ mod tests {
                 navigation_path: PathBuf::from("dir\\file"),
             },
         )));
+    }
+
+    #[test]
+    fn zip_to_zip_bench_plan_is_available() {
+        let (name, actions) = bench_automation_plan(Some("zip_to_zip"));
+
+        assert_eq!(name, "zip_to_zip");
+        assert!(actions.contains(&BenchAction::BrowseSiblingContainer));
+    }
+
+    #[test]
+    fn zip_to_zip_random_bench_plan_is_available() {
+        let (name, actions) = bench_automation_plan(Some("zip_to_zip_random"));
+
+        assert_eq!(name, "zip_to_zip_random");
+        assert!(actions.contains(&BenchAction::BrowseRandomContainer));
     }
 }

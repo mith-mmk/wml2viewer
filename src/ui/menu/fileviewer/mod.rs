@@ -651,6 +651,10 @@ impl ViewerApp {
         }
         let _ = self.request_load_target(navigation_path, load_path);
     }
+
+    pub(crate) fn bench_activate_filer_entry(&mut self, entry: FilerEntry) {
+        self.activate_filer_entry(entry);
+    }
 }
 
 fn icon_toolbar_button(
