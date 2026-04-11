@@ -531,6 +531,8 @@ impl ViewerApp {
             .default_height(110.0)
             .show(ctx, |ui| {
                 let mut close_requested = false;
+                let focus_target = self.pending_subfiler_focus_path.clone();
+                let mut focus_consumed = false;
                 ui.horizontal(|ui| {
                     ui.label(self.text(UiTextKey::Subfiler));
                     ui.label(if self.options.manga_right_to_left {
@@ -561,24 +563,50 @@ impl ViewerApp {
                             }
                             frame.show(ui, |ui| {
                                 if let Some(texture) = self.thumbnail_cache.get(&entry.path) {
-                                    if ui
+                                    let response = ui
                                         .add(egui::Button::image(
                                             egui::Image::from_texture(texture)
                                                 .fit_to_exact_size(egui::vec2(72.0, 72.0)),
-                                        ))
-                                        .clicked()
-                                    {
+                                        ));
+                                    if focus_target.as_ref() == Some(&entry.path) {
+                                        ui.scroll_to_rect(
+                                            response.rect,
+                                            Some(if self.options.manga_right_to_left {
+                                                egui::Align::Max
+                                            } else {
+                                                egui::Align::Min
+                                            }),
+                                        );
+                                        focus_consumed = true;
+                                    }
+                                    if response.clicked() {
                                         self.activate_filer_entry(entry.clone());
                                     }
-                                } else if ui.button("...").clicked() {
+                                } else {
+                                    let response = ui.button("...");
+                                    if focus_target.as_ref() == Some(&entry.path) {
+                                        ui.scroll_to_rect(
+                                            response.rect,
+                                            Some(if self.options.manga_right_to_left {
+                                                egui::Align::Max
+                                            } else {
+                                                egui::Align::Min
+                                            }),
+                                        );
+                                        focus_consumed = true;
+                                    }
+                                    if response.clicked() {
                                     self.activate_filer_entry(entry.clone());
+                                    }
                                 }
                             });
                         }
                     });
                 });
                 if close_requested {
-                    self.show_subfiler = false;
+                    self.set_show_subfiler(false);
+                } else if focus_consumed {
+                    self.pending_subfiler_focus_path = None;
                 }
             });
     }
@@ -595,6 +623,9 @@ impl ViewerApp {
         self.empty_mode = false;
         self.show_filer = false;
         self.pending_fit_recalc = true;
+        if self.show_subfiler {
+            self.pending_subfiler_focus_path = Some(navigation_path.clone());
+        }
         self.set_filesystem_current(navigation_path.clone());
         let _ = self.request_load_target(navigation_path, load_path);
     }

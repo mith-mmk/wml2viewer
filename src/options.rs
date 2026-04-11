@@ -96,6 +96,7 @@ fn default_key_mapping() -> HashMap<KeyBinding, ViewerAction> {
     );
     map.insert(KeyBinding::new("Enter"), ViewerAction::ToggleFullscreen);
     map.insert(KeyBinding::new("R").with_shift(), ViewerAction::Reload);
+    map.insert(KeyBinding::new("F5"), ViewerAction::Reload);
     map.insert(KeyBinding::new("Space"), ViewerAction::NextImage);
     map.insert(KeyBinding::new("ArrowRight"), ViewerAction::NextImage);
     map.insert(
@@ -120,6 +121,18 @@ fn default_key_mapping() -> HashMap<KeyBinding, ViewerAction> {
     map.insert(KeyBinding::new("F"), ViewerAction::ToggleFiler);
     map.insert(KeyBinding::new("P"), ViewerAction::ToggleSettings);
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{KeyBinding, ViewerAction, default_key_mapping};
+
+    #[test]
+    fn default_key_mapping_includes_f5_reload() {
+        let map = default_key_mapping();
+
+        assert_eq!(map.get(&KeyBinding::new("F5")), Some(&ViewerAction::Reload));
+    }
 }
 
 #[derive(Clone, Default)]

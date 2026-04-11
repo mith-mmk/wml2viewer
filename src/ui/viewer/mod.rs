@@ -88,6 +88,7 @@ pub(crate) struct ViewerApp {
     pub(crate) next_request_id: u64,
     pub(crate) active_request: Option<ActiveRenderRequest>,
     pub(crate) pending_navigation_path: Option<PathBuf>,
+    pending_viewer_navigation: Option<PendingViewerNavigation>,
     pub(crate) fs_tx: Option<Sender<FilesystemCommand>>,
     pub(crate) fs_rx: Option<Receiver<FilesystemResult>>,
     pub(crate) next_fs_request_id: u64,
@@ -124,6 +125,7 @@ pub(crate) struct ViewerApp {
     pub(crate) show_filer: bool,
     pub(crate) show_subfiler: bool,
     pub(crate) filer: FilerState,
+    pub(crate) pending_subfiler_focus_path: Option<PathBuf>,
     pub(crate) susie64_search_paths_input: String,
     pub(crate) system_search_paths_input: String,
     pub(crate) ffmpeg_search_paths_input: String,
@@ -184,6 +186,14 @@ enum BenchAutomationStep {
     ToggleMangaOff,
     Finish,
     Closing,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingViewerNavigation {
+    Next,
+    Prev,
+    First,
+    Last,
 }
 
 struct BenchAutomationState {
@@ -406,6 +416,7 @@ impl ViewerApp {
             next_request_id: 0,
             active_request: None,
             pending_navigation_path: None,
+            pending_viewer_navigation: None,
             fs_tx: None,
             fs_rx: None,
             next_fs_request_id: 0,
@@ -445,6 +456,7 @@ impl ViewerApp {
             show_filer: show_filer_on_start,
             show_subfiler: false,
             filer: FilerState::default(),
+            pending_subfiler_focus_path: None,
             susie64_search_paths_input: String::new(),
             system_search_paths_input: String::new(),
             ffmpeg_search_paths_input: String::new(),
@@ -1485,6 +1497,10 @@ impl ViewerApp {
         if !self.can_trigger_navigation() {
             return Ok(());
         }
+        if self.navigation_blocked_by_active_load() {
+            self.queue_viewer_navigation(PendingViewerNavigation::Next);
+            return Ok(());
+        }
         if let Some(target) = self.manga_navigation_target(true) {
             self.request_load_path(target)?;
             self.last_navigation_at = Some(Instant::now());
@@ -1501,6 +1517,10 @@ impl ViewerApp {
     pub(crate) fn prev_image(&mut self) -> Result<(), Box<dyn Error>> {
         self.cancel_pending_single_click_navigation();
         if !self.can_trigger_navigation() {
+            return Ok(());
+        }
+        if self.navigation_blocked_by_active_load() {
+            self.queue_viewer_navigation(PendingViewerNavigation::Prev);
             return Ok(());
         }
         if let Some(target) = self.manga_navigation_target(false) {
@@ -1521,6 +1541,10 @@ impl ViewerApp {
         if !self.can_trigger_navigation() {
             return Ok(());
         }
+        if self.navigation_blocked_by_active_load() {
+            self.queue_viewer_navigation(PendingViewerNavigation::First);
+            return Ok(());
+        }
         self.request_navigation(FilesystemCommand::First { request_id: 0 })?;
         self.last_navigation_at = Some(Instant::now());
         Ok(())
@@ -1529,6 +1553,10 @@ impl ViewerApp {
     pub(crate) fn last_image(&mut self) -> Result<(), Box<dyn Error>> {
         self.cancel_pending_single_click_navigation();
         if !self.can_trigger_navigation() {
+            return Ok(());
+        }
+        if self.navigation_blocked_by_active_load() {
+            self.queue_viewer_navigation(PendingViewerNavigation::Last);
             return Ok(());
         }
         self.request_navigation(FilesystemCommand::Last { request_id: 0 })?;
@@ -1546,6 +1574,15 @@ impl ViewerApp {
             self.request_load_target(path.clone(), path)
     }
 
+    pub(crate) fn set_show_subfiler(&mut self, show: bool) {
+        self.show_subfiler = show;
+        if show {
+            self.pending_subfiler_focus_path = Some(self.current_navigation_path.clone());
+        } else {
+            self.pending_subfiler_focus_path = None;
+        }
+    }
+
     fn log_bench_state(&self, event: &str, payload: serde_json::Value) {
         let Some(logger) = &self.bench_logger else {
             return;
@@ -1557,6 +1594,7 @@ impl ViewerApp {
                     "current_navigation_path": self.current_navigation_path.display().to_string(),
                     "current_path": self.current_path.display().to_string(),
                     "pending_navigation_path": self.pending_navigation_path.as_ref().map(|path| path.display().to_string()),
+                    "pending_viewer_navigation": self.pending_viewer_navigation.map(|nav| format!("{nav:?}")),
                     "navigator_ready": self.navigator_ready,
                     "active_request": format!("{:?}", self.active_request),
                     "active_fs_request_id": self.active_fs_request_id,
@@ -1585,6 +1623,67 @@ impl ViewerApp {
                 "frame_counter": self.frame_counter,
             }),
         );
+    }
+
+    fn navigation_blocked_by_active_load(&self) -> bool {
+        matches!(self.active_request, Some(ActiveRenderRequest::Load(_)))
+    }
+
+    fn queue_viewer_navigation(&mut self, navigation: PendingViewerNavigation) {
+        self.pending_viewer_navigation = Some(navigation);
+        self.log_bench_state(
+            "viewer.navigation.queued_during_load",
+            serde_json::json!({
+                "navigation": format!("{navigation:?}"),
+            }),
+        );
+    }
+
+    fn flush_pending_viewer_navigation(&mut self) {
+        if self.navigation_blocked_by_active_load() {
+            return;
+        }
+        let Some(navigation) = self.pending_viewer_navigation.take() else {
+            return;
+        };
+        self.log_bench_state(
+            "viewer.navigation.flushed_after_load",
+            serde_json::json!({
+                "navigation": format!("{navigation:?}"),
+            }),
+        );
+        self.cancel_pending_single_click_navigation();
+        let result = match navigation {
+            PendingViewerNavigation::Next => {
+                if let Some(target) = self.manga_navigation_target(true) {
+                    self.request_load_path(target)
+                } else {
+                    self.request_navigation(FilesystemCommand::Next {
+                        request_id: 0,
+                        policy: self.end_of_folder,
+                    })
+                }
+            }
+            PendingViewerNavigation::Prev => {
+                if let Some(target) = self.manga_navigation_target(false) {
+                    self.request_load_path(target)
+                } else {
+                    self.request_navigation(FilesystemCommand::Prev {
+                        request_id: 0,
+                        policy: self.end_of_folder,
+                    })
+                }
+            }
+            PendingViewerNavigation::First => {
+                self.request_navigation(FilesystemCommand::First { request_id: 0 })
+            }
+            PendingViewerNavigation::Last => {
+                self.request_navigation(FilesystemCommand::Last { request_id: 0 })
+            }
+        };
+        if result.is_ok() {
+            self.last_navigation_at = Some(Instant::now());
+        }
     }
 
     fn bench_automation_ready(&self) -> bool {
@@ -1997,6 +2096,9 @@ impl ViewerApp {
                     path: self.current_navigation_path.clone(),
                 });
             }
+            if self.show_subfiler {
+                self.pending_subfiler_focus_path = Some(self.current_navigation_path.clone());
+            }
             self.sync_filer_directory_with_current_path();
         }
         self.source = source;
@@ -2057,6 +2159,7 @@ impl ViewerApp {
             self.pending_resize_after_render = false;
             let _ = self.request_resize_current();
         }
+        self.flush_pending_viewer_navigation();
     }
 
     fn next_preload_candidate(&self) -> Option<PathBuf> {
@@ -2293,6 +2396,7 @@ impl ViewerApp {
                     self.show_loading_texture(true);
                     self.overlay.clear_loading_message();
                     self.active_request = None;
+                    self.flush_pending_viewer_navigation();
                     if !self.navigator_ready && self.active_fs_request_id.is_none() {
                         if self.deferred_filesystem_init_path.is_some() {
                             self.deferred_filesystem_init_path =

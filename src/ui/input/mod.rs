@@ -62,7 +62,11 @@ impl ViewerApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
                 }
                 ViewerAction::Reload => {
-                    let _ = self.reload_current();
+                    if self.show_filer || self.show_subfiler {
+                        self.refresh_current_filer_directory();
+                    } else {
+                        let _ = self.reload_current();
+                    }
                 }
                 ViewerAction::NextImage => {
                     let _ = self.next_image();
@@ -105,7 +109,7 @@ impl ViewerApp {
                     self.pending_fit_recalc = true;
                 }
                 ViewerAction::ToggleSubfiler => {
-                    self.show_subfiler = !self.show_subfiler;
+                    self.set_show_subfiler(!self.show_subfiler);
                 }
                 ViewerAction::SaveAs => {
                     self.open_save_dialog();
