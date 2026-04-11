@@ -227,6 +227,141 @@ startup は beta 前でも state machine を組み替えやすいように、次
 - `companion_*` と `preloaded_*` は、どちらも stale result を request id で捨てる設計です。
   - ただし新しい経路を足すと、ここを通らない stale cache が残る可能性があります。
 
+## Filer / Manga の追加整理
+
+最終整理日: 2026-04-11
+
+この領域は、局所修正ほど悪化しやすいので、先に「誰がどの state を所有するか」を固定します。
+特に `filer` と `manga companion` は viewer の従属 state として扱い、独立した truth を持たせない方針に寄せます。
+
+### 1. 所有権
+
+- Viewer primary state
+  - `current_navigation_path`
+  - `current_path`
+  - `active_request`
+  - `pending_navigation_path`
+  - `navigator_ready`
+  - `empty_mode`
+  - owner:
+    - `request_load_target()`
+    - `apply_loaded_result()`
+    - `poll_filesystem()`
+
+- Filer state
+  - `filer.directory`
+  - `filer.entries`
+  - `filer.selected`
+  - `filer.pending_request_id`
+  - owner:
+    - `request_filer_directory()`
+    - `poll_filer_worker()`
+    - `sync_filer_directory_with_current_path()`
+  - 注意:
+    - `activate_filer_entry()` は `filer.selected` を更新してよい
+    - ただし `current_directory() == filer.directory` の間は、最終的に `current_navigation_path` が選択の truth になる
+
+- Manga companion state
+  - `companion_navigation_path`
+  - `companion_source`
+  - `companion_rendered`
+  - `companion_texture`
+  - `companion_active_request`
+  - owner:
+    - `sync_manga_companion()`
+    - `request_companion_load()`
+    - `poll_companion_worker()`
+    - `clear_manga_companion()`
+  - 注意:
+    - companion は primary の従属 state であり、primary と独立に生存してはいけない
+
+### 2. 更新ルール
+
+- `current_navigation_path` が変わったら:
+  - `filer.selected` は同じ directory の範囲で追従してよい
+  - `show_subfiler == true` なら `pending_subfiler_focus_path` を更新してよい
+  - `companion_*` は再評価対象
+
+- `current_path` が変わったら:
+  - 表示中テクスチャと animation state だけを更新する
+  - `filer.directory` は直接変えない
+
+- `filer refresh` が入ったら:
+  - 再 scan の対象 directory は `filer.directory`
+  - 選択の基準は次の優先順にする
+  - `current_directory() == filer.directory` のときは `current_navigation_path`
+  - それ以外は `filer.selected`
+  - このとき refresh を理由に `request_load_target()` を呼んではいけない
+
+- `filer entry activate` が file のとき:
+  - `filer.selected = navigation_path`
+  - `set_filesystem_current(navigation_path)` を送る
+  - `request_load_target(navigation_path, load_path)` を送る
+  - `filer.directory` は変えない
+
+- `filer entry activate` が container のとき:
+  - `request_filer_directory(container, None)` を送る
+  - viewer の `current_navigation_path` は変えない
+
+- `manga mode` が on のとき:
+  - companion の存在判定は `desired_manga_companion_path()` に一本化する
+  - companion を直接残す条件は `desired == companion_navigation_path && companion_rendered.is_some()` のみ
+  - primary の image 切り替え中は stale companion を残してよい理由がないので、切り替え開始時点で破棄寄りに扱う
+
+### 3. 禁止事項
+
+- `poll_filer_worker()` が `current_navigation_path` を更新してはいけない
+- `refresh_current_filer_directory()` が暗黙に next/prev を起こしてはいけない
+- `companion_*` が primary と別 branch を指したまま残ってはいけない
+- `filer.selected` を truth と見なして `current_navigation_path` を上書きしてはいけない
+- zip 内 file 選択時だけ wait 表示を省略してはいけない
+
+### 4. 典型シーケンス
+
+#### filer から zip 内 file を選ぶ
+
+1. `activate_filer_entry()` が virtual child を受け取る
+2. `filer.selected = navigation_path`
+3. `set_filesystem_current(navigation_path)`
+4. `request_load_target(navigation_path, load_path)`
+5. wait 表示を出す条件を primary load と同じにする
+6. `apply_loaded_result()` 成功後に `current_navigation_path` / `current_path` を確定する
+7. `sync_filer_directory_with_current_path()` が同 directory なら選択だけ追従する
+8. `sync_manga_companion()` が companion を再評価する
+
+#### filer refresh
+
+1. `refresh_current_filer_directory()`
+2. `request_filer_directory(filer.directory, preferred_selected)`
+3. `poll_filer_worker()` が `directory / entries / selected` を更新
+4. この経路では viewer の load を起こさない
+
+#### manga mode で next/prev
+
+1. `next_image()` / `prev_image()`
+2. `manga_navigation_target()` が 2 枚単位の target を返すか判定
+3. `request_load_target()` が primary load を開始
+4. stale companion を破棄
+5. `apply_loaded_result()` 後に `sync_manga_companion()` が次の companion を再要求
+
+### 5. manager を置く条件
+
+以下のどれかを満たしたら、`viewer/mod.rs` の個別更新ではなく manager を置く方がよいです。
+
+- `request_load_target()` と `poll_filesystem()` と `poll_filer_worker()` が同じ state を書き換える
+- `filer.selected` と `current_navigation_path` の優先順位を call site ごとに変えてしまう
+- `manga companion` の破棄条件が 3 箇所以上に散る
+- wait 表示の条件が `active_request` 以外のフラグに分岐し始める
+
+候補名は `ViewerStateManager` か `NavigationStateManager` です。
+責務は次の 3 つに限定します。
+
+- primary navigation state の reconcile
+- filer selection / directory state の reconcile
+- manga companion / preload の invalidate 判断
+
+manager を置く場合でも、render / filesystem / filer worker の実行そのものは移さず、「state をどう確定するか」だけを集中管理します。
+
 ## コメントアウト候補
 
 以下は「今すぐ消す」ではなく、責務が固まったらコメントアウト候補として見直したい箇所です。

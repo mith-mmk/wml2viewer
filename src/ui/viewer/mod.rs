@@ -30,6 +30,7 @@ use crate::ui::viewer::options::{
 use eframe::egui::{self, Pos2, TextureHandle, TextureOptions, vec2};
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -44,6 +45,7 @@ use state::{SaveDialogState, ViewerOverlayState};
 const NAVIGATION_REPEAT_INTERVAL: Duration = Duration::from_millis(180);
 const POINTER_SINGLE_CLICK_DELAY: Duration = Duration::from_millis(500);
 const WAITING_CARD_DELAY: Duration = Duration::from_millis(180);
+const PRELOAD_CACHE_CAPACITY: usize = 2;
 
 pub(crate) struct ViewerApp {
     pub(crate) current_navigation_path: PathBuf,
@@ -53,7 +55,6 @@ pub(crate) struct ViewerApp {
     pub(crate) default_texture: TextureHandle,
     pub(crate) prev_texture: Option<TextureHandle>,
     pub(crate) current_texture: TextureHandle,
-    pub(crate) next_texture: Option<TextureHandle>,
     pub(crate) egui_ctx: egui::Context,
 
     pub(crate) zoom: f32,
@@ -112,7 +113,6 @@ pub(crate) struct ViewerApp {
     pub(crate) settings_tab: SettingsTab,
     pub(crate) max_texture_side: usize,
     pub(crate) texture_display_scale: f32,
-    pub(crate) next_texture_display_scale: f32,
     pub(crate) current_texture_is_default: bool,
     pub(crate) pending_resize_after_load: bool,
     pub(crate) pending_resize_after_render: bool,
@@ -147,10 +147,7 @@ pub(crate) struct ViewerApp {
     pub(crate) next_preload_request_id: u64,
     pub(crate) active_preload_request_id: Option<u64>,
     pub(crate) pending_preload_navigation_path: Option<PathBuf>,
-    pub(crate) preloaded_navigation_path: Option<PathBuf>,
-    pub(crate) preloaded_load_path: Option<PathBuf>,
-    pub(crate) preloaded_source: Option<LoadedImage>,
-    pub(crate) preloaded_rendered: Option<LoadedImage>,
+    preload_cache: VecDeque<PreloadedEntry>,
     pub(crate) pending_primary_click_deadline: Option<Instant>,
     pub(crate) bench_initial_load_logged: bool,
     pub(crate) bench_startup_sync_logged: bool,
@@ -199,6 +196,42 @@ enum PendingViewerNavigation {
 struct BenchAutomationState {
     step: BenchAutomationStep,
     next_action_at: Instant,
+}
+
+#[derive(Clone)]
+struct PreloadedEntry {
+    navigation_path: PathBuf,
+    load_path: Option<PathBuf>,
+    source: LoadedImage,
+    rendered: LoadedImage,
+    texture: Option<TextureHandle>,
+    texture_display_scale: f32,
+}
+
+fn remember_preloaded_entry_in_cache(cache: &mut VecDeque<PreloadedEntry>, entry: PreloadedEntry) {
+    if let Some(index) = cache
+        .iter()
+        .position(|cached| cached.navigation_path == entry.navigation_path)
+    {
+        cache.remove(index);
+    }
+    cache.push_front(entry);
+    while cache.len() > PRELOAD_CACHE_CAPACITY {
+        cache.pop_back();
+    }
+}
+
+fn should_prioritize_companion_preload(
+    desired_companion: Option<&Path>,
+    companion_navigation_path: Option<&Path>,
+    companion_ready: bool,
+) -> bool {
+    match desired_companion {
+        Some(desired_companion) => {
+            companion_navigation_path != Some(desired_companion) || !companion_ready
+        }
+        None => false,
+    }
 }
 
 fn calc_fit_zoom(ctx_size: egui::Vec2, image_size: egui::Vec2, option: &ZoomOption) -> f32 {
@@ -394,7 +427,6 @@ impl ViewerApp {
             default_texture: default_texture.clone(),
             prev_texture: None,
             current_texture: default_texture.clone(),
-            next_texture: None,
             egui_ctx: cc.egui_ctx.clone(),
 
             zoom,
@@ -453,7 +485,6 @@ impl ViewerApp {
             settings_tab: SettingsTab::Viewer,
             max_texture_side: cc.egui_ctx.input(|i| i.max_texture_side),
             texture_display_scale: 1.0,
-            next_texture_display_scale: 1.0,
             current_texture_is_default: true,
             pending_resize_after_load: false,
             pending_resize_after_render: false,
@@ -491,10 +522,7 @@ impl ViewerApp {
             next_preload_request_id: 0,
             active_preload_request_id: None,
             pending_preload_navigation_path: None,
-            preloaded_navigation_path: None,
-            preloaded_load_path: None,
-            preloaded_source: None,
-            preloaded_rendered: None,
+            preload_cache: VecDeque::new(),
             pending_primary_click_deadline: None,
             bench_initial_load_logged: false,
             bench_startup_sync_logged: false,
@@ -544,7 +572,7 @@ impl ViewerApp {
 
     fn fit_target_size(&self) -> egui::Vec2 {
         if self.manga_spread_active() {
-            if let Some(companion) = &self.companion_source {
+            if let Some(companion) = self.visible_companion_source() {
                 let separator = self.options.manga_separator.pixels.max(0.0);
                 return vec2(
                     self.source.canvas.width() as f32 + companion.canvas.width() as f32 + separator,
@@ -769,10 +797,7 @@ impl ViewerApp {
     }
 
     fn companion_draw_scale(&self) -> f32 {
-        match self.render_options.scale_mode {
-            RenderScaleMode::FastGpu => self.zoom.max(0.1),
-            RenderScaleMode::PreciseCpu => 1.0,
-        }
+        self.current_draw_scale()
     }
 
     fn effective_zoom(&self) -> f32 {
@@ -884,8 +909,6 @@ impl ViewerApp {
         }
         if reset_branch_cache {
             self.prev_texture = None;
-            self.next_texture = None;
-            self.next_texture_display_scale = 1.0;
         }
         self.current_texture = self.default_texture.clone();
         self.current_texture_is_default = true;
@@ -1418,19 +1441,47 @@ impl ViewerApp {
         self.companion_texture_display_scale = 1.0;
     }
 
+    fn visible_companion_source(&self) -> Option<&LoadedImage> {
+        self.companion_navigation_path
+            .as_ref()
+            .and(self.companion_source.as_ref())
+    }
+
+    fn visible_companion(&self) -> Option<(&LoadedImage, &TextureHandle)> {
+        self.companion_navigation_path
+            .as_ref()
+            .and(self.companion_rendered.as_ref().zip(self.companion_texture.as_ref()))
+    }
+
     fn manga_spread_active(&self) -> bool {
         self.options.manga_mode
             && self.last_viewport_size.x >= self.last_viewport_size.y * 1.4
             && self.is_current_portrait_page()
-            && self.companion_navigation_path.is_some()
             && self
-                .companion_source
-                .as_ref()
+                .visible_companion_source()
                 .map(|image| image.canvas.height() >= image.canvas.width())
                 .unwrap_or(false)
     }
 
     fn request_companion_load(&mut self, path: PathBuf) -> Result<(), Box<dyn Error>> {
+        if let Some(entry) = self.cached_preloaded_entry(&path) {
+            self.log_bench_state(
+                "viewer.request_companion_load.preloaded_hit",
+                serde_json::json!({
+                    "path": path.display().to_string(),
+                    "load_path": entry.load_path.as_ref().map(|load_path| load_path.display().to_string()),
+                }),
+            );
+            self.companion_navigation_path = Some(path);
+            self.apply_companion_loaded(
+                entry.load_path,
+                entry.source,
+                entry.rendered,
+                entry.texture,
+                entry.texture_display_scale,
+            );
+            return Ok(());
+        }
         let request_id = self.alloc_request_id();
         self.companion_active_request = Some(ActiveRenderRequest::Load(request_id));
         self.companion_navigation_path = Some(path.clone());
@@ -1465,22 +1516,32 @@ impl ViewerApp {
 
     fn sync_manga_companion(&mut self, ctx: &egui::Context) {
         let desired = self.desired_manga_companion_path();
-        if desired == self.companion_navigation_path && self.companion_rendered.is_some() {
+        if desired == self.companion_navigation_path && self.visible_companion().is_some() {
             return;
         }
 
         if desired.is_none() {
-            self.companion_navigation_path = None;
-            self.companion_source = None;
-            self.companion_rendered = None;
-            self.companion_texture = None;
-            self.companion_active_request = None;
+            self.clear_manga_companion();
             self.pending_fit_recalc |= !matches!(self.render_options.zoom_option, ZoomOption::None);
             return;
         }
 
+        let desired = desired.unwrap();
+        if let Some(entry) = self.cached_preloaded_entry(&desired) {
+            self.companion_navigation_path = Some(desired);
+            self.apply_companion_loaded(
+                entry.load_path,
+                entry.source,
+                entry.rendered,
+                entry.texture,
+                entry.texture_display_scale,
+            );
+            ctx.request_repaint();
+            return;
+        }
+
         if self.companion_active_request.is_none() {
-            let _ = self.request_companion_load(desired.unwrap());
+            let _ = self.request_companion_load(desired);
             ctx.request_repaint();
         }
     }
@@ -1617,7 +1678,7 @@ impl ViewerApp {
                     "empty_mode": self.empty_mode,
                     "active_preload_request_id": self.active_preload_request_id,
                     "pending_preload_navigation_path": self.pending_preload_navigation_path.as_ref().map(|path| path.display().to_string()),
-                    "preloaded_navigation_path": self.preloaded_navigation_path.as_ref().map(|path| path.display().to_string()),
+                    "preload_cache_navigation_paths": self.preload_cache.iter().map(|entry| entry.navigation_path.display().to_string()).collect::<Vec<_>>(),
                 },
                 "event_payload": payload,
             }),
@@ -1841,7 +1902,6 @@ impl ViewerApp {
                 "switching_image": switching_image,
             }),
         );
-        self.invalidate_preload();
         if self.try_take_preloaded(&navigation_path) {
             self.log_bench_state(
                 "viewer.request_load_target.preloaded_hit",
@@ -1954,12 +2014,105 @@ impl ViewerApp {
     fn invalidate_preload(&mut self) {
         self.active_preload_request_id = None;
         self.pending_preload_navigation_path = None;
-        self.preloaded_navigation_path = None;
-        self.preloaded_load_path = None;
-        self.preloaded_source = None;
-        self.preloaded_rendered = None;
-        self.next_texture = None;
-        self.next_texture_display_scale = 1.0;
+        self.preload_cache.clear();
+    }
+
+    fn preload_cache_contains(&self, path: &Path) -> bool {
+        self.preload_cache
+            .iter()
+            .any(|entry| entry.navigation_path == path)
+    }
+
+    fn cached_preloaded_entry(&self, path: &Path) -> Option<PreloadedEntry> {
+        self.preload_cache
+            .iter()
+            .find(|entry| entry.navigation_path == path)
+            .cloned()
+    }
+
+    fn remember_preloaded_entry(&mut self, entry: PreloadedEntry) {
+        remember_preloaded_entry_in_cache(&mut self.preload_cache, entry);
+    }
+
+    fn remember_loaded_page_in_cache(
+        &mut self,
+        navigation_path: &Path,
+        load_path: Option<&Path>,
+        source: &LoadedImage,
+        rendered: &LoadedImage,
+    ) {
+        self.remember_preloaded_entry(PreloadedEntry {
+            navigation_path: navigation_path.to_path_buf(),
+            load_path: load_path.map(Path::to_path_buf),
+            source: source.clone(),
+            rendered: rendered.clone(),
+            texture: None,
+            texture_display_scale: 1.0,
+        });
+    }
+
+    fn take_preloaded_entry(&mut self, path: &Path) -> Option<PreloadedEntry> {
+        let index = self
+            .preload_cache
+            .iter()
+            .position(|cached| cached.navigation_path == path)?;
+        self.preload_cache.remove(index)
+    }
+
+    fn apply_companion_loaded(
+        &mut self,
+        path: Option<PathBuf>,
+        source: LoadedImage,
+        rendered: LoadedImage,
+        texture: Option<TextureHandle>,
+        texture_display_scale: f32,
+    ) {
+        let reused_texture = texture.is_some();
+        let layout_changed = path.is_some()
+            || self
+                .companion_source
+                .as_ref()
+                .map(|image| {
+                    image.canvas.width() != source.canvas.width()
+                        || image.canvas.height() != source.canvas.height()
+                })
+                .unwrap_or(true);
+
+        let texture = if let Some(texture) = texture {
+            texture
+        } else {
+            let (canvas, display_scale) = downscale_for_texture_limit(
+                rendered.frame_canvas(0),
+                self.max_texture_side,
+                self.render_options.zoom_method,
+            );
+            let image = self.color_image_from_canvas(&canvas);
+            let texture_options = self.texture_options();
+            self.companion_texture_display_scale = display_scale;
+            if path.is_none() {
+                if let Some(texture) = &mut self.companion_texture {
+                    texture.set(image, texture_options);
+                    texture.clone()
+                } else {
+                    self.egui_ctx
+                        .load_texture("manga_companion", image, texture_options)
+                }
+            } else {
+                self.egui_ctx
+                    .load_texture("manga_companion", image, texture_options)
+            }
+        };
+
+        self.companion_texture = Some(texture);
+        self.companion_source = Some(source);
+        self.companion_rendered = Some(rendered);
+        if reused_texture {
+            self.companion_texture_display_scale = texture_display_scale;
+        }
+        if layout_changed {
+            self.pending_fit_recalc |= !matches!(self.render_options.zoom_option, ZoomOption::None);
+        }
+        self.companion_active_request = None;
     }
 
     fn spawn_navigation_workers(&mut self) {
@@ -2100,8 +2253,6 @@ impl ViewerApp {
             if folder_changed {
                 self.clear_manga_companion();
                 self.prev_texture = None;
-                self.next_texture = None;
-                self.next_texture_display_scale = 1.0;
             }
             if let Some(fs_tx) = &self.fs_tx {
                 let _ = fs_tx.send(FilesystemCommand::SetCurrent {
@@ -2135,6 +2286,15 @@ impl ViewerApp {
                 self.overlay.clear_loading_message();
             }
         }
+        let cache_navigation_path = self.current_navigation_path.clone();
+        let cache_source = self.source.clone();
+        let cache_rendered = self.rendered.clone();
+        self.remember_loaded_page_in_cache(
+            &cache_navigation_path,
+            loaded_path.as_deref(),
+            &cache_source,
+            &cache_rendered,
+        );
 
         if !self.navigator_ready && self.active_fs_request_id.is_none() {
             if self.deferred_filesystem_init_path.is_some() {
@@ -2176,6 +2336,16 @@ impl ViewerApp {
     }
 
     fn next_preload_candidate(&self) -> Option<PathBuf> {
+        if let Some(companion) = self.desired_manga_companion_path() {
+            let companion_ready = self.visible_companion().is_some();
+            if should_prioritize_companion_preload(
+                Some(companion.as_path()),
+                self.companion_navigation_path.as_deref(),
+                companion_ready,
+            ) {
+                return Some(companion);
+            }
+        }
         let step = if self.manga_spread_active() { 2 } else { 1 };
         adjacent_entry(&self.current_navigation_path, self.navigation_sort, step)
     }
@@ -2220,7 +2390,7 @@ impl ViewerApp {
             );
             return;
         }
-        if self.preloaded_navigation_path.as_ref() == Some(&path)
+        if self.preload_cache_contains(&path)
             || self.pending_preload_navigation_path.as_ref() == Some(&path)
         {
             self.log_bench_state(
@@ -2251,39 +2421,26 @@ impl ViewerApp {
     }
 
     fn try_take_preloaded(&mut self, path: &std::path::Path) -> bool {
-        let matches_navigation = self
-            .preloaded_navigation_path
-            .as_ref()
-            .map(|cached| cached == path)
-            .unwrap_or(false);
-        if !matches_navigation {
+        let Some(entry) = self.take_preloaded_entry(path) else {
             return false;
-        }
+        };
 
-        let source = self.preloaded_source.take();
-        let rendered = self.preloaded_rendered.take();
-        let load_path = self.preloaded_load_path.take();
-        self.preloaded_navigation_path = None;
-        self.pending_preload_navigation_path = None;
-        if let (Some(source), Some(rendered)) = (source, rendered) {
-            self.log_bench_state(
-                "viewer.try_take_preloaded.hit",
-                serde_json::json!({
-                    "path": path.display().to_string(),
-                    "load_path": load_path.as_ref().map(|path| path.display().to_string()),
-                }),
-            );
-            if let Some(texture) = self.next_texture.take() {
-                self.current_texture = texture;
-                self.current_texture_is_default = false;
-                self.texture_display_scale = self.next_texture_display_scale;
-            }
-            self.pending_navigation_path = Some(path.to_path_buf());
-            self.overlay.clear_loading_message();
-            self.apply_loaded_result(load_path, source, rendered);
-            return true;
+        self.log_bench_state(
+            "viewer.try_take_preloaded.hit",
+            serde_json::json!({
+                "path": path.display().to_string(),
+                "load_path": entry.load_path.as_ref().map(|path| path.display().to_string()),
+            }),
+        );
+        if let Some(texture) = entry.texture {
+            self.current_texture = texture;
+            self.current_texture_is_default = false;
+            self.texture_display_scale = entry.texture_display_scale;
         }
-        false
+        self.pending_navigation_path = Some(path.to_path_buf());
+        self.overlay.clear_loading_message();
+        self.apply_loaded_result(entry.load_path, entry.source, entry.rendered);
+        true
     }
 
     fn respawn_render_worker(&mut self) {
@@ -2466,15 +2623,20 @@ impl ViewerApp {
                         }),
                     );
                     self.active_preload_request_id = None;
-                    self.preloaded_navigation_path = self.pending_preload_navigation_path.take();
-                    self.preloaded_load_path = path;
-                    let texture_name = self.texture_name_for_path(self.preloaded_load_path.as_deref());
+                    let Some(navigation_path) = self.pending_preload_navigation_path.take() else {
+                        continue;
+                    };
+                    let texture_name = self.texture_name_for_path(path.as_deref());
                     let (texture, display_scale) =
                         self.build_texture_from_canvas(&texture_name, rendered.frame_canvas(0));
-                    self.next_texture = Some(texture);
-                    self.next_texture_display_scale = display_scale;
-                    self.preloaded_source = Some(source);
-                    self.preloaded_rendered = Some(rendered);
+                    self.remember_preloaded_entry(PreloadedEntry {
+                        navigation_path,
+                        load_path: path,
+                        source,
+                        rendered,
+                        texture: Some(texture),
+                        texture_display_scale: display_scale,
+                    });
                 }
                 Ok(RenderResult::Failed {
                     request_id,
@@ -2492,12 +2654,6 @@ impl ViewerApp {
                         );
                         self.active_preload_request_id = None;
                         self.pending_preload_navigation_path = None;
-                        self.preloaded_navigation_path = None;
-                        self.preloaded_load_path = None;
-                        self.preloaded_source = None;
-                        self.preloaded_rendered = None;
-                        self.next_texture = None;
-                        self.next_texture_display_scale = 1.0;
                     }
                 }
                 Err(TryRecvError::Empty) => break,
@@ -2542,16 +2698,6 @@ impl ViewerApp {
                             "metrics": Self::bench_metrics_payload(&metrics),
                         }),
                     );
-                    let layout_changed = path.is_some()
-                        || self
-                            .companion_source
-                            .as_ref()
-                            .map(|image| {
-                                image.canvas.width() != source.canvas.width()
-                                    || image.canvas.height() != source.canvas.height()
-                            })
-                            .unwrap_or(true);
-
                     let (canvas, display_scale) = downscale_for_texture_limit(
                         rendered.frame_canvas(0),
                         self.max_texture_side,
@@ -2571,15 +2717,23 @@ impl ViewerApp {
                         self.egui_ctx
                             .load_texture("manga_companion", image, texture_options)
                     };
-                    self.companion_texture = Some(texture);
-                    self.companion_source = Some(source);
-                    self.companion_rendered = Some(rendered);
-                    self.companion_texture_display_scale = display_scale;
-                    if layout_changed {
-                        self.pending_fit_recalc |=
-                            !matches!(self.render_options.zoom_option, ZoomOption::None);
+                    if let Some(navigation_path) = self.companion_navigation_path.clone() {
+                        self.remember_preloaded_entry(PreloadedEntry {
+                            navigation_path,
+                            load_path: path.clone(),
+                            source: source.clone(),
+                            rendered: rendered.clone(),
+                            texture: Some(texture.clone()),
+                            texture_display_scale: display_scale,
+                        });
                     }
-                    self.companion_active_request = None;
+                    self.apply_companion_loaded(
+                        path,
+                        source,
+                        rendered,
+                        Some(texture),
+                        display_scale,
+                    );
                 }
                 Ok(RenderResult::Failed {
                     request_id,
@@ -2602,10 +2756,7 @@ impl ViewerApp {
                                 "metrics": Self::bench_metrics_payload(&metrics),
                             }),
                         );
-                        self.companion_source = None;
-                        self.companion_rendered = None;
-                        self.companion_texture = None;
-                        self.companion_active_request = None;
+                        self.clear_manga_companion();
                     }
                 }
                 Err(TryRecvError::Empty) => break,
@@ -2614,9 +2765,7 @@ impl ViewerApp {
                         "viewer.poll_companion_worker.disconnected",
                         serde_json::json!({}),
                     );
-                    self.companion_source = None;
-                    self.companion_rendered = None;
-                    self.companion_texture = None;
+                    self.clear_manga_companion();
                     self.respawn_companion_worker();
                     if let Some(path) = self.desired_manga_companion_path() {
                         let _ = self.request_companion_load(path);
@@ -2959,10 +3108,7 @@ impl eframe::App for ViewerApp {
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     let spread_active = self.manga_spread_active();
-                    let companion = self
-                        .companion_rendered
-                        .as_ref()
-                        .zip(self.companion_texture.as_ref());
+                    let companion = self.visible_companion();
 
                     let companion_draw_size = companion.map(|(companion_rendered, _)| {
                         vec2(
@@ -3089,4 +3235,81 @@ impl eframe::App for ViewerApp {
 
 fn filesystem_send_error(err: mpsc::SendError<FilesystemCommand>) -> Box<dyn Error> {
     Box::new(std::io::Error::other(err.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::drawers::canvas::Canvas;
+
+    fn dummy_loaded_image(width: u32, height: u32) -> LoadedImage {
+        LoadedImage {
+            canvas: Canvas::new(width, height),
+            animation: Vec::new(),
+            loop_count: None,
+        }
+    }
+
+    fn dummy_preloaded_entry(path: &str) -> PreloadedEntry {
+        PreloadedEntry {
+            navigation_path: PathBuf::from(path),
+            load_path: Some(PathBuf::from(path)),
+            source: dummy_loaded_image(4, 4),
+            rendered: dummy_loaded_image(4, 4),
+            texture: None,
+            texture_display_scale: 1.0,
+        }
+    }
+
+    #[test]
+    fn remember_preloaded_entry_in_cache_keeps_two_most_recent_entries() {
+        let mut cache = VecDeque::new();
+        remember_preloaded_entry_in_cache(&mut cache, dummy_preloaded_entry("a"));
+        remember_preloaded_entry_in_cache(&mut cache, dummy_preloaded_entry("b"));
+        remember_preloaded_entry_in_cache(&mut cache, dummy_preloaded_entry("c"));
+
+        let paths = cache
+            .iter()
+            .map(|entry| entry.navigation_path.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(paths, vec![PathBuf::from("c"), PathBuf::from("b")]);
+    }
+
+    #[test]
+    fn remember_preloaded_entry_in_cache_refreshes_existing_entry_recency() {
+        let mut cache = VecDeque::new();
+        remember_preloaded_entry_in_cache(&mut cache, dummy_preloaded_entry("a"));
+        remember_preloaded_entry_in_cache(&mut cache, dummy_preloaded_entry("b"));
+        remember_preloaded_entry_in_cache(&mut cache, dummy_preloaded_entry("a"));
+
+        let paths = cache
+            .iter()
+            .map(|entry| entry.navigation_path.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(paths, vec![PathBuf::from("a"), PathBuf::from("b")]);
+    }
+
+    #[test]
+    fn should_prioritize_companion_preload_until_visible_companion_is_ready() {
+        let desired = Path::new("companion");
+
+        assert!(should_prioritize_companion_preload(
+            Some(desired),
+            None,
+            false,
+        ));
+        assert!(should_prioritize_companion_preload(
+            Some(desired),
+            Some(desired),
+            false,
+        ));
+        assert!(!should_prioritize_companion_preload(
+            Some(desired),
+            Some(desired),
+            true,
+        ));
+        assert!(!should_prioritize_companion_preload(None, None, false));
+    }
 }
