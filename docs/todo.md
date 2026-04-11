@@ -166,6 +166,10 @@ P5 = 優先度低い
 
   - [ ] コメント：漫画モードって2枚先読みするだけでしょ。後はレンダーの仕事、単純化して実装できないの？
 
+- [ ] viewer: 読み込みが終わる前に次のファイルに進んでしまう
+- [ ] zipファイルの立ち上がりが遅い問題
+- [ ] filer: zip内のファイルで終了したときそのファイルではなくファイラーを起動してしまう問題
+
 - [ ] Viewer/Filerがバラバラで持っているファイルスキャンの統合 I/Oストリームの改善
    - [+] directory scan / preview chunk / filter / metadata / sort を `filesystem.browser` へ寄せた
    - [+] `FilerCommand / FilerResult` 自体を filesystem 側の query/result モデルへ統合
@@ -186,6 +190,7 @@ P5 = 優先度低い
    - [+] 大規模フォルダ向け lazy load / incremental snapshot を filesystem 側の共通実装へ寄せる
    - [ ] thumbnail の共通永続キャッシュ層を追加
     - filesystem の共通 KVS / signature / eviction policy に乗せる
+
 ### startup sequence
 - [*] issue: Explorer統合時 Command Lineが表示される問題(println!, eprintln!が悪い？ shell統合時はstdioをcmdに出さない改善)
 - [*] issue: systemプラグイン有効時 Viewerの強制終了時 COM Surrogateが残ることがある(再現条件を確認中)
