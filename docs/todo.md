@@ -25,6 +25,23 @@ P5 = 優先度低い
 - [x] ベンチマークモード（デバッグ用）
 - [x] WML2からロード可能な画像形式をハードコーディングではなくAPI経由(get_encode_extentions, get_decoder_extentions)で取得する
 - [+] サブファイラーの右→左表示の修正（表示位置の固定） 表示位置が現在のファイルと連動していない
+- [ ] P0 filer: フォルダ移動（特に zip -> zip）で高確率に固まる問題
+    - 最優先で対処する
+    - 現在の主戦場は `filer` / `subfiler` / `viewer current` / `request ordering`
+    - タイミング依存が強く、条件再現が難しい
+    - 主な症状:
+      - 完全に固まる
+      - 固まるがしばらくすると復旧
+      - 最初の 1 つだけ表示されて止まる
+        - ナビゲーションだけが死んでいる
+        - ファイラーからの選択はできる
+    - 仮説:
+      - `accepted user request` / `pending request` / `committed viewer state` の衝突
+      - zip -> zip browse 中に `sync_filer_directory_with_current_path()` が古い current で filer を引き戻す
+      - scan / snapshot / load の完了順がランダムに前後して race している
+    - ベンチ:
+      - `--bench-scenario filer_refresh_race`
+      - `--bench-scenario zip_subfiler`
 - [ ] inputイベント処理ルーチンの作り直し keyバインドUIを考慮した**zero baseの完全再実装**
     - [ ] メッセージ受け渡しの受け渡しの問題の対処(イベントマネージャによる対応)
       - [ ] イベントをマネージャーに分離することで、イベントの衝突、抜けを防ぐ
@@ -193,6 +210,7 @@ P5 = 優先度低い
 
 - [ ] viewer: 読み込みが終わる前に次のファイルに進んでしまう
 - [ ] zipファイルの立ち上がりが遅い問題
+- [ ] P0 filer: フォルダ移動（特に zip -> zip）で固まる / 復旧待ちになる / 1枚目だけで止まる
 - [ ] filer: zip内のファイルで終了したときそのファイルではなくファイラーを起動してしまう問題
 - [ ] filerからzip内のファイルを選択するとwait画面が出ない問題
 
