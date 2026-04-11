@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 pub(crate) enum RenderCommand {
     LoadPath {
@@ -36,12 +37,26 @@ pub(crate) enum RenderResult {
         path: Option<PathBuf>,
         source: LoadedImage,
         rendered: LoadedImage,
+        metrics: RenderLoadMetrics,
     },
     Failed {
         request_id: u64,
         path: Option<PathBuf>,
         message: String,
+        metrics: RenderLoadMetrics,
     },
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RenderLoadMetrics {
+    pub(crate) resolved_path: Option<PathBuf>,
+    pub(crate) used_virtual_bytes: bool,
+    pub(crate) decoded_from_bytes: bool,
+    pub(crate) source_bytes_len: Option<usize>,
+    pub(crate) resolve_ms: u128,
+    pub(crate) read_ms: u128,
+    pub(crate) decode_ms: u128,
+    pub(crate) resize_ms: u128,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,32 +97,48 @@ pub(crate) fn spawn_render_worker(
                     let latest_load_request_id = Arc::clone(&latest_load_request_id);
                     thread::spawn(move || {
                         let result = catch_unwind(AssertUnwindSafe(|| {
-                            (|| -> Result<Option<(LoadedImage, LoadedImage, PathBuf)>, Box<dyn Error>> {
+                            (|| -> Result<Option<(LoadedImage, LoadedImage, PathBuf, RenderLoadMetrics)>, Box<dyn Error>> {
+                                let mut metrics = RenderLoadMetrics::default();
                                 if latest_load_request_id.load(Ordering::Acquire) != request_id {
                                     return Ok(None);
                                 }
 
+                                let resolve_started = Instant::now();
                                 let load_path = resolve_start_path(&path).unwrap_or(path.clone());
+                                metrics.resolve_ms = resolve_started.elapsed().as_millis();
+                                metrics.resolved_path = Some(load_path.clone());
                                 if latest_load_request_id.load(Ordering::Acquire) != request_id {
                                     return Ok(None);
                                 }
 
-                                let source = if let Some(bytes) = load_virtual_image_bytes(&load_path) {
+                                let read_started = Instant::now();
+                                let virtual_bytes = load_virtual_image_bytes(&load_path);
+                                metrics.read_ms = read_started.elapsed().as_millis();
+                                metrics.used_virtual_bytes = virtual_bytes.is_some();
+                                metrics.source_bytes_len = virtual_bytes.as_ref().map(Vec::len);
+
+                                let decode_started = Instant::now();
+                                let source = if let Some(bytes) = virtual_bytes {
+                                    metrics.decoded_from_bytes = true;
                                     load_canvas_from_bytes_with_hint(&bytes, Some(&load_path))?
                                 } else {
+                                    metrics.decoded_from_bytes = false;
                                     load_canvas_from_file(&load_path)?
                                 };
+                                metrics.decode_ms = decode_started.elapsed().as_millis();
                                 if latest_load_request_id.load(Ordering::Acquire) != request_id {
                                     return Ok(None);
                                 }
 
+                                let resize_started = Instant::now();
                                 let rendered = match scale_mode {
                                     RenderScaleMode::FastGpu => source.clone(),
                                     RenderScaleMode::PreciseCpu => {
                                         resize_loaded_image(&source, zoom, method)?
                                     }
                                 };
-                                Ok(Some((source, rendered, load_path)))
+                                metrics.resize_ms = resize_started.elapsed().as_millis();
+                                Ok(Some((source, rendered, load_path, metrics)))
                             })()
                         }))
                         .unwrap_or_else(|_| {
@@ -117,7 +148,7 @@ pub(crate) fn spawn_render_worker(
                         });
 
                         match result {
-                            Ok(Some((source, rendered, load_path))) => {
+                            Ok(Some((source, rendered, load_path, metrics))) => {
                                 if latest_load_request_id.load(Ordering::Acquire) == request_id {
                                     if let Ok(mut current) = current_source.lock() {
                                         *current = source.clone();
@@ -128,6 +159,7 @@ pub(crate) fn spawn_render_worker(
                                     path: Some(load_path),
                                     source,
                                     rendered,
+                                    metrics,
                                 });
                             }
                             Ok(None) => {}
@@ -136,6 +168,7 @@ pub(crate) fn spawn_render_worker(
                                     request_id,
                                     path: Some(path),
                                     message: err.to_string(),
+                                    metrics: RenderLoadMetrics::default(),
                                 });
                             }
                         }
@@ -173,6 +206,7 @@ pub(crate) fn spawn_render_worker(
                                     path: None,
                                     source: source_snapshot,
                                     rendered,
+                                    metrics: RenderLoadMetrics::default(),
                                 });
                             }
                             Err(err) => {
@@ -180,6 +214,7 @@ pub(crate) fn spawn_render_worker(
                                     request_id,
                                     path: None,
                                     message: err.to_string(),
+                                    metrics: RenderLoadMetrics::default(),
                                 });
                             }
                         }
@@ -195,4 +230,23 @@ pub(crate) fn spawn_render_worker(
 
 pub(crate) fn worker_send_error(err: mpsc::SendError<RenderCommand>) -> Box<dyn Error> {
     Box::new(std::io::Error::other(err.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RenderLoadMetrics;
+
+    #[test]
+    fn render_load_metrics_default_is_zeroed() {
+        let metrics = RenderLoadMetrics::default();
+
+        assert_eq!(metrics.resolve_ms, 0);
+        assert_eq!(metrics.read_ms, 0);
+        assert_eq!(metrics.decode_ms, 0);
+        assert_eq!(metrics.resize_ms, 0);
+        assert!(!metrics.used_virtual_bytes);
+        assert!(!metrics.decoded_from_bytes);
+        assert!(metrics.source_bytes_len.is_none());
+        assert!(metrics.resolved_path.is_none());
+    }
 }

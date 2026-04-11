@@ -8,6 +8,7 @@ use std::time::UNIX_EPOCH;
 
 use crate::dependent::default_temp_dir;
 use crate::options::ZipWorkaroundOptions;
+use crate::path_classification::is_probably_network_path;
 use encoding_rs::SHIFT_JIS;
 use zip::ZipArchive;
 
@@ -278,11 +279,6 @@ fn local_archive_cache() -> &'static Mutex<HashMap<PathBuf, PathBuf>> {
 fn zip_workaround_config() -> &'static Mutex<ZipWorkaroundOptions> {
     static CONFIG: OnceLock<Mutex<ZipWorkaroundOptions>> = OnceLock::new();
     CONFIG.get_or_init(|| Mutex::new(ZipWorkaroundOptions::default()))
-}
-
-fn is_probably_network_path(path: &Path) -> bool {
-    let text = path.to_string_lossy();
-    text.starts_with(r"\\") || text.starts_with(r"//")
 }
 
 struct ZipCacheReader {

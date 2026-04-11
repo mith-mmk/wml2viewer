@@ -6,6 +6,7 @@ pub mod dependent;
 pub mod drawers;
 pub mod filesystem;
 pub mod options;
+pub mod path_classification;
 pub mod ui;
 pub mod wml2_formats;
 

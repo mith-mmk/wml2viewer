@@ -20,8 +20,8 @@ use crate::ui::menu::fileviewer::thumbnail::{
 };
 use crate::ui::menu::fileviewer::worker::{FilerCommand, FilerResult, spawn_filer_worker};
 use crate::ui::render::{
-    ActiveRenderRequest, RenderCommand, RenderResult, aligned_offset, canvas_to_color_image,
-    downscale_for_texture_limit, spawn_render_worker, worker_send_error,
+    ActiveRenderRequest, RenderCommand, RenderLoadMetrics, RenderResult, aligned_offset,
+    canvas_to_color_image, downscale_for_texture_limit, spawn_render_worker, worker_send_error,
 };
 use crate::ui::viewer::options::{
     RenderOptions, RenderScaleMode, ViewerOptions, WindowOptions, WindowStartPosition,
@@ -327,6 +327,19 @@ pub(crate) fn build_settings_draft(config: &AppConfig) -> SettingsDraftState {
 }
 
 impl ViewerApp {
+    fn bench_metrics_payload(metrics: &RenderLoadMetrics) -> serde_json::Value {
+        serde_json::json!({
+            "resolved_path": metrics.resolved_path.as_ref().map(|path| path.display().to_string()),
+            "used_virtual_bytes": metrics.used_virtual_bytes,
+            "decoded_from_bytes": metrics.decoded_from_bytes,
+            "source_bytes_len": metrics.source_bytes_len,
+            "resolve_ms": metrics.resolve_ms,
+            "read_ms": metrics.read_ms,
+            "decode_ms": metrics.decode_ms,
+            "resize_ms": metrics.resize_ms,
+        })
+    }
+
     pub(crate) fn new(
         cc: &eframe::CreationContext<'_>,
         navigation_path: PathBuf,
@@ -2340,6 +2353,7 @@ impl ViewerApp {
                     path,
                     source,
                     rendered,
+                    metrics,
                 }) => {
                     let Some(active_request) = self.active_request else {
                         continue;
@@ -2356,6 +2370,7 @@ impl ViewerApp {
                         serde_json::json!({
                             "request_id": request_id,
                             "path": path.as_ref().map(|path| path.display().to_string()),
+                            "metrics": Self::bench_metrics_payload(&metrics),
                         }),
                     );
                     self.apply_loaded_result(path, source, rendered);
@@ -2364,6 +2379,7 @@ impl ViewerApp {
                     request_id,
                     path,
                     message,
+                    metrics,
                 }) => {
                     let Some(active_request) = self.active_request else {
                         continue;
@@ -2381,6 +2397,7 @@ impl ViewerApp {
                             "request_id": request_id,
                             "path": path.as_ref().map(|path| path.display().to_string()),
                             "message": message,
+                            "metrics": Self::bench_metrics_payload(&metrics),
                         }),
                     );
                     let failed_during_load =
@@ -2434,6 +2451,7 @@ impl ViewerApp {
                     path,
                     source,
                     rendered,
+                    metrics,
                 }) => {
                     if self.active_preload_request_id != Some(request_id) {
                         continue;
@@ -2444,6 +2462,7 @@ impl ViewerApp {
                             "request_id": request_id,
                             "path": path.as_ref().map(|path| path.display().to_string()),
                             "navigation_path": self.pending_preload_navigation_path.as_ref().map(|path| path.display().to_string()),
+                            "metrics": Self::bench_metrics_payload(&metrics),
                         }),
                     );
                     self.active_preload_request_id = None;
@@ -2457,13 +2476,18 @@ impl ViewerApp {
                     self.preloaded_source = Some(source);
                     self.preloaded_rendered = Some(rendered);
                 }
-                Ok(RenderResult::Failed { request_id, .. }) => {
+                Ok(RenderResult::Failed {
+                    request_id,
+                    metrics,
+                    ..
+                }) => {
                     if self.active_preload_request_id == Some(request_id) {
                         self.log_bench_state(
                             "viewer.poll_preload_worker.failed",
                             serde_json::json!({
                                 "request_id": request_id,
                                 "navigation_path": self.pending_preload_navigation_path.as_ref().map(|path| path.display().to_string()),
+                                "metrics": Self::bench_metrics_payload(&metrics),
                             }),
                         );
                         self.active_preload_request_id = None;
@@ -2497,6 +2521,7 @@ impl ViewerApp {
                     path,
                     source,
                     rendered,
+                    metrics,
                 }) => {
                     let Some(active_request) = self.companion_active_request else {
                         continue;
@@ -2514,6 +2539,7 @@ impl ViewerApp {
                             "request_id": request_id,
                             "path": path.as_ref().map(|path| path.display().to_string()),
                             "companion_navigation_path": self.companion_navigation_path.as_ref().map(|path| path.display().to_string()),
+                            "metrics": Self::bench_metrics_payload(&metrics),
                         }),
                     );
                     let layout_changed = path.is_some()
@@ -2555,7 +2581,11 @@ impl ViewerApp {
                     }
                     self.companion_active_request = None;
                 }
-                Ok(RenderResult::Failed { request_id, .. }) => {
+                Ok(RenderResult::Failed {
+                    request_id,
+                    metrics,
+                    ..
+                }) => {
                     let Some(active_request) = self.companion_active_request else {
                         continue;
                     };
@@ -2569,6 +2599,7 @@ impl ViewerApp {
                             serde_json::json!({
                                 "request_id": request_id,
                                 "companion_navigation_path": self.companion_navigation_path.as_ref().map(|path| path.display().to_string()),
+                                "metrics": Self::bench_metrics_payload(&metrics),
                             }),
                         );
                         self.companion_source = None;

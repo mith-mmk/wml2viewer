@@ -6,6 +6,7 @@ use crate::drawers::canvas::Canvas;
 use crate::drawers::image::LoadedImage;
 use crate::filesystem::{archive_prefers_low_io, is_browser_container, set_archive_zip_workaround};
 use crate::options::*;
+use crate::path_classification::bench_path_match;
 use crate::ui::menu::fileviewer::thumbnail::set_thumbnail_workaround;
 use crate::ui::viewer::ViewerApp;
 use eframe::egui::{self};
@@ -169,11 +170,7 @@ fn blank_image() -> LoadedImage {
 }
 
 fn bench_path_context(path: &Path) -> serde_json::Value {
-    let mapping = load_bench_path_mapping();
-    let normalized = normalize_bench_path(path);
-    let matched = mapping.into_iter().find(|entry| normalized.starts_with(&entry.normalized_root));
-
-    match matched {
+    match bench_path_match(path) {
         Some(entry) => serde_json::json!({
             "class": entry.class_name,
             "configured_root": entry.raw_root,
@@ -187,49 +184,10 @@ fn bench_path_context(path: &Path) -> serde_json::Value {
     }
 }
 
-fn load_bench_path_mapping() -> Vec<BenchPathEntry> {
-    let path = Path::new(".test").join("datapath.md");
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return Vec::new();
-    };
-
-    let mut current_class = String::from("unclassified");
-    let mut entries = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(class_name) = trimmed.strip_prefix("## ") {
-            current_class = class_name.to_ascii_lowercase();
-            continue;
-        }
-        let Some(root) = trimmed.strip_prefix("- ") else {
-            continue;
-        };
-        let normalized_root = normalize_bench_path(Path::new(root));
-        if normalized_root.is_empty() {
-            continue;
-        }
-        entries.push(BenchPathEntry {
-            class_name: current_class.clone(),
-            raw_root: root.to_string(),
-            normalized_root,
-        });
-    }
-    entries
-}
-
-fn normalize_bench_path(path: &Path) -> String {
-    path.to_string_lossy().replace('/', "\\").to_ascii_lowercase()
-}
-
-struct BenchPathEntry {
-    class_name: String,
-    raw_root: String,
-    normalized_root: String,
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{bench_path_context, normalize_bench_path};
+    use super::bench_path_context;
+    use crate::path_classification::normalize_bench_path;
     use std::path::Path;
 
     #[test]
@@ -246,7 +204,7 @@ mod tests {
         assert_eq!(value.get("class").and_then(|v| v.as_str()), Some("ネットワーク"));
         assert_eq!(
             value.get("configured_root").and_then(|v| v.as_str()),
-            Some("f:\\benchmark")
+            Some("F:\\benchmark")
         );
     }
 }
