@@ -8,7 +8,9 @@ use crate::drawers::image::SaveFormat;
 use crate::filesystem::resolve_start_path;
 use crate::ui::i18n::UiTextKey;
 use crate::ui::menu::fileviewer::icons::{SvgIcon, paint_svg_icon};
-use crate::ui::menu::fileviewer::state::{FilerEntry, FilerSortField, FilerViewMode, NameSortMode};
+use crate::ui::menu::fileviewer::state::{
+    FilerEntry, FilerSortField, FilerUserRequest, FilerViewMode, NameSortMode,
+};
 use crate::ui::viewer::ViewerApp;
 use crate::ui::viewer::options::PaneSide;
 use chrono::{DateTime, Local};
@@ -613,12 +615,33 @@ impl ViewerApp {
 
     fn activate_filer_entry(&mut self, entry: FilerEntry) {
         if entry.is_container {
+            self.filer.pending_user_request = Some(FilerUserRequest::BrowseDirectory {
+                directory: entry.path.clone(),
+            });
+            self.log_bench_state(
+                "viewer.filer.entry_activated",
+                serde_json::json!({
+                    "kind": "container",
+                    "path": entry.path.display().to_string(),
+                }),
+            );
             self.request_filer_directory(entry.path, None);
             return;
         }
         let navigation_path = entry.path.clone();
         let load_path = resolve_start_path(&navigation_path)
             .unwrap_or_else(|| navigation_path.clone());
+        self.log_bench_state(
+            "viewer.filer.entry_activated",
+            serde_json::json!({
+                "kind": "file",
+                "navigation_path": navigation_path.display().to_string(),
+                "load_path": load_path.display().to_string(),
+            }),
+        );
+        self.filer.pending_user_request = Some(FilerUserRequest::SelectFile {
+            navigation_path: navigation_path.clone(),
+        });
         self.filer.selected = Some(navigation_path.clone());
         self.empty_mode = false;
         self.show_filer = false;
@@ -626,7 +649,6 @@ impl ViewerApp {
         if self.show_subfiler {
             self.pending_subfiler_focus_path = Some(navigation_path.clone());
         }
-        self.set_filesystem_current(navigation_path.clone());
         let _ = self.request_load_target(navigation_path, load_path);
     }
 }

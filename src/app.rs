@@ -20,6 +20,7 @@ pub fn run(
     image_path: Option<PathBuf>,
     config_path: Option<PathBuf>,
     bench_enabled: bool,
+    bench_scenario: Option<String>,
 ) -> Result<(), Box<dyn Error>> {
     let config = load_app_config(config_path.as_deref()).unwrap_or_default();
     set_runtime_plugin_config(config.plugins.clone());
@@ -58,6 +59,7 @@ pub fn run(
                 "is_container": is_container,
                 "archive_prefers_low_io": archive_prefers_low_io(&image_path),
                 "bench_path_context": bench_context,
+                "bench_scenario": bench_scenario,
                 "show_filer_on_start": show_filer_on_start,
                 "startup_load_path": startup_load_path.as_ref().map(|path| path.display().to_string()),
                 "log_path": logger.path().display().to_string(),
@@ -143,6 +145,7 @@ pub fn run(
                 config,
                 config_path.clone(),
                 bench_logger.clone(),
+                bench_scenario.clone(),
                 show_filer_on_start,
                 startup_load_path.clone(),
             )))

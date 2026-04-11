@@ -6,7 +6,7 @@ use crate::drawers::canvas::Canvas;
 use crate::drawers::image::{LoadedImage, SaveFormat, save_loaded_image};
 use crate::filesystem::{
     FilesystemCommand, FilesystemResult, adjacent_entry, archive_prefers_low_io,
-    is_browser_container, navigation_branch_path, resolve_navigation_entry_path,
+    is_browser_container, navigation_branch_path, resolve_navigation_entry_path, resolve_start_path,
     set_archive_zip_workaround, spawn_filesystem_worker,
 };
 use crate::options::{
@@ -14,7 +14,7 @@ use crate::options::{
     RuntimeOptions, ViewerAction,
 };
 use crate::ui::i18n::{UiTextKey, tr};
-use crate::ui::menu::fileviewer::state::FilerState;
+use crate::ui::menu::fileviewer::state::{FilerState, FilerUserRequest};
 use crate::ui::menu::fileviewer::thumbnail::{
     ThumbnailCommand, ThumbnailResult, set_thumbnail_workaround, spawn_thumbnail_worker,
 };
@@ -170,19 +170,6 @@ pub(crate) enum StartupPhase {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BenchAutomationStep {
-    WaitForReady,
-    Reload,
-    Next,
-    Prev,
-    ToggleMangaOn,
-    NextInManga,
-    ToggleMangaOff,
-    Finish,
-    Closing,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PendingViewerNavigation {
     Next,
     Prev,
@@ -190,8 +177,25 @@ enum PendingViewerNavigation {
     Last,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BenchAction {
+    Reload,
+    Next,
+    Prev,
+    ToggleMangaOn,
+    ToggleMangaOff,
+    RefreshFiler,
+    EnsureCurrentDirectoryInFiler,
+    OpenSubfiler,
+    BrowseParentDirectory,
+    BrowseFirstContainer,
+    SelectNeighborFromFiler,
+}
+
 struct BenchAutomationState {
-    step: BenchAutomationStep,
+    scenario_name: String,
+    actions: Vec<BenchAction>,
+    next_index: usize,
     next_action_at: Instant,
 }
 
@@ -234,6 +238,47 @@ fn should_prioritize_companion_preload(
         }
         None => false,
     }
+}
+
+fn bench_automation_plan(name: Option<&str>) -> (&'static str, Vec<BenchAction>) {
+    match name {
+        Some("filer_refresh_race") => (
+            "filer_refresh_race",
+            vec![
+                BenchAction::EnsureCurrentDirectoryInFiler,
+                BenchAction::BrowseParentDirectory,
+                BenchAction::BrowseFirstContainer,
+                BenchAction::RefreshFiler,
+                BenchAction::EnsureCurrentDirectoryInFiler,
+                BenchAction::OpenSubfiler,
+                BenchAction::SelectNeighborFromFiler,
+            ],
+        ),
+        Some("zip_subfiler") => (
+            "zip_subfiler",
+            vec![
+                BenchAction::EnsureCurrentDirectoryInFiler,
+                BenchAction::OpenSubfiler,
+                BenchAction::SelectNeighborFromFiler,
+                BenchAction::RefreshFiler,
+            ],
+        ),
+        _ => (
+            "default",
+            vec![
+                BenchAction::Reload,
+                BenchAction::Next,
+                BenchAction::Prev,
+                BenchAction::ToggleMangaOn,
+                BenchAction::Next,
+                BenchAction::ToggleMangaOff,
+            ],
+        ),
+    }
+}
+
+fn should_clear_filer_user_request_after_snapshot(request: Option<&FilerUserRequest>) -> bool {
+    matches!(request, Some(FilerUserRequest::Refresh { .. }))
 }
 
 fn calc_fit_zoom(ctx_size: egui::Vec2, image_size: egui::Vec2, option: &ZoomOption) -> f32 {
@@ -384,6 +429,7 @@ impl ViewerApp {
         config: AppConfig,
         config_path: Option<PathBuf>,
         bench_logger: Option<BenchLogger>,
+        bench_scenario: Option<String>,
         show_filer_on_start: bool,
         startup_load_path: Option<PathBuf>,
     ) -> Self {
@@ -420,6 +466,7 @@ impl ViewerApp {
         } else {
             StartupPhase::MultiViewer
         };
+        let (bench_scenario_name, bench_actions) = bench_automation_plan(bench_scenario.as_deref());
 
         let mut this = Self {
             current_navigation_path: navigation_path.clone(),
@@ -526,7 +573,9 @@ impl ViewerApp {
             bench_initial_load_logged: false,
             bench_startup_sync_logged: false,
             bench_automation: bench_mode.then_some(BenchAutomationState {
-                step: BenchAutomationStep::WaitForReady,
+                scenario_name: bench_scenario_name.to_string(),
+                actions: bench_actions,
+                next_index: 0,
                 next_action_at: Instant::now() + Duration::from_millis(250),
             }),
         };
@@ -1081,6 +1130,14 @@ impl ViewerApp {
         };
         let request_id = self.alloc_filer_request_id();
         self.filer.pending_request_id = Some(request_id);
+        self.log_bench_state(
+            "viewer.filer.request_directory",
+            serde_json::json!({
+                "request_id": request_id,
+                "directory": dir.display().to_string(),
+                "selected": selected.as_ref().map(|path| path.display().to_string()),
+            }),
+        );
         let _ = filer_tx.send(FilerCommand::OpenDirectory {
             request_id,
             dir,
@@ -1096,17 +1153,78 @@ impl ViewerApp {
         });
     }
 
+    fn filer_selected_for_directory(
+        &self,
+        directory: &std::path::Path,
+        fallback: Option<PathBuf>,
+    ) -> Option<PathBuf> {
+        match &self.filer.pending_user_request {
+            Some(FilerUserRequest::SelectFile { navigation_path }) => {
+                if navigation_path.parent() == Some(directory) {
+                    return Some(navigation_path.clone());
+                }
+            }
+            Some(FilerUserRequest::Refresh { directory: refresh_dir, selected })
+                if refresh_dir == directory =>
+            {
+                return selected.clone();
+            }
+            Some(FilerUserRequest::BrowseDirectory { directory: browse_dir })
+                if browse_dir == directory =>
+            {
+                return fallback;
+            }
+            _ => {}
+        }
+        self.selected_path_for_filer_directory(directory, fallback)
+    }
+
+    fn clear_committed_filer_user_request(&mut self) {
+        let should_clear = match &self.filer.pending_user_request {
+            Some(FilerUserRequest::SelectFile { navigation_path }) => {
+                *navigation_path == self.current_navigation_path
+            }
+            _ => false,
+        };
+        if should_clear {
+            self.filer.pending_user_request = None;
+        }
+    }
+
     fn sync_filer_directory_with_current_path(&mut self) {
         let Some(dir) = self.current_directory() else {
             return;
         };
+        let mut rebased_navigation_path = None;
         if let Some(rebased) = resolve_navigation_entry_path(&self.current_navigation_path) {
             if rebased != self.current_navigation_path {
                 self.current_navigation_path = rebased.clone();
                 self.set_filesystem_current(rebased);
+                rebased_navigation_path = Some(self.current_navigation_path.clone());
             }
         }
         let selected = Some(self.current_navigation_path.clone());
+        self.log_bench_state(
+            "viewer.filer.sync_with_current_path",
+            serde_json::json!({
+                "directory": dir.display().to_string(),
+                "selected": selected.as_ref().map(|path| path.display().to_string()),
+                "same_directory": self.filer.directory.as_ref() == Some(&dir),
+                "entries_empty": self.filer.entries.is_empty(),
+                "had_pending_request": self.filer.pending_request_id.is_some(),
+                "pending_user_request": self.filer.pending_user_request.as_ref().map(|request| format!("{request:?}")),
+                "rebased_navigation_path": rebased_navigation_path.as_ref().map(|path| path.display().to_string()),
+            }),
+        );
+        if self.filer.pending_user_request.is_some() {
+            self.log_bench_state(
+                "viewer.filer.sync_with_current_path.skipped_pending_user_request",
+                serde_json::json!({
+                    "directory": dir.display().to_string(),
+                }),
+            );
+            return;
+        }
         if self.filer.directory.as_ref() == Some(&dir) {
             self.filer.selected = selected.clone();
             if self.filer.entries.is_empty() && self.filer.pending_request_id.is_none() {
@@ -1137,6 +1255,17 @@ impl ViewerApp {
             .clone()
             .or_else(|| self.current_directory())
         {
+            self.filer.pending_user_request = Some(FilerUserRequest::Refresh {
+                directory: dir.clone(),
+                selected: self.filer.selected.clone(),
+            });
+            self.log_bench_state(
+                "viewer.filer.refresh_requested",
+                serde_json::json!({
+                    "directory": dir.display().to_string(),
+                    "selected": self.filer.selected.as_ref().map(|path| path.display().to_string()),
+                }),
+            );
             self.request_filer_directory(dir, self.filer.selected.clone());
         }
     }
@@ -1649,7 +1778,7 @@ impl ViewerApp {
         }
     }
 
-    fn log_bench_state(&self, event: &str, payload: serde_json::Value) {
+    pub(crate) fn log_bench_state(&self, event: &str, payload: serde_json::Value) {
         let Some(logger) = &self.bench_logger else {
             return;
         };
@@ -1667,7 +1796,13 @@ impl ViewerApp {
                     "queued_navigation": self.queued_navigation.as_ref().map(|command| format!("{command:?}")),
                     "startup_phase": format!("{:?}", self.startup_phase),
                     "show_filer": self.show_filer,
+                    "show_subfiler": self.show_subfiler,
                     "empty_mode": self.empty_mode,
+                    "filer_directory": self.filer.directory.as_ref().map(|path| path.display().to_string()),
+                    "filer_selected": self.filer.selected.as_ref().map(|path| path.display().to_string()),
+                    "filer_pending_request_id": self.filer.pending_request_id,
+                    "filer_pending_user_request": self.filer.pending_user_request.as_ref().map(|request| format!("{request:?}")),
+                    "pending_subfiler_focus_path": self.pending_subfiler_focus_path.as_ref().map(|path| path.display().to_string()),
                     "active_preload_request_id": self.active_preload_request_id,
                     "pending_preload_navigation_path": self.pending_preload_navigation_path.as_ref().map(|path| path.display().to_string()),
                     "preload_cache_navigation_paths": self.preload_cache.iter().map(|entry| entry.navigation_path.display().to_string()).collect::<Vec<_>>(),
@@ -1758,119 +1893,193 @@ impl ViewerApp {
             && self.active_fs_request_id.is_none()
             && self.companion_active_request.is_none()
             && self.active_preload_request_id.is_none()
+            && self.filer.pending_request_id.is_none()
             && !self.empty_mode
     }
 
-    fn advance_bench_automation(&mut self, next_step: BenchAutomationStep, delay_ms: u64) {
+    fn advance_bench_automation(&mut self, delay_ms: u64) {
         if let Some(state) = &mut self.bench_automation {
-            state.step = next_step;
+            state.next_index += 1;
             state.next_action_at = Instant::now() + Duration::from_millis(delay_ms);
         }
     }
 
+    fn defer_bench_automation(&mut self, delay_ms: u64) {
+        if let Some(state) = &mut self.bench_automation {
+            state.next_action_at = Instant::now() + Duration::from_millis(delay_ms);
+        }
+    }
+
+    fn bench_neighbor_entry_path(&self) -> Option<PathBuf> {
+        self.filer
+            .entries
+            .iter()
+            .filter(|entry| !entry.is_container)
+            .find(|entry| entry.path != self.current_navigation_path)
+            .map(|entry| entry.path.clone())
+            .or_else(|| {
+                self.filer
+                    .entries
+                    .iter()
+                    .find(|entry| !entry.is_container)
+                    .map(|entry| entry.path.clone())
+            })
+    }
+
+    fn run_bench_action(&mut self, action: BenchAction) -> bool {
+        match action {
+            BenchAction::Reload => {
+                let _ = self.reload_current();
+                true
+            }
+            BenchAction::Next => {
+                let _ = self.next_image();
+                true
+            }
+            BenchAction::Prev => {
+                let _ = self.prev_image();
+                true
+            }
+            BenchAction::ToggleMangaOn => {
+                self.options.manga_mode = true;
+                self.pending_fit_recalc = true;
+                true
+            }
+            BenchAction::ToggleMangaOff => {
+                self.options.manga_mode = false;
+                self.pending_fit_recalc = true;
+                true
+            }
+            BenchAction::RefreshFiler => {
+                self.refresh_current_filer_directory();
+                true
+            }
+            BenchAction::EnsureCurrentDirectoryInFiler => {
+                let Some(dir) = self.current_directory() else {
+                    return false;
+                };
+                let selected = Some(self.current_navigation_path.clone());
+                if self.filer.directory.as_ref() == Some(&dir) && !self.filer.entries.is_empty() {
+                    self.filer.selected = selected;
+                } else {
+                    self.request_filer_directory(dir, selected);
+                }
+                true
+            }
+            BenchAction::OpenSubfiler => {
+                self.set_show_subfiler(true);
+                if let Some(dir) = self.current_directory() {
+                    if self.filer.directory.as_ref() != Some(&dir) {
+                        self.request_filer_directory(dir, Some(self.current_navigation_path.clone()));
+                    }
+                }
+                true
+            }
+            BenchAction::BrowseParentDirectory => {
+                let directory = self
+                    .filer
+                    .directory
+                    .clone()
+                    .or_else(|| self.current_directory());
+                let Some(parent) = directory.and_then(|dir| dir.parent().map(Path::to_path_buf)) else {
+                    return false;
+                };
+                self.request_filer_directory(parent, None);
+                true
+            }
+            BenchAction::BrowseFirstContainer => {
+                let Some(path) = self
+                    .filer
+                    .entries
+                    .iter()
+                    .find(|entry| entry.is_container)
+                    .map(|entry| entry.path.clone())
+                else {
+                    return false;
+                };
+                self.request_filer_directory(path, None);
+                true
+            }
+            BenchAction::SelectNeighborFromFiler => {
+                let Some(path) = self.bench_neighbor_entry_path() else {
+                    return false;
+                };
+                let load_path = resolve_start_path(&path).unwrap_or_else(|| path.clone());
+                self.filer.selected = Some(path.clone());
+                self.empty_mode = false;
+                self.show_filer = false;
+                self.pending_fit_recalc = true;
+                if self.show_subfiler {
+                    self.pending_subfiler_focus_path = Some(path.clone());
+                }
+                let _ = self.request_load_target(path, load_path);
+                true
+            }
+        }
+    }
+
     fn run_bench_automation(&mut self, ctx: &egui::Context) {
-        let Some(step) = self.bench_automation.as_ref().map(|state| state.step) else {
+        let Some(state) = self.bench_automation.as_ref() else {
             return;
         };
-        let Some(next_action_at) = self
-            .bench_automation
-            .as_ref()
-            .map(|state| state.next_action_at)
-        else {
-            return;
-        };
+        let next_action_at = state.next_action_at;
         if Instant::now() < next_action_at {
             ctx.request_repaint_after(next_action_at.saturating_duration_since(Instant::now()));
             return;
         }
 
-        let action_requires_idle = !matches!(
-            step,
-            BenchAutomationStep::WaitForReady | BenchAutomationStep::Closing
-        );
-        if action_requires_idle && !self.bench_automation_ready() {
-            self.advance_bench_automation(step, 100);
-            return;
-        }
-
-        match step {
-            BenchAutomationStep::WaitForReady => {
-                if self.bench_automation_ready() {
-                    self.log_bench_state(
-                        "viewer.bench_automation.ready",
-                        serde_json::json!({
-                            "frame_counter": self.frame_counter,
-                        }),
-                    );
-                    self.advance_bench_automation(BenchAutomationStep::Reload, 200);
-                } else {
-                    self.advance_bench_automation(BenchAutomationStep::WaitForReady, 100);
-                }
-            }
-            BenchAutomationStep::Reload => {
-                self.log_bench_state("viewer.bench_automation.action", serde_json::json!({ "action": "reload" }));
-                let _ = self.reload_current();
-                self.advance_bench_automation(BenchAutomationStep::Next, 500);
-            }
-            BenchAutomationStep::Next => {
-                self.log_bench_state("viewer.bench_automation.action", serde_json::json!({ "action": "next" }));
-                let _ = self.next_image();
-                self.advance_bench_automation(BenchAutomationStep::Prev, 500);
-            }
-            BenchAutomationStep::Prev => {
-                self.log_bench_state("viewer.bench_automation.action", serde_json::json!({ "action": "prev" }));
-                let _ = self.prev_image();
-                self.advance_bench_automation(BenchAutomationStep::ToggleMangaOn, 500);
-            }
-            BenchAutomationStep::ToggleMangaOn => {
+        let scenario_name = state.scenario_name.clone();
+        let next_index = state.next_index;
+        let Some(action) = state.actions.get(next_index).copied() else {
+            if self.bench_automation_ready() {
                 self.log_bench_state(
-                    "viewer.bench_automation.action",
-                    serde_json::json!({ "action": "toggle_manga_on" }),
+                    "viewer.bench_automation.completed",
+                    serde_json::json!({
+                        "frame_counter": self.frame_counter,
+                        "scenario": scenario_name,
+                    }),
                 );
-                self.options.manga_mode = true;
-                self.pending_fit_recalc = true;
-                self.advance_bench_automation(BenchAutomationStep::NextInManga, 500);
-            }
-            BenchAutomationStep::NextInManga => {
-                self.log_bench_state(
-                    "viewer.bench_automation.action",
-                    serde_json::json!({ "action": "next_in_manga" }),
-                );
-                let _ = self.next_image();
-                self.advance_bench_automation(BenchAutomationStep::ToggleMangaOff, 500);
-            }
-            BenchAutomationStep::ToggleMangaOff => {
-                self.log_bench_state(
-                    "viewer.bench_automation.action",
-                    serde_json::json!({ "action": "toggle_manga_off" }),
-                );
-                self.options.manga_mode = false;
-                self.pending_fit_recalc = true;
-                self.advance_bench_automation(BenchAutomationStep::Finish, 500);
-            }
-            BenchAutomationStep::Finish => {
-                if self.bench_automation_ready() {
-                    self.log_bench_state(
-                        "viewer.bench_automation.completed",
-                        serde_json::json!({
-                            "frame_counter": self.frame_counter,
-                        }),
-                    );
-                    self.advance_bench_automation(BenchAutomationStep::Closing, 300);
-                } else {
-                    self.advance_bench_automation(BenchAutomationStep::Finish, 100);
-                }
-            }
-            BenchAutomationStep::Closing => {
                 self.log_bench_state(
                     "viewer.bench_automation.closing",
                     serde_json::json!({
                         "frame_counter": self.frame_counter,
+                        "scenario": scenario_name,
                     }),
                 );
                 self.bench_automation = None;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            } else {
+                self.defer_bench_automation(100);
             }
+            return;
+        };
+
+        if !self.bench_automation_ready() {
+            self.defer_bench_automation(100);
+            return;
+        }
+
+        self.log_bench_state(
+            "viewer.bench_automation.action",
+            serde_json::json!({
+                "action": format!("{action:?}"),
+                "scenario": scenario_name,
+                "index": next_index,
+            }),
+        );
+
+        if self.run_bench_action(action) {
+            self.advance_bench_automation(500);
+        } else {
+            self.log_bench_state(
+                "viewer.bench_automation.action_skipped",
+                serde_json::json!({
+                    "action": format!("{action:?}"),
+                    "scenario": scenario_name,
+                    "index": next_index,
+                }),
+            );
+            self.advance_bench_automation(150);
         }
     }
 
@@ -2291,6 +2500,7 @@ impl ViewerApp {
             &cache_source,
             &cache_rendered,
         );
+        self.clear_committed_filer_user_request();
 
         if !self.navigator_ready && self.active_fs_request_id.is_none() {
             if self.deferred_filesystem_init_path.is_some() {
@@ -2906,9 +3116,17 @@ impl ViewerApp {
                     if self.filer.pending_request_id != Some(request_id) {
                         continue;
                     }
+                    self.log_bench_state(
+                        "viewer.poll_filer_worker.reset",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "directory": directory.display().to_string(),
+                            "selected": selected.as_ref().map(|path| path.display().to_string()),
+                        }),
+                    );
                     self.filer.directory = Some(directory);
                     self.filer.entries.clear();
-                    self.filer.selected = self.selected_path_for_filer_directory(
+                    self.filer.selected = self.filer_selected_for_directory(
                         self.filer.directory.as_deref().unwrap(),
                         selected,
                     );
@@ -2920,6 +3138,13 @@ impl ViewerApp {
                     if self.filer.pending_request_id != Some(request_id) {
                         continue;
                     }
+                    self.log_bench_state(
+                        "viewer.poll_filer_worker.append",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "entry_count": entries.len(),
+                        }),
+                    );
                     self.filer.entries.extend(entries);
                 }
                 Ok(FilerResult::Snapshot {
@@ -2931,13 +3156,27 @@ impl ViewerApp {
                     if self.filer.pending_request_id != Some(request_id) {
                         continue;
                     }
+                    self.log_bench_state(
+                        "viewer.poll_filer_worker.snapshot",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "directory": directory.display().to_string(),
+                            "entry_count": entries.len(),
+                            "selected": selected.as_ref().map(|path| path.display().to_string()),
+                        }),
+                    );
                     self.filer.pending_request_id = None;
                     self.filer.directory = Some(directory);
                     self.filer.entries = entries;
-                    self.filer.selected = self.selected_path_for_filer_directory(
+                    self.filer.selected = self.filer_selected_for_directory(
                         self.filer.directory.as_deref().unwrap(),
                         selected,
                     );
+                    if should_clear_filer_user_request_after_snapshot(
+                        self.filer.pending_user_request.as_ref(),
+                    ) {
+                        self.filer.pending_user_request = None;
+                    }
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
@@ -3317,5 +3556,25 @@ mod tests {
             true,
         ));
         assert!(!should_prioritize_companion_preload(None, None, false));
+    }
+
+    #[test]
+    fn snapshot_only_clears_refresh_user_request() {
+        assert!(should_clear_filer_user_request_after_snapshot(Some(
+            &FilerUserRequest::Refresh {
+                directory: PathBuf::from("dir"),
+                selected: None,
+            },
+        )));
+        assert!(!should_clear_filer_user_request_after_snapshot(Some(
+            &FilerUserRequest::BrowseDirectory {
+                directory: PathBuf::from("dir"),
+            },
+        )));
+        assert!(!should_clear_filer_user_request_after_snapshot(Some(
+            &FilerUserRequest::SelectFile {
+                navigation_path: PathBuf::from("dir\\file"),
+            },
+        )));
     }
 }

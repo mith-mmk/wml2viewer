@@ -253,13 +253,24 @@ startup は beta 前でも state machine を組み替えやすいように、次
   - `filer.entries`
   - `filer.selected`
   - `filer.pending_request_id`
+  - filer 自体を truth にしない
+  - truth は常に「最後に受理した user request」と「その request が commit 済みかどうか」
+  - request の代表例:
+    - `ViewerNavigate(next/prev/first/last)`
+    - `FilerSelect(file)`
+    - `FilerBrowse(container)`
+    - `FilerRefresh`
+  - `filer.directory/selected` は user request の即時反映を持ってよい
+  - ただし `current_navigation_path/current_path` は commit 前に上書きしてはいけない
   - owner:
     - `request_filer_directory()`
     - `poll_filer_worker()`
     - `sync_filer_directory_with_current_path()`
   - 注意:
     - `activate_filer_entry()` は `filer.selected` を更新してよい
-    - ただし `current_directory() == filer.directory` の間は、最終的に `current_navigation_path` が選択の truth になる
+    - ただしそれは `accepted user request` の pending 表示であり、viewer commit ではない
+    - `poll_filer_worker()` は request を commit してはいけない
+    - `sync_filer_directory_with_current_path()` は committed viewer state からの派生 sync だけを行ってよい
 
 - Manga companion state
   - `companion_navigation_path`
@@ -288,20 +299,28 @@ startup は beta 前でも state machine を組み替えやすいように、次
 
 - `filer refresh` が入ったら:
   - 再 scan の対象 directory は `filer.directory`
-  - 選択の基準は次の優先順にする
-  - `current_directory() == filer.directory` のときは `current_navigation_path`
-  - それ以外は `filer.selected`
+  - 選択の基準は直近の accepted request を優先する
+  - `FilerSelect/FilerBrowse/FilerRefresh` の pending がある間は、その request に対応する `filer.selected` を保持してよい
+  - pending がないなら committed viewer state から再導出してよい
   - このとき refresh を理由に `request_load_target()` を呼んではいけない
+  - refresh 完了を理由に `set_filesystem_current()` を呼んではいけない
 
 - `filer entry activate` が file のとき:
+  - accepted request は `FilerSelect(navigation_path)`
   - `filer.selected = navigation_path`
-  - `set_filesystem_current(navigation_path)` を送る
   - `request_load_target(navigation_path, load_path)` を送る
+  - `set_filesystem_current(navigation_path)` は load 完了後の reconcile に寄せる
   - `filer.directory` は変えない
 
 - `filer entry activate` が container のとき:
+  - accepted request は `FilerBrowse(container)`
   - `request_filer_directory(container, None)` を送る
   - viewer の `current_navigation_path` は変えない
+
+- `current_navigation_path` が変わったら:
+  - これは committed viewer state の更新である
+  - filer は pending な user request がないときだけ、この committed state に追従してよい
+  - subfiler は committed viewer state にだけ従属してよい
 
 - `manga mode` が on のとき:
   - companion の存在判定は `desired_manga_companion_path()` に一本化する
@@ -315,34 +334,54 @@ startup は beta 前でも state machine を組み替えやすいように、次
 - `companion_*` が primary と別 branch を指したまま残ってはいけない
 - `filer.selected` を truth と見なして `current_navigation_path` を上書きしてはいけない
 - zip 内 file 選択時だけ wait 表示を省略してはいけない
+- `sync_filer_directory_with_current_path()` が pending な `FilerSelect/FilerBrowse/FilerRefresh` request を踏み潰してはいけない
+- `poll_filer_worker()` が accepted request と committed viewer state の区別なしに `selected` を current へ寄せてはいけない
+- `subfiler` の更新完了だけで viewer load 完了扱いにしてはいけない
 
 ### 4. 典型シーケンス
 
 #### filer から zip 内 file を選ぶ
 
-1. `activate_filer_entry()` が virtual child を受け取る
+1. user request `FilerSelect(navigation_path)` を受理する
 2. `filer.selected = navigation_path`
-3. `set_filesystem_current(navigation_path)`
-4. `request_load_target(navigation_path, load_path)`
-5. wait 表示を出す条件を primary load と同じにする
-6. `apply_loaded_result()` 成功後に `current_navigation_path` / `current_path` を確定する
-7. `sync_filer_directory_with_current_path()` が同 directory なら選択だけ追従する
+3. `request_load_target(navigation_path, load_path)`
+4. wait 表示を出す条件を primary load と同じにする
+5. `apply_loaded_result()` 成功後に `current_navigation_path` / `current_path` を確定する
+6. 成功後の reconcile で `set_filesystem_current(navigation_path)` を送る
+7. pending request を clear して `sync_filer_directory_with_current_path()` が committed state に追従する
 8. `sync_manga_companion()` が companion を再評価する
 
 #### filer refresh
 
-1. `refresh_current_filer_directory()`
+1. user request `FilerRefresh` を受理する
 2. `request_filer_directory(filer.directory, preferred_selected)`
 3. `poll_filer_worker()` が `directory / entries / selected` を更新
 4. この経路では viewer の load を起こさない
+5. pending request がある間は `selected` を committed current で再解決しない
 
 #### manga mode で next/prev
 
-1. `next_image()` / `prev_image()`
+1. user request `ViewerNavigate(next/prev)` を受理する
 2. `manga_navigation_target()` が 2 枚単位の target を返すか判定
 3. `request_load_target()` が primary load を開始
 4. stale companion を破棄
 5. `apply_loaded_result()` 後に `sync_manga_companion()` が次の companion を再要求
+
+#### filer が固まりやすい現在の race
+
+1. user request `FilerBrowse` または `FilerSelect` を受理する
+2. filer/subfiler はその request を先に見た目へ反映する
+3. まだ viewer load は pending のまま
+4. 別経路の committed viewer state から `sync_filer_directory_with_current_path()` が走る
+5. 直後に filer worker の `Reset/Append/Snapshot` が返る
+5. 表示上は filer/subfiler が更新されたように見えるが、viewer load は別 request の完了待ち
+6. 結果として「subfiler は更新されたのに viewer が固まる」ように見える
+
+この race を消すには、state 上で
+- accepted user request
+- pending request
+- committed viewer state
+を分離する必要がある
 
 ### 5. manager を置く条件
 
@@ -352,6 +391,7 @@ startup は beta 前でも state machine を組み替えやすいように、次
 - `filer.selected` と `current_navigation_path` の優先順位を call site ごとに変えてしまう
 - `manga companion` の破棄条件が 3 箇所以上に散る
 - wait 表示の条件が `active_request` 以外のフラグに分岐し始める
+- filer が `accepted request` と `committed viewer state` を同じ `filer.directory/selected` に混在させている
 
 候補名は `ViewerStateManager` か `NavigationStateManager` です。
 責務は次の 3 つに限定します。
@@ -359,6 +399,10 @@ startup は beta 前でも state machine を組み替えやすいように、次
 - primary navigation state の reconcile
 - filer selection / directory state の reconcile
 - manga companion / preload の invalidate 判断
+
+filer を先に直す場合は、manager の責務をさらに 1 つ足してよいです。
+
+- request state (`accepted/pending/committed`) の reconcile
 
 manager を置く場合でも、render / filesystem / filer worker の実行そのものは移さず、「state をどう確定するか」だけを集中管理します。
 

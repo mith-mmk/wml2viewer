@@ -24,7 +24,12 @@ fn run() -> Result<(), Box<dyn Error>> {
         dependent::clean_system_integration()?;
         return Ok(());
     }
-    app::run(args.image_path, args.config_path, args.bench_enabled)
+    app::run(
+        args.image_path,
+        args.config_path,
+        args.bench_enabled,
+        args.bench_scenario,
+    )
 }
 
 struct CliArgs {
@@ -32,6 +37,7 @@ struct CliArgs {
     config_path: Option<PathBuf>,
     clean_target: Option<String>,
     bench_enabled: bool,
+    bench_scenario: Option<String>,
 }
 
 fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
@@ -48,6 +54,7 @@ where
     let mut config_path = None;
     let mut clean_target = None;
     let mut bench_enabled = false;
+    let mut bench_scenario = None;
 
     while let Some(arg) = args.next() {
         if let Some(path) = parse_config_equals(&arg) {
@@ -81,6 +88,19 @@ where
             continue;
         }
 
+        if let Some(value) = arg.to_string_lossy().strip_prefix("--bench-scenario=") {
+            bench_scenario = Some(value.to_owned());
+            continue;
+        }
+
+        if arg == "--bench-scenario" {
+            let Some(value) = args.next() else {
+                return Err(usage_error(&program));
+            };
+            bench_scenario = Some(value.to_string_lossy().into_owned());
+            continue;
+        }
+
         if is_ignorable_shell_argument(&arg) {
             continue;
         }
@@ -95,6 +115,7 @@ where
         config_path,
         clean_target,
         bench_enabled,
+        bench_scenario,
     })
 }
 
@@ -131,7 +152,9 @@ fn usage_error(program: &OsString) -> Box<dyn Error> {
         .to_string_lossy();
     Box::new(io::Error::new(
         io::ErrorKind::InvalidInput,
-        format!("Usage: {program} [--config <path>] [--clean system] [--bench] [path]"),
+        format!(
+            "Usage: {program} [--config <path>] [--clean system] [--bench] [--bench-scenario <name>] [path]"
+        ),
     ))
 }
 
@@ -168,5 +191,20 @@ mod tests {
 
         assert!(parsed.bench_enabled);
         assert_eq!(parsed.config_path, Some(PathBuf::from("config.toml")));
+    }
+
+    #[test]
+    fn parse_args_supports_bench_scenario() {
+        let args = vec![
+            OsString::from("wml2viewer"),
+            OsString::from("--bench"),
+            OsString::from("--bench-scenario"),
+            OsString::from("zip_subfiler"),
+        ];
+
+        let parsed = parse_args_from(args).unwrap();
+
+        assert!(parsed.bench_enabled);
+        assert_eq!(parsed.bench_scenario.as_deref(), Some("zip_subfiler"));
     }
 }
