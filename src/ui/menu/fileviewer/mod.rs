@@ -618,6 +618,7 @@ impl ViewerApp {
             self.filer.pending_user_request = Some(FilerUserRequest::BrowseDirectory {
                 directory: entry.path.clone(),
             });
+            self.filer.committed_browse_directory = None;
             self.log_bench_state(
                 "viewer.filer.entry_activated",
                 serde_json::json!({
@@ -642,6 +643,7 @@ impl ViewerApp {
         self.filer.pending_user_request = Some(FilerUserRequest::SelectFile {
             navigation_path: navigation_path.clone(),
         });
+        self.filer.committed_browse_directory = None;
         self.filer.selected = Some(navigation_path.clone());
         self.empty_mode = false;
         self.show_filer = false;

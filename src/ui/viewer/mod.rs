@@ -1215,6 +1215,7 @@ impl ViewerApp {
         };
         if should_clear {
             self.filer.pending_user_request = None;
+            self.filer.committed_browse_directory = None;
         }
     }
 
@@ -1240,6 +1241,7 @@ impl ViewerApp {
                 "entries_empty": self.filer.entries.is_empty(),
                 "had_pending_request": self.filer.pending_request_id.is_some(),
                 "pending_user_request": self.filer.pending_user_request.as_ref().map(|request| format!("{request:?}")),
+                "committed_browse_directory": self.filer.committed_browse_directory.as_ref().map(|path| path.display().to_string()),
                 "rebased_navigation_path": rebased_navigation_path.as_ref().map(|path| path.display().to_string()),
             }),
         );
@@ -1248,6 +1250,21 @@ impl ViewerApp {
                 "viewer.filer.sync_with_current_path.skipped_pending_user_request",
                 serde_json::json!({
                     "directory": dir.display().to_string(),
+                }),
+            );
+            return;
+        }
+        if self
+            .filer
+            .committed_browse_directory
+            .as_ref()
+            .is_some_and(|browse_dir| browse_dir != &dir)
+        {
+            self.log_bench_state(
+                "viewer.filer.sync_with_current_path.skipped_committed_browse",
+                serde_json::json!({
+                    "directory": dir.display().to_string(),
+                    "committed_browse_directory": self.filer.committed_browse_directory.as_ref().map(|path| path.display().to_string()),
                 }),
             );
             return;
@@ -2047,6 +2064,7 @@ impl ViewerApp {
                 let Some(dir) = self.current_directory() else {
                     return false;
                 };
+                self.filer.committed_browse_directory = None;
                 let selected = Some(self.current_navigation_path.clone());
                 if self.filer.directory.as_ref() == Some(&dir) && !self.filer.entries.is_empty() {
                     self.filer.selected = selected;
@@ -3277,6 +3295,20 @@ impl ViewerApp {
                             "selected": selected.as_ref().map(|path| path.display().to_string()),
                         }),
                     );
+                    if matches!(
+                        self.filer.pending_user_request.as_ref(),
+                        Some(FilerUserRequest::BrowseDirectory { directory: browse_dir }) if browse_dir == &directory
+                    ) {
+                        self.filer.committed_browse_directory = Some(directory.clone());
+                        self.log_bench_state(
+                            "viewer.filer.browse_committed",
+                            serde_json::json!({
+                                "request_id": request_id,
+                                "directory": directory.display().to_string(),
+                            }),
+                        );
+                        self.filer.pending_user_request = None;
+                    }
                     self.filer.pending_request_id = None;
                     self.filer.directory = Some(directory);
                     self.filer.entries = entries;
@@ -3704,5 +3736,14 @@ mod tests {
 
         assert_eq!(name, "zip_to_zip_random");
         assert!(actions.contains(&BenchAction::BrowseRandomContainer));
+    }
+
+    #[test]
+    fn snapshot_does_not_clear_browse_user_request_directly() {
+        assert!(!should_clear_filer_user_request_after_snapshot(Some(
+            &FilerUserRequest::BrowseDirectory {
+                directory: PathBuf::from("dir"),
+            },
+        )));
     }
 }
