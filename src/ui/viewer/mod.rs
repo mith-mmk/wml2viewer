@@ -150,6 +150,9 @@ pub(crate) struct ViewerApp {
     pub(crate) preloaded_source: Option<LoadedImage>,
     pub(crate) preloaded_rendered: Option<LoadedImage>,
     pub(crate) pending_primary_click_deadline: Option<Instant>,
+    pub(crate) bench_initial_load_logged: bool,
+    pub(crate) bench_startup_sync_logged: bool,
+    bench_automation: Option<BenchAutomationState>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -168,6 +171,24 @@ pub(crate) enum StartupPhase {
     SingleViewer,
     Synchronizing,
     MultiViewer,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BenchAutomationStep {
+    WaitForReady,
+    Reload,
+    Next,
+    Prev,
+    ToggleMangaOn,
+    NextInManga,
+    ToggleMangaOff,
+    Finish,
+    Closing,
+}
+
+struct BenchAutomationState {
+    step: BenchAutomationStep,
+    next_action_at: Instant,
 }
 
 fn calc_fit_zoom(ctx_size: egui::Vec2, image_size: egui::Vec2, option: &ZoomOption) -> f32 {
@@ -335,6 +356,7 @@ impl ViewerApp {
         let resource_locale_input = config.resources.locale.clone().unwrap_or_default();
         let resource_font_paths_input = join_search_paths(&config.resources.font_paths);
         let defer_navigation_workers = !show_filer_on_start;
+        let bench_mode = bench_logger.is_some();
         let startup_phase = if defer_navigation_workers {
             StartupPhase::SingleViewer
         } else {
@@ -449,6 +471,12 @@ impl ViewerApp {
             preloaded_source: None,
             preloaded_rendered: None,
             pending_primary_click_deadline: None,
+            bench_initial_load_logged: false,
+            bench_startup_sync_logged: false,
+            bench_automation: bench_mode.then_some(BenchAutomationState {
+                step: BenchAutomationStep::WaitForReady,
+                next_action_at: Instant::now() + Duration::from_millis(250),
+            }),
         };
 
         this.save_dialog.output_dir = this
@@ -682,6 +710,12 @@ impl ViewerApp {
         if self.deferred_filesystem_init_path.is_some() {
             self.startup_phase = StartupPhase::Synchronizing;
             self.deferred_filesystem_sync_frame = Some(self.frame_counter + 2);
+            self.log_bench_state(
+                "viewer.startup_sync.deferred",
+                serde_json::json!({
+                    "target_frame": self.deferred_filesystem_sync_frame,
+                }),
+            );
         }
     }
 
@@ -1539,6 +1573,142 @@ impl ViewerApp {
         );
     }
 
+    fn log_bench_startup_sync_once(&mut self, reason: &str) {
+        if self.bench_startup_sync_logged {
+            return;
+        }
+        self.bench_startup_sync_logged = true;
+        self.log_bench_state(
+            "viewer.startup_sync.completed",
+            serde_json::json!({
+                "reason": reason,
+                "frame_counter": self.frame_counter,
+            }),
+        );
+    }
+
+    fn bench_automation_ready(&self) -> bool {
+        self.navigator_ready
+            && self.active_request.is_none()
+            && self.active_fs_request_id.is_none()
+            && self.companion_active_request.is_none()
+            && self.active_preload_request_id.is_none()
+            && !self.empty_mode
+    }
+
+    fn advance_bench_automation(&mut self, next_step: BenchAutomationStep, delay_ms: u64) {
+        if let Some(state) = &mut self.bench_automation {
+            state.step = next_step;
+            state.next_action_at = Instant::now() + Duration::from_millis(delay_ms);
+        }
+    }
+
+    fn run_bench_automation(&mut self, ctx: &egui::Context) {
+        let Some(step) = self.bench_automation.as_ref().map(|state| state.step) else {
+            return;
+        };
+        let Some(next_action_at) = self
+            .bench_automation
+            .as_ref()
+            .map(|state| state.next_action_at)
+        else {
+            return;
+        };
+        if Instant::now() < next_action_at {
+            ctx.request_repaint_after(next_action_at.saturating_duration_since(Instant::now()));
+            return;
+        }
+
+        let action_requires_idle = !matches!(
+            step,
+            BenchAutomationStep::WaitForReady | BenchAutomationStep::Closing
+        );
+        if action_requires_idle && !self.bench_automation_ready() {
+            self.advance_bench_automation(step, 100);
+            return;
+        }
+
+        match step {
+            BenchAutomationStep::WaitForReady => {
+                if self.bench_automation_ready() {
+                    self.log_bench_state(
+                        "viewer.bench_automation.ready",
+                        serde_json::json!({
+                            "frame_counter": self.frame_counter,
+                        }),
+                    );
+                    self.advance_bench_automation(BenchAutomationStep::Reload, 200);
+                } else {
+                    self.advance_bench_automation(BenchAutomationStep::WaitForReady, 100);
+                }
+            }
+            BenchAutomationStep::Reload => {
+                self.log_bench_state("viewer.bench_automation.action", serde_json::json!({ "action": "reload" }));
+                let _ = self.reload_current();
+                self.advance_bench_automation(BenchAutomationStep::Next, 500);
+            }
+            BenchAutomationStep::Next => {
+                self.log_bench_state("viewer.bench_automation.action", serde_json::json!({ "action": "next" }));
+                let _ = self.next_image();
+                self.advance_bench_automation(BenchAutomationStep::Prev, 500);
+            }
+            BenchAutomationStep::Prev => {
+                self.log_bench_state("viewer.bench_automation.action", serde_json::json!({ "action": "prev" }));
+                let _ = self.prev_image();
+                self.advance_bench_automation(BenchAutomationStep::ToggleMangaOn, 500);
+            }
+            BenchAutomationStep::ToggleMangaOn => {
+                self.log_bench_state(
+                    "viewer.bench_automation.action",
+                    serde_json::json!({ "action": "toggle_manga_on" }),
+                );
+                self.options.manga_mode = true;
+                self.pending_fit_recalc = true;
+                self.advance_bench_automation(BenchAutomationStep::NextInManga, 500);
+            }
+            BenchAutomationStep::NextInManga => {
+                self.log_bench_state(
+                    "viewer.bench_automation.action",
+                    serde_json::json!({ "action": "next_in_manga" }),
+                );
+                let _ = self.next_image();
+                self.advance_bench_automation(BenchAutomationStep::ToggleMangaOff, 500);
+            }
+            BenchAutomationStep::ToggleMangaOff => {
+                self.log_bench_state(
+                    "viewer.bench_automation.action",
+                    serde_json::json!({ "action": "toggle_manga_off" }),
+                );
+                self.options.manga_mode = false;
+                self.pending_fit_recalc = true;
+                self.advance_bench_automation(BenchAutomationStep::Finish, 500);
+            }
+            BenchAutomationStep::Finish => {
+                if self.bench_automation_ready() {
+                    self.log_bench_state(
+                        "viewer.bench_automation.completed",
+                        serde_json::json!({
+                            "frame_counter": self.frame_counter,
+                        }),
+                    );
+                    self.advance_bench_automation(BenchAutomationStep::Closing, 300);
+                } else {
+                    self.advance_bench_automation(BenchAutomationStep::Finish, 100);
+                }
+            }
+            BenchAutomationStep::Closing => {
+                self.log_bench_state(
+                    "viewer.bench_automation.closing",
+                    serde_json::json!({
+                        "frame_counter": self.frame_counter,
+                    }),
+                );
+                self.bench_automation = None;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+
     pub(crate) fn request_load_target(
         &mut self,
         navigation_path: PathBuf,
@@ -1863,6 +2033,17 @@ impl ViewerApp {
             }
         }
         self.schedule_preload();
+        if !self.bench_initial_load_logged {
+            self.bench_initial_load_logged = true;
+            self.log_bench_state(
+                "viewer.initial_load.completed",
+                serde_json::json!({
+                    "loaded_path": loaded_path.as_ref().map(|path| path.display().to_string()),
+                    "frame_counter": self.frame_counter,
+                    "startup_phase": format!("{:?}", self.startup_phase),
+                }),
+            );
+        }
         self.log_bench_state(
             "viewer.apply_loaded_result.end",
             serde_json::json!({
@@ -1969,6 +2150,13 @@ impl ViewerApp {
         self.preloaded_navigation_path = None;
         self.pending_preload_navigation_path = None;
         if let (Some(source), Some(rendered)) = (source, rendered) {
+            self.log_bench_state(
+                "viewer.try_take_preloaded.hit",
+                serde_json::json!({
+                    "path": path.display().to_string(),
+                    "load_path": load_path.as_ref().map(|path| path.display().to_string()),
+                }),
+            );
             if let Some(texture) = self.next_texture.take() {
                 self.current_texture = texture;
                 self.current_texture_is_default = false;
@@ -2146,6 +2334,14 @@ impl ViewerApp {
                     if self.active_preload_request_id != Some(request_id) {
                         continue;
                     }
+                    self.log_bench_state(
+                        "viewer.poll_preload_worker.loaded",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "path": path.as_ref().map(|path| path.display().to_string()),
+                            "navigation_path": self.pending_preload_navigation_path.as_ref().map(|path| path.display().to_string()),
+                        }),
+                    );
                     self.active_preload_request_id = None;
                     self.preloaded_navigation_path = self.pending_preload_navigation_path.take();
                     self.preloaded_load_path = path;
@@ -2159,6 +2355,13 @@ impl ViewerApp {
                 }
                 Ok(RenderResult::Failed { request_id, .. }) => {
                     if self.active_preload_request_id == Some(request_id) {
+                        self.log_bench_state(
+                            "viewer.poll_preload_worker.failed",
+                            serde_json::json!({
+                                "request_id": request_id,
+                                "navigation_path": self.pending_preload_navigation_path.as_ref().map(|path| path.display().to_string()),
+                            }),
+                        );
                         self.active_preload_request_id = None;
                         self.pending_preload_navigation_path = None;
                         self.preloaded_navigation_path = None;
@@ -2171,6 +2374,10 @@ impl ViewerApp {
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
+                    self.log_bench_state(
+                        "viewer.poll_preload_worker.disconnected",
+                        serde_json::json!({}),
+                    );
                     self.respawn_preload_worker();
                     break;
                 }
@@ -2197,6 +2404,14 @@ impl ViewerApp {
                     if !request_matches {
                         continue;
                     }
+                    self.log_bench_state(
+                        "viewer.poll_companion_worker.loaded",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "path": path.as_ref().map(|path| path.display().to_string()),
+                            "companion_navigation_path": self.companion_navigation_path.as_ref().map(|path| path.display().to_string()),
+                        }),
+                    );
                     let layout_changed = path.is_some()
                         || self
                             .companion_source
@@ -2245,6 +2460,13 @@ impl ViewerApp {
                         | ActiveRenderRequest::Resize(active_id) => active_id == request_id,
                     };
                     if request_matches {
+                        self.log_bench_state(
+                            "viewer.poll_companion_worker.failed",
+                            serde_json::json!({
+                                "request_id": request_id,
+                                "companion_navigation_path": self.companion_navigation_path.as_ref().map(|path| path.display().to_string()),
+                            }),
+                        );
                         self.companion_source = None;
                         self.companion_rendered = None;
                         self.companion_texture = None;
@@ -2253,6 +2475,10 @@ impl ViewerApp {
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
+                    self.log_bench_state(
+                        "viewer.poll_companion_worker.disconnected",
+                        serde_json::json!({}),
+                    );
                     self.companion_source = None;
                     self.companion_rendered = None;
                     self.companion_texture = None;
@@ -2290,6 +2516,7 @@ impl ViewerApp {
                         self.navigator_ready = true;
                         self.active_fs_request_id = None;
                         self.startup_phase = StartupPhase::MultiViewer;
+                        self.log_bench_startup_sync_once("navigator_ready");
                         match (navigation_path, load_path) {
                             (Some(navigation_path), Some(load_path)) => {
                                 self.empty_mode = false;
@@ -2331,6 +2558,7 @@ impl ViewerApp {
                         );
                         self.empty_mode = false;
                         self.startup_phase = StartupPhase::MultiViewer;
+                        self.log_bench_startup_sync_once("path_resolved");
                         if self.current_navigation_path != navigation_path
                             || self.current_path != load_path
                         {
@@ -2348,6 +2576,7 @@ impl ViewerApp {
                             }),
                         );
                         self.startup_phase = StartupPhase::MultiViewer;
+                        self.log_bench_startup_sync_once("no_path");
                         self.overlay
                             .set_loading_message("No displayable file found");
                         self.show_filer = true;
@@ -2536,6 +2765,7 @@ impl eframe::App for ViewerApp {
         self.alert_dialog_ui(ctx);
         self.save_dialog_ui(ctx);
         self.left_click_menu_ui(ctx);
+        self.run_bench_automation(ctx);
         self.filer_ui(ctx);
         self.subfiler_ui(ctx);
         self.status_panel_ui(ctx);

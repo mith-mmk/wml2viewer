@@ -4,12 +4,13 @@ use crate::configs::resourses::apply_resources;
 use crate::dependent::plugins::set_runtime_plugin_config;
 use crate::drawers::canvas::Canvas;
 use crate::drawers::image::LoadedImage;
-use crate::filesystem::{is_browser_container, set_archive_zip_workaround};
+use crate::filesystem::{archive_prefers_low_io, is_browser_container, set_archive_zip_workaround};
 use crate::options::*;
 use crate::ui::menu::fileviewer::thumbnail::set_thumbnail_workaround;
 use crate::ui::viewer::ViewerApp;
 use eframe::egui::{self};
 use std::error::Error;
+use std::path::Path;
 use std::path::PathBuf;
 
 const APP_ICON_PNG: &[u8] = include_bytes!("../resources/wml2viwer.png");
@@ -46,11 +47,16 @@ pub fn run(
     };
     let bench_logger = if bench_enabled {
         let logger = BenchLogger::create()?;
+        let bench_context = bench_path_context(&image_path);
         logger.log(
             "app.start",
             serde_json::json!({
                 "image_path": image_path.display().to_string(),
                 "config_path": config_path.as_ref().map(|path| path.display().to_string()),
+                "path_exists": path_exists,
+                "is_container": is_container,
+                "archive_prefers_low_io": archive_prefers_low_io(&image_path),
+                "bench_path_context": bench_context,
                 "show_filer_on_start": show_filer_on_start,
                 "startup_load_path": startup_load_path.as_ref().map(|path| path.display().to_string()),
                 "log_path": logger.path().display().to_string(),
@@ -159,5 +165,88 @@ fn blank_image() -> LoadedImage {
         canvas,
         animation: Vec::new(),
         loop_count: None,
+    }
+}
+
+fn bench_path_context(path: &Path) -> serde_json::Value {
+    let mapping = load_bench_path_mapping();
+    let normalized = normalize_bench_path(path);
+    let matched = mapping.into_iter().find(|entry| normalized.starts_with(&entry.normalized_root));
+
+    match matched {
+        Some(entry) => serde_json::json!({
+            "class": entry.class_name,
+            "configured_root": entry.raw_root,
+            "matched": true,
+        }),
+        None => serde_json::json!({
+            "class": "unclassified",
+            "configured_root": serde_json::Value::Null,
+            "matched": false,
+        }),
+    }
+}
+
+fn load_bench_path_mapping() -> Vec<BenchPathEntry> {
+    let path = Path::new(".test").join("datapath.md");
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+
+    let mut current_class = String::from("unclassified");
+    let mut entries = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(class_name) = trimmed.strip_prefix("## ") {
+            current_class = class_name.to_ascii_lowercase();
+            continue;
+        }
+        let Some(root) = trimmed.strip_prefix("- ") else {
+            continue;
+        };
+        let normalized_root = normalize_bench_path(Path::new(root));
+        if normalized_root.is_empty() {
+            continue;
+        }
+        entries.push(BenchPathEntry {
+            class_name: current_class.clone(),
+            raw_root: root.to_string(),
+            normalized_root,
+        });
+    }
+    entries
+}
+
+fn normalize_bench_path(path: &Path) -> String {
+    path.to_string_lossy().replace('/', "\\").to_ascii_lowercase()
+}
+
+struct BenchPathEntry {
+    class_name: String,
+    raw_root: String,
+    normalized_root: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{bench_path_context, normalize_bench_path};
+    use std::path::Path;
+
+    #[test]
+    fn normalize_bench_path_unifies_separator_and_case() {
+        let normalized = normalize_bench_path(Path::new("F:/Comics/Series"));
+        assert_eq!(normalized, "f:\\comics\\series");
+    }
+
+    #[test]
+    fn bench_path_context_matches_datapath_roots() {
+        let value = bench_path_context(Path::new("F:\\benchmark\\archive\\test.zip"));
+
+        assert_eq!(value.get("matched").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(value.get("class").and_then(|v| v.as_str()), Some("ネットワーク"));
+        assert_eq!(
+            value.get("configured_root").and_then(|v| v.as_str()),
+            Some("f:\\benchmark")
+        );
     }
 }
