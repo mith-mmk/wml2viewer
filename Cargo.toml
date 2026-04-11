@@ -34,5 +34,3 @@ winres = "0.1"
 [dev-dependencies]
 filetime = "0.2"
 
-[patch.crates-io]
-wml2 = { path = "../wml2/wml2" }
