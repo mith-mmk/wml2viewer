@@ -89,9 +89,7 @@ impl ViewerApp {
                 ViewerAction::ToggleGrayscale => {
                     self.options.grayscale = !self.options.grayscale;
                     self.upload_current_frame();
-                    if self.companion_rendered.is_some() {
-                        self.pending_fit_recalc = true;
-                    }
+                    self.pending_fit_recalc = true;
                 }
                 ViewerAction::ToggleMangaMode => {
                     self.options.manga_mode = !self.options.manga_mode;

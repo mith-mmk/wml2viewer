@@ -137,10 +137,7 @@ pub(crate) struct ViewerApp {
     pub(crate) companion_join: Option<JoinHandle<()>>,
     pub(crate) companion_active_request: Option<ActiveRenderRequest>,
     pub(crate) companion_navigation_path: Option<PathBuf>,
-    pub(crate) companion_source: Option<LoadedImage>,
-    pub(crate) companion_rendered: Option<LoadedImage>,
-    pub(crate) companion_texture: Option<TextureHandle>,
-    pub(crate) companion_texture_display_scale: f32,
+    companion_display: Option<DisplayedPageState>,
     pub(crate) preload_tx: Sender<RenderCommand>,
     pub(crate) preload_rx: Receiver<RenderResult>,
     pub(crate) preload_join: Option<JoinHandle<()>>,
@@ -199,13 +196,18 @@ struct BenchAutomationState {
 }
 
 #[derive(Clone)]
-struct PreloadedEntry {
-    navigation_path: PathBuf,
-    load_path: Option<PathBuf>,
+struct DisplayedPageState {
     source: LoadedImage,
     rendered: LoadedImage,
     texture: Option<TextureHandle>,
     texture_display_scale: f32,
+}
+
+#[derive(Clone)]
+struct PreloadedEntry {
+    navigation_path: PathBuf,
+    load_path: Option<PathBuf>,
+    display: DisplayedPageState,
 }
 
 fn remember_preloaded_entry_in_cache(cache: &mut VecDeque<PreloadedEntry>, entry: PreloadedEntry) {
@@ -512,10 +514,7 @@ impl ViewerApp {
             companion_join: Some(companion_join),
             companion_active_request: None,
             companion_navigation_path: None,
-            companion_source: None,
-            companion_rendered: None,
-            companion_texture: None,
-            companion_texture_display_scale: 1.0,
+            companion_display: None,
             preload_tx,
             preload_rx,
             preload_join: Some(preload_join),
@@ -1434,23 +1433,25 @@ impl ViewerApp {
 
     fn clear_manga_companion(&mut self) {
         self.companion_navigation_path = None;
-        self.companion_source = None;
-        self.companion_rendered = None;
-        self.companion_texture = None;
+        self.companion_display = None;
         self.companion_active_request = None;
-        self.companion_texture_display_scale = 1.0;
     }
 
     fn visible_companion_source(&self) -> Option<&LoadedImage> {
         self.companion_navigation_path
             .as_ref()
-            .and(self.companion_source.as_ref())
+            .and(self.companion_display.as_ref().map(|display| &display.source))
     }
 
     fn visible_companion(&self) -> Option<(&LoadedImage, &TextureHandle)> {
         self.companion_navigation_path
             .as_ref()
-            .and(self.companion_rendered.as_ref().zip(self.companion_texture.as_ref()))
+            .and(self.companion_display.as_ref().and_then(|display| {
+                display
+                    .texture
+                    .as_ref()
+                    .map(|texture| (&display.rendered, texture))
+            }))
     }
 
     fn manga_spread_active(&self) -> bool {
@@ -1475,10 +1476,7 @@ impl ViewerApp {
             self.companion_navigation_path = Some(path);
             self.apply_companion_loaded(
                 entry.load_path,
-                entry.source,
-                entry.rendered,
-                entry.texture,
-                entry.texture_display_scale,
+                entry.display,
             );
             return Ok(());
         }
@@ -1498,7 +1496,7 @@ impl ViewerApp {
     }
 
     fn request_companion_resize(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.companion_source.is_none() {
+        if self.companion_display.is_none() {
             return Ok(());
         }
         let request_id = self.alloc_request_id();
@@ -1529,13 +1527,7 @@ impl ViewerApp {
         let desired = desired.unwrap();
         if let Some(entry) = self.cached_preloaded_entry(&desired) {
             self.companion_navigation_path = Some(desired);
-            self.apply_companion_loaded(
-                entry.load_path,
-                entry.source,
-                entry.rendered,
-                entry.texture,
-                entry.texture_display_scale,
-            );
+            self.apply_companion_loaded(entry.load_path, entry.display);
             ctx.request_repaint();
             return;
         }
@@ -1956,7 +1948,7 @@ impl ViewerApp {
                 .min(self.rendered.frame_count().saturating_sub(1));
             self.upload_current_frame();
             self.overlay.clear_loading_message();
-            if self.companion_source.is_some() && self.companion_rendered.is_none() {
+            if self.companion_display.is_some() {
                 if let Some(path) = self.companion_navigation_path.clone() {
                     let _ = self.request_companion_load(path);
                 }
@@ -1977,7 +1969,7 @@ impl ViewerApp {
             })
             .map_err(worker_send_error)?;
         if let Some(path) = self.companion_navigation_path.clone() {
-            if self.companion_source.is_some() {
+            if self.companion_display.is_some() {
                 let _ = self.request_companion_resize();
             } else {
                 let _ = self.request_companion_load(path);
@@ -2044,10 +2036,12 @@ impl ViewerApp {
         self.remember_preloaded_entry(PreloadedEntry {
             navigation_path: navigation_path.to_path_buf(),
             load_path: load_path.map(Path::to_path_buf),
-            source: source.clone(),
-            rendered: rendered.clone(),
-            texture: None,
-            texture_display_scale: 1.0,
+            display: DisplayedPageState {
+                source: source.clone(),
+                rendered: rendered.clone(),
+                texture: (!self.current_texture_is_default).then(|| self.current_texture.clone()),
+                texture_display_scale: self.texture_display_scale,
+            },
         });
     }
 
@@ -2062,37 +2056,39 @@ impl ViewerApp {
     fn apply_companion_loaded(
         &mut self,
         path: Option<PathBuf>,
-        source: LoadedImage,
-        rendered: LoadedImage,
-        texture: Option<TextureHandle>,
-        texture_display_scale: f32,
+        display: DisplayedPageState,
     ) {
-        let reused_texture = texture.is_some();
+        let previous_companion = self.companion_display.clone();
         let layout_changed = path.is_some()
-            || self
-                .companion_source
+            || previous_companion
                 .as_ref()
-                .map(|image| {
-                    image.canvas.width() != source.canvas.width()
-                        || image.canvas.height() != source.canvas.height()
+                .map(|current| {
+                    current.source.canvas.width() != display.source.canvas.width()
+                        || current.source.canvas.height() != display.source.canvas.height()
                 })
                 .unwrap_or(true);
 
-        let texture = if let Some(texture) = texture {
+        let mut display = display;
+        let texture = if let Some(texture) = display.texture.clone() {
             texture
         } else {
             let (canvas, display_scale) = downscale_for_texture_limit(
-                rendered.frame_canvas(0),
+                display.rendered.frame_canvas(0),
                 self.max_texture_side,
                 self.render_options.zoom_method,
             );
             let image = self.color_image_from_canvas(&canvas);
             let texture_options = self.texture_options();
-            self.companion_texture_display_scale = display_scale;
+            display.texture_display_scale = display_scale;
             if path.is_none() {
-                if let Some(texture) = &mut self.companion_texture {
-                    texture.set(image, texture_options);
-                    texture.clone()
+                if let Some(existing) = &mut previous_companion.clone() {
+                    if let Some(texture) = &mut existing.texture {
+                        texture.set(image, texture_options);
+                        texture.clone()
+                    } else {
+                        self.egui_ctx
+                            .load_texture("manga_companion", image, texture_options)
+                    }
                 } else {
                     self.egui_ctx
                         .load_texture("manga_companion", image, texture_options)
@@ -2103,12 +2099,12 @@ impl ViewerApp {
             }
         };
 
-        self.companion_texture = Some(texture);
-        self.companion_source = Some(source);
-        self.companion_rendered = Some(rendered);
-        if reused_texture {
-            self.companion_texture_display_scale = texture_display_scale;
+        display.texture = Some(texture);
+        if display.texture_display_scale <= 0.0 {
+            display.texture_display_scale = 1.0;
         }
+
+        self.companion_display = Some(display);
         if layout_changed {
             self.pending_fit_recalc |= !matches!(self.render_options.zoom_option, ZoomOption::None);
         }
@@ -2432,14 +2428,14 @@ impl ViewerApp {
                 "load_path": entry.load_path.as_ref().map(|path| path.display().to_string()),
             }),
         );
-        if let Some(texture) = entry.texture {
+        if let Some(texture) = entry.display.texture {
             self.current_texture = texture;
             self.current_texture_is_default = false;
-            self.texture_display_scale = entry.texture_display_scale;
+            self.texture_display_scale = entry.display.texture_display_scale;
         }
         self.pending_navigation_path = Some(path.to_path_buf());
         self.overlay.clear_loading_message();
-        self.apply_loaded_result(entry.load_path, entry.source, entry.rendered);
+        self.apply_loaded_result(entry.load_path, entry.display.source, entry.display.rendered);
         true
     }
 
@@ -2453,8 +2449,9 @@ impl ViewerApp {
 
     fn respawn_companion_worker(&mut self) {
         let seed = self
-            .companion_source
-            .clone()
+            .companion_display
+            .as_ref()
+            .map(|display| display.source.clone())
             .unwrap_or_else(|| self.source.clone());
         let (tx, rx, join) = spawn_render_worker(seed);
         self.companion_tx = tx;
@@ -2632,10 +2629,12 @@ impl ViewerApp {
                     self.remember_preloaded_entry(PreloadedEntry {
                         navigation_path,
                         load_path: path,
-                        source,
-                        rendered,
-                        texture: Some(texture),
-                        texture_display_scale: display_scale,
+                        display: DisplayedPageState {
+                            source,
+                            rendered,
+                            texture: Some(texture),
+                            texture_display_scale: display_scale,
+                        },
                     });
                 }
                 Ok(RenderResult::Failed {
@@ -2706,7 +2705,11 @@ impl ViewerApp {
                     let image = self.color_image_from_canvas(&canvas);
                     let texture_options = self.texture_options();
                     let texture = if path.is_none() {
-                        if let Some(texture) = &mut self.companion_texture {
+                        if let Some(texture) = self
+                            .companion_display
+                            .as_mut()
+                            .and_then(|display| display.texture.as_mut())
+                        {
                             texture.set(image, texture_options);
                             texture.clone()
                         } else {
@@ -2721,19 +2724,20 @@ impl ViewerApp {
                         self.remember_preloaded_entry(PreloadedEntry {
                             navigation_path,
                             load_path: path.clone(),
-                            source: source.clone(),
-                            rendered: rendered.clone(),
-                            texture: Some(texture.clone()),
-                            texture_display_scale: display_scale,
+                            display: DisplayedPageState {
+                                source: source.clone(),
+                                rendered: rendered.clone(),
+                                texture: Some(texture.clone()),
+                                texture_display_scale: display_scale,
+                            },
                         });
                     }
-                    self.apply_companion_loaded(
-                        path,
+                    self.apply_companion_loaded(path, DisplayedPageState {
                         source,
                         rendered,
-                        Some(texture),
-                        display_scale,
-                    );
+                        texture: Some(texture),
+                        texture_display_scale: display_scale,
+                    });
                 }
                 Ok(RenderResult::Failed {
                     request_id,
@@ -3254,10 +3258,12 @@ mod tests {
         PreloadedEntry {
             navigation_path: PathBuf::from(path),
             load_path: Some(PathBuf::from(path)),
-            source: dummy_loaded_image(4, 4),
-            rendered: dummy_loaded_image(4, 4),
-            texture: None,
-            texture_display_scale: 1.0,
+            display: DisplayedPageState {
+                source: dummy_loaded_image(4, 4),
+                rendered: dummy_loaded_image(4, 4),
+                texture: None,
+                texture_display_scale: 1.0,
+            },
         }
     }
 
