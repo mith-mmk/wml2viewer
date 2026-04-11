@@ -4886,6 +4886,8 @@ dependencies = [
 [[package]]
 name = "wml2"
 version = "0.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a349f50feb0cdd2b2ae16296e240fc6ec2c78606f3d71e680385a0d18aec9e4e"
 dependencies = [
  "bin-rs",
  "miniz_oxide 0.7.4",
@@ -5271,3 +5273,7 @@ dependencies = [
  "syn",
  "winnow",
 ]
+
+[[patch.unused]]
+name = "wml2"
+version = "0.0.20"

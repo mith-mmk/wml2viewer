@@ -8,8 +8,8 @@ use crate::filesystem::{
     adjacent_entry, adjacent_entry_in_current_branch, adjacent_non_container_entry,
     archive_prefers_low_io, browser_directory_for_path, is_browser_container,
     navigation_branch_path, new_shared_browser_worker_state, new_shared_filesystem_cache,
-    resolve_navigation_entry_path, set_archive_zip_workaround, spawn_browser_query_worker,
-    spawn_filesystem_worker,
+    resolve_navigation_entry_path, resolve_start_path, set_archive_zip_workaround,
+    spawn_browser_query_worker, spawn_filesystem_worker,
 };
 use crate::options::{
     AppConfig, EndOfFolderOption, KeyBinding, NavigationSortOption, PluginConfig, ResourceOptions,
@@ -94,8 +94,10 @@ pub(crate) struct ViewerApp {
     pub(crate) fs_rx: Option<Receiver<FilesystemResult>>,
     pub(crate) next_fs_request_id: u64,
     pub(crate) active_fs_request_id: Option<u64>,
+    active_fs_request_kind: Option<ActiveFilesystemRequestKind>,
     pub(crate) active_fs_input_request_id: Option<u64>,
     pub(crate) queued_navigation: Option<FilesystemCommand>,
+    pending_navigation_intent: Option<PendingNavigationIntent>,
     pub(crate) deferred_filesystem_init_path: Option<PathBuf>,
     pub(crate) filer_tx: Option<Sender<FilesystemCommand>>,
     pub(crate) filer_rx: Option<Receiver<FilesystemResult>>,
@@ -190,6 +192,20 @@ pub(crate) enum StartupPhase {
     SingleViewer,
     Synchronizing,
     MultiViewer,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActiveFilesystemRequestKind {
+    Init,
+    Navigation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingNavigationIntent {
+    Next,
+    Prev,
+    First,
+    Last,
 }
 
 fn calc_fit_zoom(ctx_size: egui::Vec2, image_size: egui::Vec2, option: &ZoomOption) -> f32 {
@@ -380,6 +396,16 @@ fn should_defer_thumbnail_io(
         && (active_request || companion_active_request || preload_active_request)
 }
 
+fn should_open_filer_for_no_path(kind: Option<ActiveFilesystemRequestKind>) -> bool {
+    matches!(kind, Some(ActiveFilesystemRequestKind::Init))
+}
+
+fn resolve_requested_load_target(path: &Path) -> (PathBuf, PathBuf) {
+    let navigation_path = resolve_navigation_entry_path(path).unwrap_or_else(|| path.to_path_buf());
+    let load_path = resolve_start_path(&navigation_path).unwrap_or_else(|| navigation_path.clone());
+    (navigation_path, load_path)
+}
+
 pub(crate) fn join_search_paths(paths: &[PathBuf]) -> String {
     paths
         .iter()
@@ -508,8 +534,10 @@ impl ViewerApp {
             fs_rx: None,
             next_fs_request_id: 0,
             active_fs_request_id: None,
+            active_fs_request_kind: None,
             active_fs_input_request_id: None,
             queued_navigation: None,
+            pending_navigation_intent: None,
             deferred_filesystem_init_path: None,
             filer_tx: None,
             filer_rx: None,
@@ -1725,58 +1753,38 @@ impl ViewerApp {
 
     pub(crate) fn next_image(&mut self) -> Result<(), Box<dyn Error>> {
         self.cancel_pending_single_click_navigation();
-        if !self.can_trigger_navigation() {
+        if self.navigation_transition_in_flight() {
+            self.pending_navigation_intent = Some(PendingNavigationIntent::Next);
             return Ok(());
         }
-        if let Some(target) = self.manga_navigation_target(true) {
-            self.request_load_path(target)?;
-            self.last_navigation_at = Some(Instant::now());
-            return Ok(());
-        }
-        self.request_navigation(FilesystemCommand::Next {
-            request_id: 0,
-            policy: self.end_of_folder,
-        })?;
-        self.last_navigation_at = Some(Instant::now());
-        Ok(())
+        self.dispatch_navigation_intent(PendingNavigationIntent::Next, true)
     }
 
     pub(crate) fn prev_image(&mut self) -> Result<(), Box<dyn Error>> {
         self.cancel_pending_single_click_navigation();
-        if !self.can_trigger_navigation() {
+        if self.navigation_transition_in_flight() {
+            self.pending_navigation_intent = Some(PendingNavigationIntent::Prev);
             return Ok(());
         }
-        if let Some(target) = self.manga_navigation_target(false) {
-            self.request_load_path(target)?;
-            self.last_navigation_at = Some(Instant::now());
-            return Ok(());
-        }
-        self.request_navigation(FilesystemCommand::Prev {
-            request_id: 0,
-            policy: self.end_of_folder,
-        })?;
-        self.last_navigation_at = Some(Instant::now());
-        Ok(())
+        self.dispatch_navigation_intent(PendingNavigationIntent::Prev, true)
     }
 
     pub(crate) fn first_image(&mut self) -> Result<(), Box<dyn Error>> {
         self.cancel_pending_single_click_navigation();
-        if !self.can_trigger_navigation() {
+        if self.navigation_transition_in_flight() {
+            self.pending_navigation_intent = Some(PendingNavigationIntent::First);
             return Ok(());
         }
-        self.request_navigation(FilesystemCommand::First { request_id: 0 })?;
-        self.last_navigation_at = Some(Instant::now());
-        Ok(())
+        self.dispatch_navigation_intent(PendingNavigationIntent::First, true)
     }
 
     pub(crate) fn last_image(&mut self) -> Result<(), Box<dyn Error>> {
         self.cancel_pending_single_click_navigation();
-        if !self.can_trigger_navigation() {
+        if self.navigation_transition_in_flight() {
+            self.pending_navigation_intent = Some(PendingNavigationIntent::Last);
             return Ok(());
         }
-        self.request_navigation(FilesystemCommand::Last { request_id: 0 })?;
-        self.last_navigation_at = Some(Instant::now());
-        Ok(())
+        self.dispatch_navigation_intent(PendingNavigationIntent::Last, true)
     }
 
     fn can_trigger_navigation(&self) -> bool {
@@ -1785,8 +1793,77 @@ impl ViewerApp {
             .unwrap_or(true)
     }
 
+    fn navigation_transition_in_flight(&self) -> bool {
+        self.active_request.is_some()
+            || self.active_fs_request_id.is_some()
+            || self.active_fs_input_request_id.is_some()
+    }
+
+    fn dispatch_navigation_intent(
+        &mut self,
+        intent: PendingNavigationIntent,
+        respect_repeat_interval: bool,
+    ) -> Result<(), Box<dyn Error>> {
+        if respect_repeat_interval && !self.can_trigger_navigation() {
+            return Ok(());
+        }
+
+        match intent {
+            PendingNavigationIntent::Next => {
+                if let Some(target) = self.manga_navigation_target(true) {
+                    self.request_load_path(target)?;
+                } else {
+                    self.request_navigation(FilesystemCommand::Next {
+                        request_id: 0,
+                        policy: self.end_of_folder,
+                    })?;
+                }
+            }
+            PendingNavigationIntent::Prev => {
+                if let Some(target) = self.manga_navigation_target(false) {
+                    self.request_load_path(target)?;
+                } else {
+                    self.request_navigation(FilesystemCommand::Prev {
+                        request_id: 0,
+                        policy: self.end_of_folder,
+                    })?;
+                }
+            }
+            PendingNavigationIntent::First => {
+                self.request_navigation(FilesystemCommand::First { request_id: 0 })?;
+            }
+            PendingNavigationIntent::Last => {
+                self.request_navigation(FilesystemCommand::Last { request_id: 0 })?;
+            }
+        }
+        self.last_navigation_at = Some(Instant::now());
+        Ok(())
+    }
+
+    fn drain_pending_navigation_intent(&mut self) {
+        if self.navigation_transition_in_flight() {
+            return;
+        }
+        let Some(intent) = self.pending_navigation_intent.take() else {
+            return;
+        };
+        let _ = self.dispatch_navigation_intent(intent, false);
+    }
+
+    fn clear_active_filesystem_request(
+        &mut self,
+        request_id: u64,
+    ) -> Option<ActiveFilesystemRequestKind> {
+        if self.active_fs_request_id != Some(request_id) {
+            return None;
+        }
+        self.active_fs_request_id = None;
+        self.active_fs_request_kind.take()
+    }
+
     pub(crate) fn request_load_path(&mut self, path: PathBuf) -> Result<(), Box<dyn Error>> {
-        self.request_load_target(path.clone(), path)
+        let (navigation_path, load_path) = resolve_requested_load_target(&path);
+        self.request_load_target(navigation_path, load_path)
     }
 
     pub(crate) fn request_load_target(
@@ -1979,6 +2056,7 @@ impl ViewerApp {
         };
         let request_id = self.alloc_fs_request_id();
         self.active_fs_request_id = Some(request_id);
+        self.active_fs_request_kind = Some(ActiveFilesystemRequestKind::Init);
         self.overlay
             .set_loading_message(format!("Scanning {}", path.display()));
         fs_tx
@@ -2023,6 +2101,7 @@ impl ViewerApp {
         };
         let request_id = self.alloc_fs_request_id();
         self.active_fs_request_id = Some(request_id);
+        self.active_fs_request_kind = Some(ActiveFilesystemRequestKind::Navigation);
         command = match command {
             FilesystemCommand::Init { path, .. } => FilesystemCommand::Init { request_id, path },
             FilesystemCommand::SetCurrent { path, .. } => {
@@ -2294,6 +2373,7 @@ impl ViewerApp {
         self.fs_rx = Some(rx);
         self.navigator_ready = false;
         self.active_fs_request_id = None;
+        self.active_fs_request_kind = None;
         self.active_fs_input_request_id = None;
         let _ = self.init_filesystem(self.current_navigation_path.clone());
     }
@@ -2628,9 +2708,8 @@ impl ViewerApp {
                     navigation_path,
                     load_path,
                 }) => {
-                    if self.active_fs_request_id == Some(request_id) {
+                    if self.clear_active_filesystem_request(request_id).is_some() {
                         self.navigator_ready = true;
-                        self.active_fs_request_id = None;
                         self.startup_phase = StartupPhase::MultiViewer;
                         match (navigation_path, load_path) {
                             (Some(navigation_path), Some(load_path)) => {
@@ -2662,7 +2741,7 @@ impl ViewerApp {
                     navigation_path,
                     load_path,
                 }) => {
-                    if self.active_fs_request_id == Some(request_id) {
+                    if self.clear_active_filesystem_request(request_id).is_some() {
                         self.empty_mode = false;
                         self.startup_phase = StartupPhase::MultiViewer;
                         if self.current_navigation_path != navigation_path
@@ -2670,16 +2749,19 @@ impl ViewerApp {
                         {
                             let _ = self.request_load_target(navigation_path, load_path);
                         }
-                        self.active_fs_request_id = None;
                     }
                 }
                 Ok(FilesystemResult::NoPath { request_id }) => {
-                    if self.active_fs_request_id == Some(request_id) {
+                    if let Some(kind) = self.clear_active_filesystem_request(request_id) {
                         self.startup_phase = StartupPhase::MultiViewer;
-                        self.overlay
-                            .set_loading_message("No displayable file found");
-                        self.show_filer = true;
-                        self.active_fs_request_id = None;
+                        if should_open_filer_for_no_path(Some(kind)) {
+                            self.empty_mode = true;
+                            self.overlay
+                                .set_loading_message("No displayable file found");
+                            self.show_filer = true;
+                        } else if self.active_request.is_none() {
+                            self.overlay.clear_loading_message();
+                        }
                     }
                 }
                 Ok(FilesystemResult::InputPathResolved { request_id, path }) => {
@@ -2896,6 +2978,7 @@ impl eframe::App for ViewerApp {
         self.poll_thumbnail_worker();
         self.poll_save_result();
         self.poll_deferred_filer_sync();
+        self.drain_pending_navigation_intent();
         self.sync_manga_companion_if_targets_changed(ctx);
         self.handle_keyboard(ctx);
         self.poll_pending_pointer_actions();
@@ -2921,6 +3004,7 @@ impl eframe::App for ViewerApp {
 
         self.frame_counter += 1;
         self.poll_deferred_filesystem_sync();
+        self.drain_pending_navigation_intent();
         self.update_animation(ctx);
 
         let panel = egui::CentralPanel::default().frame(egui::Frame::NONE);
@@ -3098,12 +3182,16 @@ fn filesystem_send_error(err: mpsc::SendError<FilesystemCommand>) -> Box<dyn Err
 #[cfg(test)]
 mod tests {
     use super::{
-        adjacent_same_branch_navigation_target, manga_companion_matches_preloaded,
-        preloaded_navigation_matches, same_navigation_branch, should_allow_preload_for_path,
+        ActiveFilesystemRequestKind, adjacent_same_branch_navigation_target,
+        manga_companion_matches_preloaded, preloaded_navigation_matches,
+        resolve_requested_load_target, same_navigation_branch, should_allow_preload_for_path,
         should_defer_filer_request_while_loading, should_defer_filer_sync_for_navigation,
         should_defer_preload_for_manga_low_io, should_defer_thumbnail_io,
+        should_open_filer_for_no_path,
     };
-    use crate::filesystem::{build_zip_virtual_children, zip_index_is_available};
+    use crate::filesystem::{
+        build_zip_virtual_children, resolve_virtual_zip_child, zip_index_is_available,
+    };
     use crate::options::{ArchiveBrowseOption, NavigationSortOption};
     use std::fs;
     use std::path::Path;
@@ -3255,5 +3343,34 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn startup_no_path_opens_filer_but_navigation_no_path_does_not() {
+        assert!(should_open_filer_for_no_path(Some(
+            ActiveFilesystemRequestKind::Init
+        )));
+        assert!(!should_open_filer_for_no_path(Some(
+            ActiveFilesystemRequestKind::Navigation
+        )));
+        assert!(!should_open_filer_for_no_path(None));
+    }
+
+    #[test]
+    fn request_load_path_resolves_zip_root_to_first_virtual_child() {
+        let dir = make_temp_dir();
+        let archive = dir.join("pages.zip");
+        make_zip_with_entries(&archive, &["001.png", "002.png"]);
+
+        let (navigation_path, load_path) = resolve_requested_load_target(&archive);
+
+        assert_eq!(
+            resolve_virtual_zip_child(&navigation_path),
+            Some((archive.clone(), 0))
+        );
+        assert_eq!(load_path, navigation_path);
+        assert!(!zip_index_is_available(&archive));
+
+        let _ = fs::remove_dir_all(dir);
     }
 }
