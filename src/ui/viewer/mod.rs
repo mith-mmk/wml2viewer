@@ -4,12 +4,9 @@ use crate::dependent::{default_download_dir, pick_save_directory};
 use crate::drawers::canvas::Canvas;
 use crate::drawers::image::{LoadedImage, SaveFormat, save_loaded_image};
 use crate::filesystem::{
-    FilesystemCommand, FilesystemResult, SharedBrowserWorkerState, SharedFilesystemCache,
-    adjacent_entry, adjacent_entry_in_current_branch, adjacent_non_container_entry,
-    archive_prefers_low_io, browser_directory_for_path, is_browser_container,
-    navigation_branch_path, new_shared_browser_worker_state, new_shared_filesystem_cache,
-    resolve_navigation_entry_path, resolve_start_path, set_archive_zip_workaround,
-    spawn_browser_query_worker, spawn_filesystem_worker,
+    FilesystemCommand, FilesystemResult, adjacent_entry, archive_prefers_low_io,
+    is_browser_container, navigation_branch_path, resolve_navigation_entry_path,
+    set_archive_zip_workaround, spawn_filesystem_worker,
 };
 use crate::options::{
     AppConfig, EndOfFolderOption, KeyBinding, NavigationSortOption, PluginConfig, ResourceOptions,
@@ -20,9 +17,10 @@ use crate::ui::menu::fileviewer::state::FilerState;
 use crate::ui::menu::fileviewer::thumbnail::{
     ThumbnailCommand, ThumbnailResult, set_thumbnail_workaround, spawn_thumbnail_worker,
 };
+use crate::ui::menu::fileviewer::worker::{FilerCommand, FilerResult, spawn_filer_worker};
 use crate::ui::render::{
-    ActiveRenderRequest, RenderCommand, RenderResult, RenderWorkerPriority, aligned_offset,
-    canvas_to_color_image, downscale_for_texture_limit, spawn_render_worker, worker_send_error,
+    ActiveRenderRequest, RenderCommand, RenderResult, aligned_offset, canvas_to_color_image,
+    downscale_for_texture_limit, spawn_render_worker, worker_send_error,
 };
 use crate::ui::viewer::options::{
     RenderOptions, RenderScaleMode, ViewerOptions, WindowOptions, WindowStartPosition,
@@ -30,6 +28,7 @@ use crate::ui::viewer::options::{
 };
 use eframe::egui::{self, Pos2, TextureHandle, TextureOptions, vec2};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -41,7 +40,7 @@ use options::ZoomOption;
 pub(crate) use state::SettingsDraftState;
 use state::{SaveDialogState, ViewerOverlayState};
 
-const NAVIGATION_REPEAT_INTERVAL: Duration = Duration::from_millis(90);
+const NAVIGATION_REPEAT_INTERVAL: Duration = Duration::from_millis(180);
 const POINTER_SINGLE_CLICK_DELAY: Duration = Duration::from_millis(500);
 const WAITING_CARD_DELAY: Duration = Duration::from_millis(180);
 
@@ -88,27 +87,20 @@ pub(crate) struct ViewerApp {
     pub(crate) next_request_id: u64,
     pub(crate) active_request: Option<ActiveRenderRequest>,
     pub(crate) pending_navigation_path: Option<PathBuf>,
-    pub(crate) shared_filesystem_cache: Option<SharedFilesystemCache>,
-    pub(crate) shared_browser_worker_state: Option<SharedBrowserWorkerState>,
     pub(crate) fs_tx: Option<Sender<FilesystemCommand>>,
     pub(crate) fs_rx: Option<Receiver<FilesystemResult>>,
     pub(crate) next_fs_request_id: u64,
     pub(crate) active_fs_request_id: Option<u64>,
-    active_fs_request_kind: Option<ActiveFilesystemRequestKind>,
-    pub(crate) active_fs_input_request_id: Option<u64>,
     pub(crate) queued_navigation: Option<FilesystemCommand>,
-    pending_navigation_intent: Option<PendingNavigationIntent>,
     pub(crate) deferred_filesystem_init_path: Option<PathBuf>,
-    pub(crate) filer_tx: Option<Sender<FilesystemCommand>>,
-    pub(crate) filer_rx: Option<Receiver<FilesystemResult>>,
+    pub(crate) filer_tx: Option<Sender<FilerCommand>>,
+    pub(crate) filer_rx: Option<Receiver<FilerResult>>,
     pub(crate) next_filer_request_id: u64,
     pub(crate) thumbnail_tx: Option<Sender<ThumbnailCommand>>,
     pub(crate) thumbnail_rx: Option<Receiver<ThumbnailResult>>,
     pub(crate) next_thumbnail_request_id: u64,
-    pub(crate) thumbnail_pending: HashMap<PathBuf, u32>,
-    pub(crate) thumbnail_cache: HashMap<PathBuf, CachedThumbnail>,
-    pub(crate) pending_filer_scroll_to: Option<PathBuf>,
-    pub(crate) filer_needs_sync: bool,
+    pub(crate) thumbnail_pending: HashSet<PathBuf>,
+    pub(crate) thumbnail_cache: HashMap<PathBuf, TextureHandle>,
     pub(crate) navigator_ready: bool,
     pub(crate) overlay: ViewerOverlayState,
     pub(crate) last_navigation_at: Option<Instant>,
@@ -140,14 +132,6 @@ pub(crate) struct ViewerApp {
     pub(crate) companion_rx: Receiver<RenderResult>,
     pub(crate) companion_join: Option<JoinHandle<()>>,
     pub(crate) companion_active_request: Option<ActiveRenderRequest>,
-    pub(crate) manga_cached_navigation_path: Option<PathBuf>,
-    pub(crate) manga_cached_spread_requested: bool,
-    pub(crate) manga_cached_navigator_ready: bool,
-    pub(crate) manga_cached_sort: NavigationSortOption,
-    pub(crate) manga_cached_archive_mode: crate::options::ArchiveBrowseOption,
-    pub(crate) desired_companion_navigation_path: Option<PathBuf>,
-    pub(crate) next_manga_navigation_path: Option<PathBuf>,
-    pub(crate) prev_manga_navigation_path: Option<PathBuf>,
     pub(crate) companion_navigation_path: Option<PathBuf>,
     pub(crate) companion_source: Option<LoadedImage>,
     pub(crate) companion_rendered: Option<LoadedImage>,
@@ -163,17 +147,7 @@ pub(crate) struct ViewerApp {
     pub(crate) preloaded_load_path: Option<PathBuf>,
     pub(crate) preloaded_source: Option<LoadedImage>,
     pub(crate) preloaded_rendered: Option<LoadedImage>,
-    pub(crate) preloaded_companion_navigation_path: Option<PathBuf>,
-    pub(crate) preloaded_companion_source: Option<LoadedImage>,
-    pub(crate) preloaded_companion_rendered: Option<LoadedImage>,
-    pub(crate) preloaded_companion_texture: Option<TextureHandle>,
-    pub(crate) preloaded_companion_texture_display_scale: f32,
     pub(crate) pending_primary_click_deadline: Option<Instant>,
-}
-
-pub(crate) struct CachedThumbnail {
-    pub(crate) texture: TextureHandle,
-    pub(crate) max_side: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -192,20 +166,6 @@ pub(crate) enum StartupPhase {
     SingleViewer,
     Synchronizing,
     MultiViewer,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ActiveFilesystemRequestKind {
-    Init,
-    Navigation,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PendingNavigationIntent {
-    Next,
-    Prev,
-    First,
-    Last,
 }
 
 fn calc_fit_zoom(ctx_size: egui::Vec2, image_size: egui::Vec2, option: &ZoomOption) -> f32 {
@@ -283,10 +243,7 @@ fn ellipsize_end(text: &str, max_chars: usize) -> String {
     if chars.len() <= max_chars {
         return text.to_string();
     }
-    let head = chars
-        .iter()
-        .take(max_chars.saturating_sub(3))
-        .collect::<String>();
+    let head = chars.iter().take(max_chars.saturating_sub(3)).collect::<String>();
     format!("{head}...")
 }
 
@@ -303,107 +260,6 @@ fn format_key_binding(binding: &KeyBinding) -> String {
     }
     parts.push(&binding.key);
     parts.join("+")
-}
-
-fn preloaded_navigation_matches(
-    preloaded_navigation_path: Option<&std::path::Path>,
-    requested_navigation_path: &std::path::Path,
-) -> bool {
-    preloaded_navigation_path == Some(requested_navigation_path)
-}
-
-#[cfg(test)]
-fn same_navigation_branch(
-    current_path: &std::path::Path,
-    candidate_path: &std::path::Path,
-) -> bool {
-    navigation_branch_path(current_path) == navigation_branch_path(candidate_path)
-}
-
-fn adjacent_same_branch_navigation_target(
-    current_path: &std::path::Path,
-    navigation_sort: NavigationSortOption,
-    archive_mode: crate::options::ArchiveBrowseOption,
-    step: isize,
-) -> Option<PathBuf> {
-    let branch = navigation_branch_path(current_path)?;
-    if !branch.is_dir() && is_browser_container(&branch) {
-        return adjacent_entry_in_current_branch(current_path, navigation_sort, archive_mode, step)
-            .filter(|candidate| navigation_branch_path(candidate) == Some(branch.clone()));
-    }
-    adjacent_non_container_entry(current_path, navigation_sort, archive_mode, step)
-}
-
-fn should_defer_filer_sync_for_navigation(
-    navigation_path: &std::path::Path,
-    current_load_path: Option<&std::path::Path>,
-) -> bool {
-    browser_directory_for_path(navigation_path, current_load_path)
-        .filter(|dir| !dir.is_dir() && is_browser_container(dir))
-        .is_some()
-}
-
-fn should_allow_preload_for_path(
-    current_navigation_path: &std::path::Path,
-    candidate_path: &std::path::Path,
-) -> bool {
-    if !archive_prefers_low_io(candidate_path) {
-        return true;
-    }
-    navigation_branch_path(current_navigation_path) == navigation_branch_path(candidate_path)
-}
-
-fn should_defer_filer_request_while_loading(
-    active_request: bool,
-    active_fs_request: bool,
-    active_fs_input_request: bool,
-    companion_active_request: bool,
-    preload_active_request: bool,
-) -> bool {
-    active_request
-        || active_fs_request
-        || active_fs_input_request
-        || companion_active_request
-        || preload_active_request
-}
-
-fn manga_companion_matches_preloaded(
-    companion_path: &std::path::Path,
-    preloaded_navigation_path: Option<&std::path::Path>,
-) -> bool {
-    preloaded_navigation_matches(preloaded_navigation_path, companion_path)
-}
-
-fn should_defer_preload_for_manga_low_io(
-    manga_mode: bool,
-    current_navigation_path: &std::path::Path,
-    desired_companion: Option<&std::path::Path>,
-    companion_ready: bool,
-) -> bool {
-    manga_mode
-        && desired_companion.is_some()
-        && archive_prefers_low_io(current_navigation_path)
-        && !companion_ready
-}
-
-fn should_defer_thumbnail_io(
-    current_navigation_path: &std::path::Path,
-    active_request: bool,
-    companion_active_request: bool,
-    preload_active_request: bool,
-) -> bool {
-    archive_prefers_low_io(current_navigation_path)
-        && (active_request || companion_active_request || preload_active_request)
-}
-
-fn should_open_filer_for_no_path(kind: Option<ActiveFilesystemRequestKind>) -> bool {
-    matches!(kind, Some(ActiveFilesystemRequestKind::Init))
-}
-
-fn resolve_requested_load_target(path: &Path) -> (PathBuf, PathBuf) {
-    let navigation_path = resolve_navigation_entry_path(path).unwrap_or_else(|| path.to_path_buf());
-    let load_path = resolve_start_path(&navigation_path).unwrap_or_else(|| navigation_path.clone());
-    (navigation_path, load_path)
 }
 
 pub(crate) fn join_search_paths(paths: &[PathBuf]) -> String {
@@ -470,12 +326,9 @@ impl ViewerApp {
         } = apply_resources(&cc.egui_ctx, &config.resources);
         set_archive_zip_workaround(config.runtime.workaround.archive.zip.clone());
         set_thumbnail_workaround(config.runtime.workaround.thumbnail.clone());
-        let (worker_tx, worker_rx, worker_join) =
-            spawn_render_worker(source.clone(), RenderWorkerPriority::Primary);
-        let (companion_tx, companion_rx, companion_join) =
-            spawn_render_worker(source.clone(), RenderWorkerPriority::Companion);
-        let (preload_tx, preload_rx, preload_join) =
-            spawn_render_worker(source.clone(), RenderWorkerPriority::Preload);
+        let (worker_tx, worker_rx, worker_join) = spawn_render_worker(source.clone());
+        let (companion_tx, companion_rx, companion_join) = spawn_render_worker(source.clone());
+        let (preload_tx, preload_rx, preload_join) = spawn_render_worker(source.clone());
         let resource_locale_input = config.resources.locale.clone().unwrap_or_default();
         let resource_font_paths_input = join_search_paths(&config.resources.font_paths);
         let defer_navigation_workers = !show_filer_on_start;
@@ -528,16 +381,11 @@ impl ViewerApp {
             next_request_id: 0,
             active_request: None,
             pending_navigation_path: None,
-            shared_filesystem_cache: None,
-            shared_browser_worker_state: None,
             fs_tx: None,
             fs_rx: None,
             next_fs_request_id: 0,
             active_fs_request_id: None,
-            active_fs_request_kind: None,
-            active_fs_input_request_id: None,
             queued_navigation: None,
-            pending_navigation_intent: None,
             deferred_filesystem_init_path: None,
             filer_tx: None,
             filer_rx: None,
@@ -545,10 +393,8 @@ impl ViewerApp {
             thumbnail_tx: None,
             thumbnail_rx: None,
             next_thumbnail_request_id: 0,
-            thumbnail_pending: HashMap::new(),
+            thumbnail_pending: HashSet::new(),
             thumbnail_cache: HashMap::new(),
-            pending_filer_scroll_to: None,
-            filer_needs_sync: true,
             navigator_ready: false,
             overlay: ViewerOverlayState::default(),
             last_navigation_at: None,
@@ -572,10 +418,7 @@ impl ViewerApp {
             },
             show_filer: show_filer_on_start,
             show_subfiler: false,
-            filer: FilerState {
-                archive_mode: config.navigation.archive,
-                ..FilerState::default()
-            },
+            filer: FilerState::default(),
             susie64_search_paths_input: String::new(),
             system_search_paths_input: String::new(),
             ffmpeg_search_paths_input: String::new(),
@@ -586,14 +429,6 @@ impl ViewerApp {
             companion_rx,
             companion_join: Some(companion_join),
             companion_active_request: None,
-            manga_cached_navigation_path: None,
-            manga_cached_spread_requested: false,
-            manga_cached_navigator_ready: false,
-            manga_cached_sort: config.navigation.sort,
-            manga_cached_archive_mode: config.navigation.archive,
-            desired_companion_navigation_path: None,
-            next_manga_navigation_path: None,
-            prev_manga_navigation_path: None,
             companion_navigation_path: None,
             companion_source: None,
             companion_rendered: None,
@@ -609,11 +444,6 @@ impl ViewerApp {
             preloaded_load_path: None,
             preloaded_source: None,
             preloaded_rendered: None,
-            preloaded_companion_navigation_path: None,
-            preloaded_companion_source: None,
-            preloaded_companion_rendered: None,
-            preloaded_companion_texture: None,
-            preloaded_companion_texture_display_scale: 1.0,
             pending_primary_click_deadline: None,
         };
 
@@ -771,8 +601,7 @@ impl ViewerApp {
     <li><code>wml2viewer [path]</code></li>
     <li><code>wml2viewer --config &lt;path&gt; [path]</code></li>
     <li><code>wml2viewer --config=&lt;path&gt; [path]</code></li>
-    <li><code>wml2viewer --clean system</code></li>
-    <li><code>wml2viewer --clean cache</code></li>
+    <li><code>wml2viewer --clean system</code> (planned)</li>
   </ul>
 </body>
 </html>"#
@@ -822,8 +651,7 @@ impl ViewerApp {
                     | crate::drawers::affine::InterpolationAlgorithm::Bilinear
             )
         {
-            self.render_options.zoom_method =
-                crate::drawers::affine::InterpolationAlgorithm::Bilinear;
+            self.render_options.zoom_method = crate::drawers::affine::InterpolationAlgorithm::Bilinear;
         }
     }
 
@@ -867,10 +695,7 @@ impl ViewerApp {
     }
 
     fn texture_options(&self) -> TextureOptions {
-        texture_options_for_scale_mode(
-            self.render_options.scale_mode,
-            self.render_options.zoom_method,
-        )
+        texture_options_for_scale_mode(self.render_options.scale_mode, self.render_options.zoom_method)
     }
 
     fn current_draw_scale(&self) -> f32 {
@@ -975,9 +800,9 @@ impl ViewerApp {
             self.render_options.zoom_method,
         );
         let image = self.color_image_from_canvas(&canvas);
-        let texture =
-            self.egui_ctx
-                .load_texture(texture_name.to_owned(), image, self.texture_options());
+        let texture = self
+            .egui_ctx
+            .load_texture(texture_name.to_owned(), image, self.texture_options());
         (texture, display_scale)
     }
 
@@ -1004,7 +829,10 @@ impl ViewerApp {
         self.texture_display_scale = 1.0;
     }
 
-    fn shutdown_render_worker(tx: &Sender<RenderCommand>, join: &mut Option<JoinHandle<()>>) {
+    fn shutdown_render_worker(
+        tx: &Sender<RenderCommand>,
+        join: &mut Option<JoinHandle<()>>,
+    ) {
         let _ = tx.send(RenderCommand::Shutdown);
         if let Some(handle) = join.take() {
             let _ = handle.join();
@@ -1073,8 +901,12 @@ impl ViewerApp {
             return false;
         }
 
-        let target_fit =
-            calc_fit_zoom(viewport, source_size, &self.render_options.zoom_option).clamp(0.1, 16.0);
+        let target_fit = calc_fit_zoom(
+            viewport,
+            source_size,
+            &self.render_options.zoom_option,
+        )
+        .clamp(0.1, 16.0);
         let target_zoom = (target_fit * self.zoom_factor.clamp(0.1, 16.0)).clamp(0.1, 16.0);
 
         if (target_zoom - 1.0).abs() < 0.01 {
@@ -1144,91 +976,83 @@ impl ViewerApp {
     }
 
     pub(crate) fn current_directory(&self) -> Option<PathBuf> {
-        browser_directory_for_path(&self.current_navigation_path, Some(&self.current_path))
+        if self.current_navigation_path.is_dir() {
+            return Some(self.current_navigation_path.clone());
+        }
+        if let Some(parent) = self.current_navigation_path.parent() {
+            let marker = parent.file_name().and_then(|name| name.to_str());
+            if matches!(marker, Some("__wmlv__" | "__zipv__")) {
+                return parent.parent().map(|path| path.to_path_buf());
+            }
+            return Some(parent.to_path_buf());
+        }
+        self.current_path.parent().map(|path| path.to_path_buf())
     }
 
     pub(crate) fn request_filer_directory(&mut self, dir: PathBuf, selected: Option<PathBuf>) {
-        if should_defer_filer_request_while_loading(
-            self.active_request.is_some(),
-            self.active_fs_request_id.is_some(),
-            self.active_fs_input_request_id.is_some(),
-            self.companion_active_request.is_some(),
-            self.active_preload_request_id.is_some(),
-        ) {
-            self.filer_needs_sync = true;
-            self.pending_filer_scroll_to = selected.clone();
-            self.filer.snapshot.directory = Some(dir);
-            self.filer.snapshot.selected = selected;
-            return;
-        }
         self.spawn_navigation_workers();
         let Some(filer_tx) = self.filer_tx.clone() else {
             return;
         };
         let request_id = self.alloc_filer_request_id();
-        self.filer_needs_sync = false;
-        self.filer.snapshot.begin_request(request_id);
-        self.pending_filer_scroll_to = selected.clone();
-        let _ = filer_tx.send(FilesystemCommand::OpenBrowserDirectory {
+        self.filer.pending_request_id = Some(request_id);
+        let _ = filer_tx.send(FilerCommand::OpenDirectory {
             request_id,
             dir,
+            sort: self.navigation_sort,
             selected,
-            options: self.filer.take_browser_scan_options(self.navigation_sort),
+            sort_field: self.filer.sort_field,
+            ascending: self.filer.ascending,
+            separate_dirs: self.filer.separate_dirs,
+            archive_as_container_in_sort: self.filer.archive_as_container_in_sort,
+            filter_text: self.filer.filter_text.clone(),
+            extension_filter: self.filer.extension_filter.clone(),
+            name_sort_mode: self.filer.name_sort_mode,
         });
     }
 
     fn sync_filer_directory_with_current_path(&mut self) {
+        let Some(dir) = self.current_directory() else {
+            return;
+        };
         if let Some(rebased) = resolve_navigation_entry_path(&self.current_navigation_path) {
             if rebased != self.current_navigation_path {
                 self.current_navigation_path = rebased.clone();
                 self.set_filesystem_current(rebased);
             }
         }
-        let previous_selected = self.filer.snapshot.selected.clone();
-        if let Some((dir, selected)) = self.filer.snapshot.sync_with_navigation(
-            &self.current_navigation_path,
-            self.pending_navigation_path.as_deref(),
-            Some(&self.current_path),
-        ) {
-            self.request_filer_directory(dir, selected);
-        } else if self.filer.snapshot.selected != previous_selected {
-            self.pending_filer_scroll_to = self.filer.snapshot.selected.clone();
-        }
-    }
-
-    pub(crate) fn maybe_sync_visible_filer_with_current_path(&mut self) {
-        if self.show_filer || self.show_subfiler {
-            self.sync_filer_directory_with_current_path();
+        let selected = Some(self.current_navigation_path.clone());
+        if self.filer.directory.as_ref() == Some(&dir) {
+            self.filer.selected = selected.clone();
+            if self.filer.entries.is_empty() && self.filer.pending_request_id.is_none() {
+                self.request_filer_directory(dir, selected);
+            }
         } else {
-            self.filer_needs_sync = true;
+            self.request_filer_directory(dir, selected);
         }
     }
 
-    fn poll_deferred_filer_sync(&mut self) {
-        if !self.filer_needs_sync || !(self.show_filer || self.show_subfiler) {
-            return;
+    fn selected_path_for_filer_directory(
+        &self,
+        directory: &std::path::Path,
+        fallback: Option<PathBuf>,
+    ) -> Option<PathBuf> {
+        if self.current_directory().as_deref() == Some(directory) {
+            resolve_navigation_entry_path(&self.current_navigation_path)
+                .or_else(|| Some(self.current_navigation_path.clone()))
+        } else {
+            fallback
         }
-        if should_defer_filer_request_while_loading(
-            self.active_request.is_some(),
-            self.active_fs_request_id.is_some(),
-            self.active_fs_input_request_id.is_some(),
-            self.companion_active_request.is_some(),
-            self.active_preload_request_id.is_some(),
-        ) {
-            return;
-        }
-        self.sync_filer_directory_with_current_path();
     }
 
     pub(crate) fn refresh_current_filer_directory(&mut self) {
         if let Some(dir) = self
             .filer
-            .snapshot
             .directory
             .clone()
             .or_else(|| self.current_directory())
         {
-            self.request_filer_directory(dir, self.filer.snapshot.selected.clone());
+            self.request_filer_directory(dir, self.filer.selected.clone());
         }
     }
 
@@ -1509,94 +1333,17 @@ impl ViewerApp {
     }
 
     fn desired_manga_companion_path(&self) -> Option<PathBuf> {
-        self.desired_companion_navigation_path.clone()
-    }
-
-    fn manga_companion_candidate_for_path(
-        &self,
-        navigation_path: &std::path::Path,
-    ) -> Option<PathBuf> {
         if !self.options.manga_mode
-            || !self.navigator_ready
             || self.empty_mode
-            || self.last_viewport_size.x < self.last_viewport_size.y * 1.4
+            || !self.navigator_ready
+            || !self.is_current_portrait_page()
         {
             return None;
         }
-        adjacent_same_branch_navigation_target(
-            navigation_path,
-            self.navigation_sort,
-            self.filer.archive_mode,
-            1,
-        )
-    }
-
-    fn manga_spread_requested(&self) -> bool {
-        self.options.manga_mode
-            && !self.empty_mode
-            && self.navigator_ready
-            && self.last_viewport_size.x >= self.last_viewport_size.y * 1.4
-            && self.is_current_portrait_page()
-    }
-
-    fn refresh_manga_targets(&mut self) -> bool {
-        let spread_requested = self.manga_spread_requested();
-        let unchanged = self.manga_cached_navigation_path.as_deref()
-            == Some(self.current_navigation_path.as_path())
-            && self.manga_cached_spread_requested == spread_requested
-            && self.manga_cached_navigator_ready == self.navigator_ready
-            && self.manga_cached_sort == self.navigation_sort
-            && self.manga_cached_archive_mode == self.filer.archive_mode;
-        if unchanged {
-            return false;
-        }
-
-        self.manga_cached_navigation_path = Some(self.current_navigation_path.clone());
-        self.manga_cached_spread_requested = spread_requested;
-        self.manga_cached_navigator_ready = self.navigator_ready;
-        self.manga_cached_sort = self.navigation_sort;
-        self.manga_cached_archive_mode = self.filer.archive_mode;
-        self.desired_companion_navigation_path = None;
-        self.next_manga_navigation_path = None;
-        self.prev_manga_navigation_path = None;
-
-        if !spread_requested {
-            return true;
-        }
-
-        let next_boundary = adjacent_same_branch_navigation_target(
-            &self.current_navigation_path,
-            self.navigation_sort,
-            self.filer.archive_mode,
-            1,
-        );
-        self.desired_companion_navigation_path = next_boundary.clone();
-        self.next_manga_navigation_path = next_boundary.as_ref().and_then(|boundary| {
-            adjacent_same_branch_navigation_target(
-                boundary,
-                self.navigation_sort,
-                self.filer.archive_mode,
-                1,
-            )
-            .or_else(|| Some(boundary.clone()))
-        });
-
-        self.prev_manga_navigation_path = adjacent_same_branch_navigation_target(
-            &self.current_navigation_path,
-            self.navigation_sort,
-            self.filer.archive_mode,
-            -1,
-        )
-        .and_then(|boundary| {
-            adjacent_same_branch_navigation_target(
-                &boundary,
-                self.navigation_sort,
-                self.filer.archive_mode,
-                -1,
-            )
-            .or(Some(boundary))
-        });
-        true
+        let companion = adjacent_entry(&self.current_navigation_path, self.navigation_sort, 1)?;
+        let current_branch = navigation_branch_path(&self.current_navigation_path);
+        let companion_branch = navigation_branch_path(&companion);
+        (current_branch == companion_branch).then_some(companion)
     }
 
     fn clear_manga_companion(&mut self) {
@@ -1606,30 +1353,6 @@ impl ViewerApp {
         self.companion_texture = None;
         self.companion_active_request = None;
         self.companion_texture_display_scale = 1.0;
-    }
-
-    fn apply_loaded_companion(
-        &mut self,
-        navigation_path: PathBuf,
-        source: LoadedImage,
-        rendered: LoadedImage,
-    ) {
-        let (canvas, display_scale) = downscale_for_texture_limit(
-            rendered.frame_canvas(0),
-            self.max_texture_side,
-            self.render_options.zoom_method,
-        );
-        let image = self.color_image_from_canvas(&canvas);
-        let texture = self
-            .egui_ctx
-            .load_texture("manga_companion", image, self.texture_options());
-        self.companion_navigation_path = Some(navigation_path);
-        self.companion_source = Some(source);
-        self.companion_rendered = Some(rendered);
-        self.companion_texture = Some(texture);
-        self.companion_texture_display_scale = display_scale;
-        self.companion_active_request = None;
-        self.pending_fit_recalc |= !matches!(self.render_options.zoom_option, ZoomOption::None);
     }
 
     fn manga_spread_active(&self) -> bool {
@@ -1677,36 +1400,7 @@ impl ViewerApp {
         Ok(())
     }
 
-    fn try_apply_preloaded_to_companion(&mut self, path: &std::path::Path) -> bool {
-        if !manga_companion_matches_preloaded(
-            path,
-            self.preloaded_companion_navigation_path.as_deref(),
-        ) {
-            return false;
-        }
-        let (Some(source), Some(rendered), Some(texture)) = (
-            self.preloaded_companion_source.take(),
-            self.preloaded_companion_rendered.take(),
-            self.preloaded_companion_texture.take(),
-        ) else {
-            return false;
-        };
-        self.companion_navigation_path = Some(path.to_path_buf());
-        self.companion_source = Some(source);
-        self.companion_rendered = Some(rendered);
-        self.companion_texture = Some(texture);
-        self.companion_texture_display_scale = self.preloaded_companion_texture_display_scale;
-        self.preloaded_companion_navigation_path = None;
-        self.preloaded_companion_texture_display_scale = 1.0;
-        self.companion_active_request = None;
-        self.pending_fit_recalc |= !matches!(self.render_options.zoom_option, ZoomOption::None);
-        true
-    }
-
     fn sync_manga_companion(&mut self, ctx: &egui::Context) {
-        if self.active_request.is_some() {
-            return;
-        }
         let desired = self.desired_manga_companion_path();
         if desired == self.companion_navigation_path && self.companion_rendered.is_some() {
             return;
@@ -1722,69 +1416,86 @@ impl ViewerApp {
             return;
         }
 
-        if self.try_apply_preloaded_to_companion(desired.as_deref().unwrap()) {
-            ctx.request_repaint();
-            return;
-        }
-
         if self.companion_active_request.is_none() {
             let _ = self.request_companion_load(desired.unwrap());
             ctx.request_repaint();
         }
     }
 
-    fn sync_manga_companion_if_targets_changed(&mut self, ctx: &egui::Context) {
-        if self.refresh_manga_targets() {
-            self.sync_manga_companion(ctx);
-        }
-    }
-
-    fn manga_navigation_target(&mut self, forward: bool) -> Option<PathBuf> {
-        self.refresh_manga_targets();
+    fn manga_navigation_target(&self, forward: bool) -> Option<PathBuf> {
         if !self.navigator_ready || !self.manga_spread_active() {
             return None;
         }
-        if forward {
-            self.next_manga_navigation_path.clone()
-        } else {
-            self.prev_manga_navigation_path.clone()
+
+        let boundary_target = adjacent_entry(
+            &self.current_navigation_path,
+            self.navigation_sort,
+            if forward { 1 } else { -1 },
+        )?;
+        let current_branch = navigation_branch_path(&self.current_navigation_path);
+        let boundary_branch = navigation_branch_path(&boundary_target);
+        if current_branch != boundary_branch {
+            return Some(boundary_target);
         }
+
+        let step = if forward { 2 } else { -2 };
+        adjacent_entry(&self.current_navigation_path, self.navigation_sort, step)
     }
 
     pub(crate) fn next_image(&mut self) -> Result<(), Box<dyn Error>> {
         self.cancel_pending_single_click_navigation();
-        if self.navigation_transition_in_flight() {
-            self.pending_navigation_intent = Some(PendingNavigationIntent::Next);
+        if !self.can_trigger_navigation() {
             return Ok(());
         }
-        self.dispatch_navigation_intent(PendingNavigationIntent::Next, true)
+        if let Some(target) = self.manga_navigation_target(true) {
+            self.request_load_path(target)?;
+            self.last_navigation_at = Some(Instant::now());
+            return Ok(());
+        }
+        self.request_navigation(FilesystemCommand::Next {
+            request_id: 0,
+            policy: self.end_of_folder,
+        })?;
+        self.last_navigation_at = Some(Instant::now());
+        Ok(())
     }
 
     pub(crate) fn prev_image(&mut self) -> Result<(), Box<dyn Error>> {
         self.cancel_pending_single_click_navigation();
-        if self.navigation_transition_in_flight() {
-            self.pending_navigation_intent = Some(PendingNavigationIntent::Prev);
+        if !self.can_trigger_navigation() {
             return Ok(());
         }
-        self.dispatch_navigation_intent(PendingNavigationIntent::Prev, true)
+        if let Some(target) = self.manga_navigation_target(false) {
+            self.request_load_path(target)?;
+            self.last_navigation_at = Some(Instant::now());
+            return Ok(());
+        }
+        self.request_navigation(FilesystemCommand::Prev {
+            request_id: 0,
+            policy: self.end_of_folder,
+        })?;
+        self.last_navigation_at = Some(Instant::now());
+        Ok(())
     }
 
     pub(crate) fn first_image(&mut self) -> Result<(), Box<dyn Error>> {
         self.cancel_pending_single_click_navigation();
-        if self.navigation_transition_in_flight() {
-            self.pending_navigation_intent = Some(PendingNavigationIntent::First);
+        if !self.can_trigger_navigation() {
             return Ok(());
         }
-        self.dispatch_navigation_intent(PendingNavigationIntent::First, true)
+        self.request_navigation(FilesystemCommand::First { request_id: 0 })?;
+        self.last_navigation_at = Some(Instant::now());
+        Ok(())
     }
 
     pub(crate) fn last_image(&mut self) -> Result<(), Box<dyn Error>> {
         self.cancel_pending_single_click_navigation();
-        if self.navigation_transition_in_flight() {
-            self.pending_navigation_intent = Some(PendingNavigationIntent::Last);
+        if !self.can_trigger_navigation() {
             return Ok(());
         }
-        self.dispatch_navigation_intent(PendingNavigationIntent::Last, true)
+        self.request_navigation(FilesystemCommand::Last { request_id: 0 })?;
+        self.last_navigation_at = Some(Instant::now());
+        Ok(())
     }
 
     fn can_trigger_navigation(&self) -> bool {
@@ -1793,77 +1504,8 @@ impl ViewerApp {
             .unwrap_or(true)
     }
 
-    fn navigation_transition_in_flight(&self) -> bool {
-        self.active_request.is_some()
-            || self.active_fs_request_id.is_some()
-            || self.active_fs_input_request_id.is_some()
-    }
-
-    fn dispatch_navigation_intent(
-        &mut self,
-        intent: PendingNavigationIntent,
-        respect_repeat_interval: bool,
-    ) -> Result<(), Box<dyn Error>> {
-        if respect_repeat_interval && !self.can_trigger_navigation() {
-            return Ok(());
-        }
-
-        match intent {
-            PendingNavigationIntent::Next => {
-                if let Some(target) = self.manga_navigation_target(true) {
-                    self.request_load_path(target)?;
-                } else {
-                    self.request_navigation(FilesystemCommand::Next {
-                        request_id: 0,
-                        policy: self.end_of_folder,
-                    })?;
-                }
-            }
-            PendingNavigationIntent::Prev => {
-                if let Some(target) = self.manga_navigation_target(false) {
-                    self.request_load_path(target)?;
-                } else {
-                    self.request_navigation(FilesystemCommand::Prev {
-                        request_id: 0,
-                        policy: self.end_of_folder,
-                    })?;
-                }
-            }
-            PendingNavigationIntent::First => {
-                self.request_navigation(FilesystemCommand::First { request_id: 0 })?;
-            }
-            PendingNavigationIntent::Last => {
-                self.request_navigation(FilesystemCommand::Last { request_id: 0 })?;
-            }
-        }
-        self.last_navigation_at = Some(Instant::now());
-        Ok(())
-    }
-
-    fn drain_pending_navigation_intent(&mut self) {
-        if self.navigation_transition_in_flight() {
-            return;
-        }
-        let Some(intent) = self.pending_navigation_intent.take() else {
-            return;
-        };
-        let _ = self.dispatch_navigation_intent(intent, false);
-    }
-
-    fn clear_active_filesystem_request(
-        &mut self,
-        request_id: u64,
-    ) -> Option<ActiveFilesystemRequestKind> {
-        if self.active_fs_request_id != Some(request_id) {
-            return None;
-        }
-        self.active_fs_request_id = None;
-        self.active_fs_request_kind.take()
-    }
-
     pub(crate) fn request_load_path(&mut self, path: PathBuf) -> Result<(), Box<dyn Error>> {
-        let (navigation_path, load_path) = resolve_requested_load_target(&path);
-        self.request_load_target(navigation_path, load_path)
+        self.request_load_target(path.clone(), path)
     }
 
     pub(crate) fn request_load_target(
@@ -1871,16 +1513,16 @@ impl ViewerApp {
         navigation_path: PathBuf,
         load_request_path: PathBuf,
     ) -> Result<(), Box<dyn Error>> {
-        let branch_changed = navigation_branch_path(&self.current_navigation_path)
-            != navigation_branch_path(&navigation_path);
+        let branch_changed =
+            navigation_branch_path(&self.current_navigation_path) != navigation_branch_path(&navigation_path);
         let switching_image = self.current_navigation_path != navigation_path;
         if branch_changed {
             self.clear_manga_companion();
         }
+        self.invalidate_preload();
         if self.try_take_preloaded(&navigation_path) {
             return Ok(());
         }
-        self.invalidate_preload();
         if switching_image {
             self.zoom_factor = 1.0;
             self.zoom = 1.0;
@@ -1888,43 +1530,25 @@ impl ViewerApp {
         if branch_changed {
             self.show_loading_texture(true); // フォルダ変わった時だけリセット
             self.clear_current_image_display();
-        }
-        //        self.show_loading_texture(branch_changed);
-        //        self.clear_current_image_display();
+        } 
+//        self.show_loading_texture(branch_changed);
+//        self.clear_current_image_display();
         let request_id = self.alloc_request_id();
         self.active_request = Some(ActiveRenderRequest::Load(request_id));
         self.pending_navigation_path = Some(navigation_path.clone());
-        if !should_defer_filer_sync_for_navigation(&navigation_path, Some(&load_request_path)) {
-            self.maybe_sync_visible_filer_with_current_path();
-        } else {
-            self.filer_needs_sync = true;
-        }
         self.pending_fit_recalc = !matches!(self.render_options.zoom_option, ZoomOption::None);
         self.overlay
             .set_loading_message(format!("Loading {}", navigation_path.display()));
         let load_zoom = if switching_image { 1.0 } else { self.zoom };
-        if let Some(companion_path) = self.manga_companion_candidate_for_path(&navigation_path) {
-            self.worker_tx
-                .send(RenderCommand::LoadSpread {
-                    request_id,
-                    path: load_request_path,
-                    companion_path,
-                    zoom: load_zoom,
-                    method: self.render_options.zoom_method,
-                    scale_mode: self.render_options.scale_mode,
-                })
-                .map_err(worker_send_error)?;
-        } else {
-            self.worker_tx
-                .send(RenderCommand::LoadPath {
-                    request_id,
-                    path: load_request_path,
-                    zoom: load_zoom,
-                    method: self.render_options.zoom_method,
-                    scale_mode: self.render_options.scale_mode,
-                })
-                .map_err(worker_send_error)?;
-        }
+        self.worker_tx
+            .send(RenderCommand::LoadPath {
+                request_id,
+                path: load_request_path,
+                zoom: load_zoom,
+                method: self.render_options.zoom_method,
+                scale_mode: self.render_options.scale_mode,
+            })
+            .map_err(worker_send_error)?;
         Ok(())
     }
 
@@ -2006,38 +1630,18 @@ impl ViewerApp {
         self.preloaded_load_path = None;
         self.preloaded_source = None;
         self.preloaded_rendered = None;
-        self.preloaded_companion_navigation_path = None;
-        self.preloaded_companion_source = None;
-        self.preloaded_companion_rendered = None;
-        self.preloaded_companion_texture = None;
-        self.preloaded_companion_texture_display_scale = 1.0;
         self.next_texture = None;
         self.next_texture_display_scale = 1.0;
     }
 
     fn spawn_navigation_workers(&mut self) {
-        let shared_cache = self
-            .shared_filesystem_cache
-            .get_or_insert_with(|| {
-                new_shared_filesystem_cache(self.navigation_sort, self.filer.archive_mode)
-            })
-            .clone();
-        let shared_browser_state = self
-            .shared_browser_worker_state
-            .get_or_insert_with(new_shared_browser_worker_state)
-            .clone();
         if self.fs_tx.is_none() || self.fs_rx.is_none() {
-            let (tx, rx) = spawn_filesystem_worker(
-                self.navigation_sort,
-                self.filer.archive_mode,
-                shared_cache.clone(),
-                shared_browser_state.clone(),
-            );
+            let (tx, rx) = spawn_filesystem_worker(self.navigation_sort);
             self.fs_tx = Some(tx);
             self.fs_rx = Some(rx);
         }
         if self.filer_tx.is_none() || self.filer_rx.is_none() {
-            let (tx, rx) = spawn_browser_query_worker(shared_cache, shared_browser_state);
+            let (tx, rx) = spawn_filer_worker();
             self.filer_tx = Some(tx);
             self.filer_rx = Some(rx);
         }
@@ -2056,31 +1660,10 @@ impl ViewerApp {
         };
         let request_id = self.alloc_fs_request_id();
         self.active_fs_request_id = Some(request_id);
-        self.active_fs_request_kind = Some(ActiveFilesystemRequestKind::Init);
         self.overlay
             .set_loading_message(format!("Scanning {}", path.display()));
         fs_tx
             .send(FilesystemCommand::Init { request_id, path })
-            .map_err(filesystem_send_error)?;
-        Ok(())
-    }
-
-    pub(crate) fn request_source_input(&mut self, input: PathBuf) -> Result<(), Box<dyn Error>> {
-        self.spawn_navigation_workers();
-        let Some(fs_tx) = self.fs_tx.clone() else {
-            return Ok(());
-        };
-        if let Some(active_request_id) = self.active_fs_input_request_id.take() {
-            let _ = fs_tx.send(FilesystemCommand::CancelSourceInput {
-                request_id: active_request_id,
-            });
-        }
-        let request_id = self.alloc_fs_request_id();
-        self.active_fs_input_request_id = Some(request_id);
-        self.overlay
-            .set_loading_message(format!("Opening {}", input.display()));
-        fs_tx
-            .send(FilesystemCommand::ResolveSourceInput { request_id, input })
             .map_err(filesystem_send_error)?;
         Ok(())
     }
@@ -2101,7 +1684,6 @@ impl ViewerApp {
         };
         let request_id = self.alloc_fs_request_id();
         self.active_fs_request_id = Some(request_id);
-        self.active_fs_request_kind = Some(ActiveFilesystemRequestKind::Navigation);
         command = match command {
             FilesystemCommand::Init { path, .. } => FilesystemCommand::Init { request_id, path },
             FilesystemCommand::SetCurrent { path, .. } => {
@@ -2115,23 +1697,6 @@ impl ViewerApp {
             }
             FilesystemCommand::First { .. } => FilesystemCommand::First { request_id },
             FilesystemCommand::Last { .. } => FilesystemCommand::Last { request_id },
-            FilesystemCommand::OpenBrowserDirectory {
-                dir,
-                selected,
-                options,
-                ..
-            } => FilesystemCommand::OpenBrowserDirectory {
-                request_id,
-                dir,
-                selected,
-                options,
-            },
-            FilesystemCommand::ResolveSourceInput { input, .. } => {
-                FilesystemCommand::ResolveSourceInput { request_id, input }
-            }
-            FilesystemCommand::CancelSourceInput { .. } => {
-                FilesystemCommand::CancelSourceInput { request_id }
-            }
         };
         self.overlay.set_loading_message("Scanning folder...");
         fs_tx.send(command).map_err(filesystem_send_error)?;
@@ -2143,7 +1708,6 @@ impl ViewerApp {
         path: Option<PathBuf>,
         source: LoadedImage,
         rendered: LoadedImage,
-        companion: Option<(PathBuf, LoadedImage, LoadedImage)>,
     ) {
         let previous_navigation_path = self.current_navigation_path.clone();
         if let Some(pending_navigation_path) = self.pending_navigation_path.take() {
@@ -2177,7 +1741,7 @@ impl ViewerApp {
                     path: self.current_navigation_path.clone(),
                 });
             }
-            self.maybe_sync_visible_filer_with_current_path();
+            self.sync_filer_directory_with_current_path();
         }
         self.source = source;
         self.rendered = rendered;
@@ -2189,10 +1753,7 @@ impl ViewerApp {
         self.last_frame_at = Instant::now();
         self.active_request = None;
 
-        let source_size = vec2(
-            self.source.canvas.width() as f32,
-            self.source.canvas.height() as f32,
-        );
+        let source_size = vec2(self.source.canvas.width() as f32, self.source.canvas.height() as f32);
         let defer_precise_display =
             self.maybe_defer_precise_display(source_size, loaded_path.as_deref());
         if defer_precise_display {
@@ -2211,13 +1772,6 @@ impl ViewerApp {
                 self.defer_initial_filesystem_sync();
             }
         }
-        self.refresh_manga_targets();
-        if let Some((navigation_path, source, rendered)) = companion {
-            self.apply_loaded_companion(navigation_path, source, rendered);
-        } else {
-            let egui_ctx = self.egui_ctx.clone();
-            self.sync_manga_companion(&egui_ctx);
-        }
         self.schedule_preload();
         if self.pending_resize_after_load {
             self.pending_resize_after_load = false;
@@ -2230,12 +1784,7 @@ impl ViewerApp {
 
     fn next_preload_candidate(&self) -> Option<PathBuf> {
         let step = if self.manga_spread_active() { 2 } else { 1 };
-        adjacent_entry(
-            &self.current_navigation_path,
-            self.navigation_sort,
-            self.filer.archive_mode,
-            step,
-        )
+        adjacent_entry(&self.current_navigation_path, self.navigation_sort, step)
     }
 
     fn schedule_preload(&mut self) {
@@ -2245,27 +1794,13 @@ impl ViewerApp {
         if !self.navigator_ready {
             return;
         }
-        self.refresh_manga_targets();
-        let desired_companion = self.desired_manga_companion_path();
-        if should_defer_preload_for_manga_low_io(
-            self.options.manga_mode,
-            &self.current_navigation_path,
-            desired_companion.as_deref(),
-            self.companion_rendered.is_some(),
-        ) {
+        if archive_prefers_low_io(&self.current_navigation_path) {
             return;
         }
         let Some(path) = self.next_preload_candidate() else {
             return;
         };
-        if !should_allow_preload_for_path(&self.current_navigation_path, &path) {
-            return;
-        }
-        if desired_companion
-            .as_ref()
-            .is_some_and(|companion| companion == &path)
-            && (self.companion_active_request.is_some() || self.companion_rendered.is_none())
-        {
+        if archive_prefers_low_io(&path) {
             return;
         }
         if self.preloaded_navigation_path.as_ref() == Some(&path)
@@ -2276,29 +1811,21 @@ impl ViewerApp {
         let request_id = self.alloc_preload_request_id();
         self.active_preload_request_id = Some(request_id);
         self.pending_preload_navigation_path = Some(path.clone());
-        if let Some(companion_path) = self.manga_companion_candidate_for_path(&path) {
-            let _ = self.preload_tx.send(RenderCommand::LoadSpread {
-                request_id,
-                path,
-                companion_path,
-                zoom: self.zoom,
-                method: self.render_options.zoom_method,
-                scale_mode: self.render_options.scale_mode,
-            });
-        } else {
-            let _ = self.preload_tx.send(RenderCommand::LoadPath {
-                request_id,
-                path,
-                zoom: self.zoom,
-                method: self.render_options.zoom_method,
-                scale_mode: self.render_options.scale_mode,
-            });
-        }
+        let _ = self.preload_tx.send(RenderCommand::LoadPath {
+            request_id,
+            path,
+            zoom: self.zoom,
+            method: self.render_options.zoom_method,
+            scale_mode: self.render_options.scale_mode,
+        });
     }
 
     fn try_take_preloaded(&mut self, path: &std::path::Path) -> bool {
-        let matches_navigation =
-            preloaded_navigation_matches(self.preloaded_navigation_path.as_deref(), path);
+        let matches_navigation = self
+            .preloaded_navigation_path
+            .as_ref()
+            .map(|cached| cached == path)
+            .unwrap_or(false);
         if !matches_navigation {
             return false;
         }
@@ -2316,15 +1843,14 @@ impl ViewerApp {
             }
             self.pending_navigation_path = Some(path.to_path_buf());
             self.overlay.clear_loading_message();
-            self.apply_loaded_result(load_path, source, rendered, None);
+            self.apply_loaded_result(load_path, source, rendered);
             return true;
         }
         false
     }
 
     fn respawn_render_worker(&mut self) {
-        let (worker_tx, worker_rx, worker_join) =
-            spawn_render_worker(self.source.clone(), RenderWorkerPriority::Primary);
+        let (worker_tx, worker_rx, worker_join) = spawn_render_worker(self.source.clone());
         self.worker_tx = worker_tx;
         self.worker_rx = worker_rx;
         self.worker_join = Some(worker_join);
@@ -2336,7 +1862,7 @@ impl ViewerApp {
             .companion_source
             .clone()
             .unwrap_or_else(|| self.source.clone());
-        let (tx, rx, join) = spawn_render_worker(seed, RenderWorkerPriority::Companion);
+        let (tx, rx, join) = spawn_render_worker(seed);
         self.companion_tx = tx;
         self.companion_rx = rx;
         self.companion_join = Some(join);
@@ -2344,8 +1870,7 @@ impl ViewerApp {
     }
 
     fn respawn_preload_worker(&mut self) {
-        let (tx, rx, join) =
-            spawn_render_worker(self.source.clone(), RenderWorkerPriority::Preload);
+        let (tx, rx, join) = spawn_render_worker(self.source.clone());
         self.preload_tx = tx;
         self.preload_rx = rx;
         self.preload_join = Some(join);
@@ -2353,55 +1878,26 @@ impl ViewerApp {
     }
 
     pub(crate) fn respawn_filesystem_worker(&mut self) {
-        let shared_cache = self
-            .shared_filesystem_cache
-            .get_or_insert_with(|| {
-                new_shared_filesystem_cache(self.navigation_sort, self.filer.archive_mode)
-            })
-            .clone();
-        let shared_browser_state = self
-            .shared_browser_worker_state
-            .get_or_insert_with(new_shared_browser_worker_state)
-            .clone();
-        let (tx, rx) = spawn_filesystem_worker(
-            self.navigation_sort,
-            self.filer.archive_mode,
-            shared_cache,
-            shared_browser_state,
-        );
+        let (tx, rx) = spawn_filesystem_worker(self.navigation_sort);
         self.fs_tx = Some(tx);
         self.fs_rx = Some(rx);
         self.navigator_ready = false;
         self.active_fs_request_id = None;
-        self.active_fs_request_kind = None;
-        self.active_fs_input_request_id = None;
         let _ = self.init_filesystem(self.current_navigation_path.clone());
     }
 
     fn respawn_filer_worker(&mut self) {
-        let shared_cache = self
-            .shared_filesystem_cache
-            .get_or_insert_with(|| {
-                new_shared_filesystem_cache(self.navigation_sort, self.filer.archive_mode)
-            })
-            .clone();
-        let shared_browser_state = self
-            .shared_browser_worker_state
-            .get_or_insert_with(new_shared_browser_worker_state)
-            .clone();
-        let (tx, rx) = spawn_browser_query_worker(shared_cache, shared_browser_state);
+        let (tx, rx) = spawn_filer_worker();
         self.filer_tx = Some(tx);
         self.filer_rx = Some(rx);
-        self.filer.snapshot.clear_pending_request();
-        self.filer.mark_query_options_dirty();
+        self.filer.pending_request_id = None;
         if let Some(dir) = self
             .filer
-            .snapshot
             .directory
             .clone()
             .or_else(|| self.current_directory())
         {
-            self.request_filer_directory(dir, self.filer.snapshot.selected.clone());
+            self.request_filer_directory(dir, self.filer.selected.clone());
         }
     }
 
@@ -2431,37 +1927,7 @@ impl ViewerApp {
                     if !request_matches {
                         continue;
                     }
-                    self.apply_loaded_result(path, source, rendered, None);
-                }
-                Ok(RenderResult::LoadedSpread {
-                    request_id,
-                    path,
-                    source,
-                    rendered,
-                    companion,
-                }) => {
-                    let Some(active_request) = self.active_request else {
-                        continue;
-                    };
-                    let request_matches = match active_request {
-                        ActiveRenderRequest::Load(active_id)
-                        | ActiveRenderRequest::Resize(active_id) => active_id == request_id,
-                    };
-                    if !request_matches {
-                        continue;
-                    }
-                    let companion = companion.map(|(_, source, rendered)| {
-                        let navigation_base = self
-                            .pending_navigation_path
-                            .as_deref()
-                            .unwrap_or(self.current_navigation_path.as_path());
-                        let navigation_path = self
-                            .manga_companion_candidate_for_path(navigation_base)
-                            .or_else(|| self.desired_manga_companion_path())
-                            .unwrap_or_else(|| path.clone());
-                        (navigation_path, source, rendered)
-                    });
-                    self.apply_loaded_result(Some(path), source, rendered, companion);
+                    self.apply_loaded_result(path, source, rendered);
                 }
                 Ok(RenderResult::Failed {
                     request_id,
@@ -2478,7 +1944,8 @@ impl ViewerApp {
                     if !request_matches {
                         continue;
                     }
-                    let failed_during_load = matches!(active_request, ActiveRenderRequest::Load(_));
+                    let failed_during_load =
+                        matches!(active_request, ActiveRenderRequest::Load(_));
                     self.pending_navigation_path = None;
                     let label = path
                         .as_ref()
@@ -2530,55 +1997,13 @@ impl ViewerApp {
                     self.active_preload_request_id = None;
                     self.preloaded_navigation_path = self.pending_preload_navigation_path.take();
                     self.preloaded_load_path = path;
-                    let texture_name =
-                        self.texture_name_for_path(self.preloaded_load_path.as_deref());
+                    let texture_name = self.texture_name_for_path(self.preloaded_load_path.as_deref());
                     let (texture, display_scale) =
                         self.build_texture_from_canvas(&texture_name, rendered.frame_canvas(0));
                     self.next_texture = Some(texture);
                     self.next_texture_display_scale = display_scale;
                     self.preloaded_source = Some(source);
                     self.preloaded_rendered = Some(rendered);
-                }
-                Ok(RenderResult::LoadedSpread {
-                    request_id,
-                    path,
-                    source,
-                    rendered,
-                    companion,
-                }) => {
-                    if self.active_preload_request_id != Some(request_id) {
-                        continue;
-                    }
-                    self.active_preload_request_id = None;
-                    self.preloaded_navigation_path = self.pending_preload_navigation_path.take();
-                    self.preloaded_load_path = Some(path);
-                    let texture_name =
-                        self.texture_name_for_path(self.preloaded_load_path.as_deref());
-                    let (texture, display_scale) =
-                        self.build_texture_from_canvas(&texture_name, rendered.frame_canvas(0));
-                    self.next_texture = Some(texture);
-                    self.next_texture_display_scale = display_scale;
-                    self.preloaded_source = Some(source);
-                    self.preloaded_rendered = Some(rendered);
-                    if let Some((companion_path, companion_source, companion_rendered)) = companion
-                    {
-                        let texture_name = self.texture_name_for_path(Some(&companion_path));
-                        let (texture, display_scale) = self.build_texture_from_canvas(
-                            &texture_name,
-                            companion_rendered.frame_canvas(0),
-                        );
-                        self.preloaded_companion_navigation_path = Some(companion_path);
-                        self.preloaded_companion_source = Some(companion_source);
-                        self.preloaded_companion_rendered = Some(companion_rendered);
-                        self.preloaded_companion_texture = Some(texture);
-                        self.preloaded_companion_texture_display_scale = display_scale;
-                    } else {
-                        self.preloaded_companion_navigation_path = None;
-                        self.preloaded_companion_source = None;
-                        self.preloaded_companion_rendered = None;
-                        self.preloaded_companion_texture = None;
-                        self.preloaded_companion_texture_display_scale = 1.0;
-                    }
                 }
                 Ok(RenderResult::Failed { request_id, .. }) => {
                     if self.active_preload_request_id == Some(request_id) {
@@ -2588,11 +2013,6 @@ impl ViewerApp {
                         self.preloaded_load_path = None;
                         self.preloaded_source = None;
                         self.preloaded_rendered = None;
-                        self.preloaded_companion_navigation_path = None;
-                        self.preloaded_companion_source = None;
-                        self.preloaded_companion_rendered = None;
-                        self.preloaded_companion_texture = None;
-                        self.preloaded_companion_texture_display_scale = 1.0;
                         self.next_texture = None;
                         self.next_texture_display_scale = 1.0;
                     }
@@ -2663,7 +2083,6 @@ impl ViewerApp {
                             !matches!(self.render_options.zoom_option, ZoomOption::None);
                     }
                     self.companion_active_request = None;
-                    self.schedule_preload();
                 }
                 Ok(RenderResult::Failed { request_id, .. }) => {
                     let Some(active_request) = self.companion_active_request else {
@@ -2680,7 +2099,6 @@ impl ViewerApp {
                         self.companion_active_request = None;
                     }
                 }
-                Ok(RenderResult::LoadedSpread { .. }) => continue,
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     self.companion_source = None;
@@ -2708,8 +2126,9 @@ impl ViewerApp {
                     navigation_path,
                     load_path,
                 }) => {
-                    if self.clear_active_filesystem_request(request_id).is_some() {
+                    if self.active_fs_request_id == Some(request_id) {
                         self.navigator_ready = true;
+                        self.active_fs_request_id = None;
                         self.startup_phase = StartupPhase::MultiViewer;
                         match (navigation_path, load_path) {
                             (Some(navigation_path), Some(load_path)) => {
@@ -2741,7 +2160,7 @@ impl ViewerApp {
                     navigation_path,
                     load_path,
                 }) => {
-                    if self.clear_active_filesystem_request(request_id).is_some() {
+                    if self.active_fs_request_id == Some(request_id) {
                         self.empty_mode = false;
                         self.startup_phase = StartupPhase::MultiViewer;
                         if self.current_navigation_path != navigation_path
@@ -2749,48 +2168,18 @@ impl ViewerApp {
                         {
                             let _ = self.request_load_target(navigation_path, load_path);
                         }
+                        self.active_fs_request_id = None;
                     }
                 }
                 Ok(FilesystemResult::NoPath { request_id }) => {
-                    if let Some(kind) = self.clear_active_filesystem_request(request_id) {
+                    if self.active_fs_request_id == Some(request_id) {
                         self.startup_phase = StartupPhase::MultiViewer;
-                        if should_open_filer_for_no_path(Some(kind)) {
-                            self.empty_mode = true;
-                            self.overlay
-                                .set_loading_message("No displayable file found");
-                            self.show_filer = true;
-                        } else if self.active_request.is_none() {
-                            self.overlay.clear_loading_message();
-                        }
-                    }
-                }
-                Ok(FilesystemResult::InputPathResolved { request_id, path }) => {
-                    if self.active_fs_input_request_id == Some(request_id) {
-                        self.active_fs_input_request_id = None;
-                        self.empty_mode = false;
-                        self.pending_fit_recalc = true;
-                        let _ = self.request_load_path(path);
-                    }
-                }
-                Ok(FilesystemResult::InputPathFailed { request_id, input }) => {
-                    if self.active_fs_input_request_id == Some(request_id) {
-                        self.active_fs_input_request_id = None;
                         self.overlay
-                            .set_loading_message(format!("Failed to open {}", input.display()));
+                            .set_loading_message("No displayable file found");
+                        self.show_filer = true;
+                        self.active_fs_request_id = None;
                     }
                 }
-                Ok(FilesystemResult::InputPathCancelled { request_id, input }) => {
-                    if self.active_fs_input_request_id == Some(request_id) {
-                        self.active_fs_input_request_id = None;
-                        self.overlay
-                            .set_loading_message(format!("Cancelled opening {}", input.display()));
-                    }
-                }
-                Ok(FilesystemResult::BrowserReset { .. })
-                | Ok(FilesystemResult::BrowserAppend { .. })
-                | Ok(FilesystemResult::ThumbnailHint { .. })
-                | Ok(FilesystemResult::BrowserFinish { .. })
-                | Ok(FilesystemResult::BrowserFailed { .. }) => {}
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     self.overlay
@@ -2814,34 +2203,46 @@ impl ViewerApp {
                 None => return,
             };
             match result {
-                Ok(result) => {
-                    if let FilesystemResult::ThumbnailHint {
-                        request_id: _,
-                        paths,
-                        max_side,
-                    } = &result
-                    {
-                        if should_defer_thumbnail_io(
-                            &self.current_navigation_path,
-                            self.active_request.is_some(),
-                            self.companion_active_request.is_some(),
-                            self.active_preload_request_id.is_some(),
-                        ) {
-                            continue;
-                        }
-                        self.queue_thumbnail_hints(paths, *max_side);
+                Ok(FilerResult::Reset {
+                    request_id,
+                    directory,
+                    selected,
+                }) => {
+                    if self.filer.pending_request_id != Some(request_id) {
                         continue;
                     }
-                    let previous_selected = self.filer.snapshot.selected.clone();
-                    let applied = self.filer.snapshot.apply_query_result(
-                        result,
-                        &self.current_navigation_path,
-                        self.pending_navigation_path.as_deref(),
-                        Some(&self.current_path),
+                    self.filer.directory = Some(directory);
+                    self.filer.entries.clear();
+                    self.filer.selected = self.selected_path_for_filer_directory(
+                        self.filer.directory.as_deref().unwrap(),
+                        selected,
                     );
-                    if applied && self.filer.snapshot.selected != previous_selected {
-                        self.pending_filer_scroll_to = self.filer.snapshot.selected.clone();
+                }
+                Ok(FilerResult::Append {
+                    request_id,
+                    entries,
+                }) => {
+                    if self.filer.pending_request_id != Some(request_id) {
+                        continue;
                     }
+                    self.filer.entries.extend(entries);
+                }
+                Ok(FilerResult::Snapshot {
+                    request_id,
+                    directory,
+                    entries,
+                    selected,
+                }) => {
+                    if self.filer.pending_request_id != Some(request_id) {
+                        continue;
+                    }
+                    self.filer.pending_request_id = None;
+                    self.filer.directory = Some(directory);
+                    self.filer.entries = entries;
+                    self.filer.selected = self.selected_path_for_filer_directory(
+                        self.filer.directory.as_deref().unwrap(),
+                        selected,
+                    );
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
@@ -2862,7 +2263,6 @@ impl ViewerApp {
                 Ok(ThumbnailResult::Ready {
                     _request_id: _,
                     path,
-                    max_side,
                     image,
                 }) => {
                     self.thumbnail_pending.remove(&path);
@@ -2871,13 +2271,11 @@ impl ViewerApp {
                         image,
                         TextureOptions::LINEAR,
                     );
-                    self.thumbnail_cache
-                        .insert(path, CachedThumbnail { texture, max_side });
+                    self.thumbnail_cache.insert(path, texture);
                 }
                 Ok(ThumbnailResult::Failed {
                     _request_id: _,
                     path,
-                    _max_side: _,
                     ..
                 }) => {
                     self.thumbnail_pending.remove(&path);
@@ -2892,46 +2290,21 @@ impl ViewerApp {
     }
 
     pub(crate) fn ensure_thumbnail(&mut self, path: &std::path::Path, max_side: u32) {
-        if should_defer_thumbnail_io(
-            &self.current_navigation_path,
-            self.active_request.is_some(),
-            self.companion_active_request.is_some(),
-            self.active_preload_request_id.is_some(),
-        ) {
-            return;
-        }
         self.spawn_navigation_workers();
         let Some(thumbnail_tx) = self.thumbnail_tx.clone() else {
             return;
         };
-        if self
-            .thumbnail_cache
-            .get(path)
-            .is_some_and(|cached| cached.max_side >= max_side)
-        {
-            return;
-        }
-        if self
-            .thumbnail_pending
-            .get(path)
-            .is_some_and(|pending| *pending >= max_side)
-        {
+        if self.thumbnail_cache.contains_key(path) || self.thumbnail_pending.contains(path) {
             return;
         }
         let request_id = self.alloc_thumbnail_request_id();
         let path = path.to_path_buf();
-        self.thumbnail_pending.insert(path.clone(), max_side);
+        self.thumbnail_pending.insert(path.clone());
         let _ = thumbnail_tx.send(ThumbnailCommand::Generate {
             request_id,
             path,
             max_side,
         });
-    }
-
-    fn queue_thumbnail_hints(&mut self, paths: &[PathBuf], max_side: u32) {
-        for path in paths {
-            self.ensure_thumbnail(path, max_side);
-        }
     }
 
     fn sync_window_state(&mut self, ctx: &egui::Context) {
@@ -2977,9 +2350,7 @@ impl eframe::App for ViewerApp {
         self.poll_filer_worker();
         self.poll_thumbnail_worker();
         self.poll_save_result();
-        self.poll_deferred_filer_sync();
-        self.drain_pending_navigation_intent();
-        self.sync_manga_companion_if_targets_changed(ctx);
+        self.sync_manga_companion(ctx);
         self.handle_keyboard(ctx);
         self.poll_pending_pointer_actions();
         self.settings_ui(ctx);
@@ -3004,7 +2375,6 @@ impl eframe::App for ViewerApp {
 
         self.frame_counter += 1;
         self.poll_deferred_filesystem_sync();
-        self.drain_pending_navigation_intent();
         self.update_animation(ctx);
 
         let panel = egui::CentralPanel::default().frame(egui::Frame::NONE);
@@ -3021,7 +2391,6 @@ impl eframe::App for ViewerApp {
 
             if startup_viewport_settling {
                 self.last_viewport_size = viewport;
-                self.sync_manga_companion_if_targets_changed(ctx);
             } else if !self.empty_mode
                 && (viewport_size_changed(viewport, self.last_viewport_size)
                     || self.pending_fit_recalc)
@@ -3029,7 +2398,6 @@ impl eframe::App for ViewerApp {
             {
                 self.last_viewport_size = viewport;
                 self.pending_fit_recalc = false;
-                self.sync_manga_companion_if_targets_changed(ctx);
 
                 let new_zoom = calc_fit_zoom(
                     viewport,
@@ -3056,7 +2424,8 @@ impl eframe::App for ViewerApp {
                     let companion_draw_size = companion.map(|(companion_rendered, _)| {
                         vec2(
                             companion_rendered.canvas.width() as f32 * self.companion_draw_scale(),
-                            companion_rendered.canvas.height() as f32 * self.companion_draw_scale(),
+                            companion_rendered.canvas.height() as f32
+                                * self.companion_draw_scale(),
                         )
                     });
                     let total_draw_size = if spread_active {
@@ -3177,200 +2546,4 @@ impl eframe::App for ViewerApp {
 
 fn filesystem_send_error(err: mpsc::SendError<FilesystemCommand>) -> Box<dyn Error> {
     Box::new(std::io::Error::other(err.to_string()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        ActiveFilesystemRequestKind, adjacent_same_branch_navigation_target,
-        manga_companion_matches_preloaded, preloaded_navigation_matches,
-        resolve_requested_load_target, same_navigation_branch, should_allow_preload_for_path,
-        should_defer_filer_request_while_loading, should_defer_filer_sync_for_navigation,
-        should_defer_preload_for_manga_low_io, should_defer_thumbnail_io,
-        should_open_filer_for_no_path,
-    };
-    use crate::filesystem::{
-        build_zip_virtual_children, resolve_virtual_zip_child, zip_index_is_available,
-    };
-    use crate::options::{ArchiveBrowseOption, NavigationSortOption};
-    use std::fs;
-    use std::path::Path;
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use zip::write::SimpleFileOptions;
-
-    fn make_temp_dir() -> std::path::PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("wml2viewer_viewer_{unique}"));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn make_zip_with_entries(path: &Path, names: &[&str]) {
-        let file = fs::File::create(path).unwrap();
-        let mut zip = zip::ZipWriter::new(file);
-        for name in names {
-            zip.start_file(name, SimpleFileOptions::default()).unwrap();
-            use std::io::Write;
-            zip.write_all(b"data").unwrap();
-        }
-        zip.finish().unwrap();
-    }
-
-    #[test]
-    fn preloaded_navigation_match_requires_same_path() {
-        assert!(preloaded_navigation_matches(
-            Some(Path::new(r"F:\archive.zip#001.bmp")),
-            Path::new(r"F:\archive.zip#001.bmp")
-        ));
-        assert!(!preloaded_navigation_matches(
-            Some(Path::new(r"F:\archive.zip#002.bmp")),
-            Path::new(r"F:\archive.zip#001.bmp")
-        ));
-    }
-
-    #[test]
-    fn same_navigation_branch_requires_same_container_or_directory() {
-        assert!(same_navigation_branch(
-            Path::new(r"F:\dir\001.png"),
-            Path::new(r"F:\dir\002.png")
-        ));
-        assert!(!same_navigation_branch(
-            Path::new(r"F:\dir\001.png"),
-            Path::new(r"F:\other\002.png")
-        ));
-    }
-
-    #[test]
-    fn filer_sync_is_deferred_for_archive_virtual_navigation() {
-        assert!(should_defer_filer_sync_for_navigation(
-            Path::new(r"F:\archive.zip\__zipv__\00000000__001.png"),
-            Some(Path::new(r"F:\archive.zip"))
-        ));
-        assert!(!should_defer_filer_sync_for_navigation(
-            Path::new(r"F:\dir\001.png"),
-            Some(Path::new(r"F:\dir\001.png"))
-        ));
-    }
-
-    #[test]
-    fn adjacent_same_branch_navigation_target_works_inside_zip() {
-        let dir = make_temp_dir();
-        let archive = dir.join("pages.zip");
-        make_zip_with_entries(&archive, &["001.png", "002.png"]);
-        let children = build_zip_virtual_children(&archive);
-        assert!(!zip_index_is_available(&archive));
-
-        let next = adjacent_same_branch_navigation_target(
-            &children[0],
-            NavigationSortOption::OsName,
-            ArchiveBrowseOption::Folder,
-            1,
-        );
-
-        assert_eq!(next, Some(children[1].clone()));
-
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn should_allow_preload_for_same_zip_branch_even_when_low_io() {
-        let current = Path::new(r"F:\archive.zip\__zipv__\00000000__001.png");
-        let next = Path::new(r"F:\archive.zip\__zipv__\00000001__002.png");
-        assert!(should_allow_preload_for_path(current, next));
-    }
-
-    #[test]
-    fn filer_request_is_deferred_while_loading_or_navigation_is_active() {
-        assert!(should_defer_filer_request_while_loading(
-            true, false, false, false, false
-        ));
-        assert!(should_defer_filer_request_while_loading(
-            false, true, false, false, false
-        ));
-        assert!(should_defer_filer_request_while_loading(
-            false, false, true, false, false
-        ));
-        assert!(should_defer_filer_request_while_loading(
-            false, false, false, true, false
-        ));
-        assert!(should_defer_filer_request_while_loading(
-            false, false, false, false, true
-        ));
-        assert!(!should_defer_filer_request_while_loading(
-            false, false, false, false, false
-        ));
-    }
-
-    #[test]
-    fn manga_companion_can_reuse_matching_preload() {
-        let companion = Path::new(r"F:\archive.zip\__zipv__\00000001__002.png");
-        let preloaded = Some(Path::new(r"F:\archive.zip\__zipv__\00000001__002.png"));
-        assert!(manga_companion_matches_preloaded(companion, preloaded));
-        assert!(!manga_companion_matches_preloaded(
-            companion,
-            Some(Path::new(r"F:\archive.zip\__zipv__\00000002__003.png"))
-        ));
-    }
-
-    #[test]
-    fn low_io_manga_defers_preload_until_companion_is_ready() {
-        let current = Path::new(r"F:\archive.zip\__zipv__\00000000__001.png");
-        let companion = Some(Path::new(r"F:\archive.zip\__zipv__\00000001__002.png"));
-        assert!(should_defer_preload_for_manga_low_io(
-            true, current, companion, false
-        ));
-        assert!(!should_defer_preload_for_manga_low_io(
-            true, current, companion, true
-        ));
-        assert!(!should_defer_preload_for_manga_low_io(
-            false, current, companion, false
-        ));
-    }
-
-    #[test]
-    fn low_io_archive_defers_thumbnail_work_while_rendering() {
-        let current = Path::new(r"F:\archive.zip\__zipv__\00000000__001.png");
-        assert!(should_defer_thumbnail_io(current, true, false, false));
-        assert!(should_defer_thumbnail_io(current, false, true, false));
-        assert!(should_defer_thumbnail_io(current, false, false, true));
-        assert!(!should_defer_thumbnail_io(current, false, false, false));
-        assert!(!should_defer_thumbnail_io(
-            Path::new(r"F:\dir\001.png"),
-            true,
-            false,
-            false
-        ));
-    }
-
-    #[test]
-    fn startup_no_path_opens_filer_but_navigation_no_path_does_not() {
-        assert!(should_open_filer_for_no_path(Some(
-            ActiveFilesystemRequestKind::Init
-        )));
-        assert!(!should_open_filer_for_no_path(Some(
-            ActiveFilesystemRequestKind::Navigation
-        )));
-        assert!(!should_open_filer_for_no_path(None));
-    }
-
-    #[test]
-    fn request_load_path_resolves_zip_root_to_first_virtual_child() {
-        let dir = make_temp_dir();
-        let archive = dir.join("pages.zip");
-        make_zip_with_entries(&archive, &["001.png", "002.png"]);
-
-        let (navigation_path, load_path) = resolve_requested_load_target(&archive);
-
-        assert_eq!(
-            resolve_virtual_zip_child(&navigation_path),
-            Some((archive.clone(), 0))
-        );
-        assert_eq!(load_path, navigation_path);
-        assert!(!zip_index_is_available(&archive));
-
-        let _ = fs::remove_dir_all(dir);
-    }
 }

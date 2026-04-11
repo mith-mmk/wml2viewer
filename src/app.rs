@@ -3,9 +3,7 @@ use crate::configs::resourses::apply_resources;
 use crate::dependent::plugins::set_runtime_plugin_config;
 use crate::drawers::canvas::Canvas;
 use crate::drawers::image::LoadedImage;
-use crate::filesystem::{
-    is_browser_container, resolve_source_input_path, set_archive_zip_workaround,
-};
+use crate::filesystem::{is_browser_container, set_archive_zip_workaround};
 use crate::options::*;
 use crate::ui::menu::fileviewer::thumbnail::set_thumbnail_workaround;
 use crate::ui::viewer::ViewerApp;
@@ -25,7 +23,6 @@ pub fn run(
     set_thumbnail_workaround(config.runtime.workaround.thumbnail.clone());
     let image_path = image_path
         .unwrap_or(load_startup_path(config_path.as_deref()).unwrap_or(std::env::current_dir()?));
-    let image_path = resolve_source_input_path(&image_path).unwrap_or(image_path);
     let path_exists = image_path.exists();
     let is_container = is_browser_container(&image_path);
     let (navigation_path, start_path, startup_load_path, show_filer_on_start) = if path_exists {

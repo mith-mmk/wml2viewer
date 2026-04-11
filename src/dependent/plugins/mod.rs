@@ -392,7 +392,10 @@ fn module_priority(
     if priorities.is_empty() {
         priorities.push(fallback_priority.max(default_priority(provider_name)));
     }
-    *priorities.iter().max().unwrap_or(&fallback_priority)
+    *priorities
+        .iter()
+        .max()
+        .unwrap_or(&fallback_priority)
 }
 
 fn default_priority(provider_name: &str) -> i32 {
@@ -595,12 +598,7 @@ mod tests {
     }
 
     fn plugin_path(provider: &str) -> PathBuf {
-        repo_root()
-            .join("test")
-            .join("images")
-            .join("external")
-            .join("plugins")
-            .join(provider)
+        repo_root().join("test").join("plugins").join(provider)
     }
 
     #[test]

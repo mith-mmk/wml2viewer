@@ -34,7 +34,6 @@ fn key_name_to_egui(key: &str) -> Option<egui::Key> {
         "Minus" => Some(egui::Key::Minus),
         "Num0" => Some(egui::Key::Num0),
         "Enter" => Some(egui::Key::Enter),
-        "F5" => Some(egui::Key::F5),
         "R" => Some(egui::Key::R),
         "Space" => Some(egui::Key::Space),
         "ArrowRight" => Some(egui::Key::ArrowRight),

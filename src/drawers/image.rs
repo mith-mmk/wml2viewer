@@ -286,10 +286,7 @@ fn compose_animation_frames(
 
     let background = background_rgba(background);
     let mut frames = Vec::with_capacity(layers.len());
-    let mut composited = Canvas::new(base.width(), base.height());
-    for pixel in composited.buffer_mut().chunks_exact_mut(4) {
-        pixel.copy_from_slice(&background);
-    }
+    let mut composited = base.clone();
 
     for layer in layers {
         let previous = composited.clone();
@@ -429,26 +426,17 @@ fn blend_rgba(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_canvas_from_file, load_canvas_from_file_internal};
+    use super::load_canvas_from_file;
     use crate::dependent::plugins::{
         PluginConfig, PluginProviderConfig, discover_plugin_modules, set_runtime_plugin_config,
     };
     use std::path::PathBuf;
-    use wml2::draw::image_from_file;
 
     fn repo_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
             .to_path_buf()
-    }
-
-    fn bundled_test_image_path(name: &str) -> PathBuf {
-        repo_root()
-            .join("test")
-            .join("images")
-            .join("bundled")
-            .join(name)
     }
 
     #[cfg(target_os = "windows")]
@@ -470,33 +458,5 @@ mod tests {
 
         let decoded = load_canvas_from_file(&repo_root().join("samples").join("WML2Viewer.avif"));
         assert!(decoded.is_ok());
-    }
-
-    #[test]
-    fn loads_bundled_webp_sample() {
-        let decoded = load_canvas_from_file(&repo_root().join("samples").join("WML2Viewer.webp"));
-        assert!(decoded.is_ok());
-    }
-
-    #[test]
-    fn bundled_webp_sample_matches_raw_decoder_canvas() {
-        let path = repo_root().join("samples").join("WML2Viewer.webp");
-        let raw = image_from_file(path.to_string_lossy().into_owned()).unwrap();
-        let loaded = load_canvas_from_file_internal(&path).unwrap();
-
-        assert_eq!(loaded.canvas.width() as usize, raw.width);
-        assert_eq!(loaded.canvas.height() as usize, raw.height);
-        assert_eq!(loaded.canvas.buffer(), raw.buffer.as_ref().unwrap());
-    }
-
-    #[test]
-    fn bundled_error_webp_sample_matches_raw_decoder_canvas() {
-        let path = bundled_test_image_path("WML2Viewer_error.webp");
-        let raw = image_from_file(path.to_string_lossy().into_owned()).unwrap();
-        let loaded = load_canvas_from_file_internal(&path).unwrap();
-
-        assert_eq!(loaded.canvas.width() as usize, raw.width);
-        assert_eq!(loaded.canvas.height() as usize, raw.height);
-        assert_eq!(loaded.canvas.buffer(), raw.buffer.as_ref().unwrap());
     }
 }

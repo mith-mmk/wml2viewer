@@ -2,14 +2,9 @@ use crate::drawers::affine::InterpolationAlgorithm;
 use crate::drawers::image::{
     load_canvas_from_bytes_with_hint, load_canvas_from_file, resize_loaded_image,
 };
-use crate::filesystem::{
-    OpenedImageSource, open_image_source_with_cancel, source_prefers_low_io, virtual_image_size,
-};
+use crate::filesystem::{load_virtual_image_bytes, virtual_image_size};
 use crate::options::ThumbnailWorkaroundOptions;
-use crate::ui::render::{
-    RenderWorkerPriority, acquire_low_io_permit, canvas_to_color_image,
-    should_cancel_low_priority_io, snapshot_primary_io_epoch,
-};
+use crate::ui::render::canvas_to_color_image;
 use eframe::egui::ColorImage;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
@@ -29,13 +24,11 @@ pub(crate) enum ThumbnailResult {
     Ready {
         _request_id: u64,
         path: PathBuf,
-        max_side: u32,
         image: ColorImage,
     },
     Failed {
         _request_id: u64,
         path: PathBuf,
-        _max_side: u32,
         _message: String,
     },
 }
@@ -56,34 +49,12 @@ pub(crate) fn spawn_thumbnail_worker() -> (Sender<ThumbnailCommand>, Receiver<Th
                         if should_skip_thumbnail(&path) {
                             return Err("thumbnail suppressed".to_string());
                         }
-                        let primary_epoch_snapshot = snapshot_primary_io_epoch();
-                        let should_cancel =
-                            || should_cancel_low_priority_io(primary_epoch_snapshot);
-                        if should_cancel() {
-                            return Err("thumbnail cancelled".to_string());
-                        }
-                        let low_io_permit = source_prefers_low_io(&path)
-                            .then(|| {
-                                acquire_low_io_permit(RenderWorkerPriority::Preload, &should_cancel)
-                            })
-                            .flatten();
-                        if source_prefers_low_io(&path) && low_io_permit.is_none() {
-                            return Err("thumbnail cancelled".to_string());
-                        }
-                        let loaded = match open_image_source_with_cancel(&path, &should_cancel) {
-                            Some(OpenedImageSource::Bytes {
-                                bytes, hint_path, ..
-                            }) => load_canvas_from_bytes_with_hint(&bytes, Some(&hint_path)),
-                            Some(OpenedImageSource::File { path, .. }) => {
-                                load_canvas_from_file(&path)
-                            }
-                            None => load_canvas_from_file(&path),
+                        let loaded = if let Some(bytes) = load_virtual_image_bytes(&path) {
+                            load_canvas_from_bytes_with_hint(&bytes, Some(&path))
+                        } else {
+                            load_canvas_from_file(&path)
                         }
                         .map_err(|err| err.to_string())?;
-                        drop(low_io_permit);
-                        if should_cancel() {
-                            return Err("thumbnail cancelled".to_string());
-                        }
 
                         let scale = (max_side as f32
                             / loaded.canvas.width().max(loaded.canvas.height()) as f32)
@@ -99,7 +70,6 @@ pub(crate) fn spawn_thumbnail_worker() -> (Sender<ThumbnailCommand>, Receiver<Th
                             let _ = result_tx.send(ThumbnailResult::Ready {
                                 _request_id: request_id,
                                 path,
-                                max_side,
                                 image,
                             });
                         }
@@ -107,7 +77,6 @@ pub(crate) fn spawn_thumbnail_worker() -> (Sender<ThumbnailCommand>, Receiver<Th
                             let _ = result_tx.send(ThumbnailResult::Failed {
                                 _request_id: request_id,
                                 path,
-                                _max_side: max_side,
                                 _message: message,
                             });
                         }
@@ -115,7 +84,6 @@ pub(crate) fn spawn_thumbnail_worker() -> (Sender<ThumbnailCommand>, Receiver<Th
                             let _ = result_tx.send(ThumbnailResult::Failed {
                                 _request_id: request_id,
                                 path,
-                                _max_side: max_side,
                                 _message: "thumbnail worker panicked".to_string(),
                             });
                         }

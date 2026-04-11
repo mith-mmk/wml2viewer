@@ -1,7 +1,4 @@
-#![cfg_attr(
-    all(target_os = "windows", not(debug_assertions)),
-    windows_subsystem = "windows"
-)]
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::env;
 use std::error::Error;
@@ -9,7 +6,7 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use wml2viewer::{app, dependent, filesystem};
+use wml2viewer::{app, dependent};
 
 fn main() -> ExitCode {
     match run() {
@@ -25,10 +22,6 @@ fn run() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
     if args.clean_target.as_deref() == Some("system") {
         dependent::clean_system_integration()?;
-        return Ok(());
-    }
-    if args.clean_target.as_deref() == Some("cache") {
-        filesystem::clean_cache_files()?;
         return Ok(());
     }
     app::run(args.image_path, args.config_path)
@@ -123,6 +116,6 @@ fn usage_error(program: &OsString) -> Box<dyn Error> {
         .to_string_lossy();
     Box::new(io::Error::new(
         io::ErrorKind::InvalidInput,
-        format!("Usage: {program} [--config <path>] [--clean system|cache] [path]"),
+        format!("Usage: {program} [--config <path>] [--clean system] [path]"),
     ))
 }

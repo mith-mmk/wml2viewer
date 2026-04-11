@@ -252,7 +252,6 @@ enum FontSizeConfigFile {
 struct NavigationConfigFile {
     end_of_folder: EndOfFolderConfigFile,
     sort: NavigationSortConfigFile,
-    archive: ArchiveBrowseConfigFile,
 }
 
 impl Default for NavigationConfigFile {
@@ -260,7 +259,6 @@ impl Default for NavigationConfigFile {
         Self {
             end_of_folder: EndOfFolderConfigFile::Recursive,
             sort: NavigationSortConfigFile::OsName,
-            archive: ArchiveBrowseConfigFile::Folder,
         }
     }
 }
@@ -297,14 +295,6 @@ enum NavigationSortConfigFile {
     Name,
     Date,
     Size,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
-enum ArchiveBrowseConfigFile {
-    Folder,
-    Skip,
-    Archiver,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -377,14 +367,11 @@ struct ZipWorkaroundConfigFile {
     local_cache: bool,
 }
 
-const LEGACY_ZIP_WORKAROUND_THRESHOLD_MB: u64 = 256;
-const LEGACY_ZIP_WORKAROUND_LOCAL_CACHE: bool = false;
-
 impl Default for ZipWorkaroundConfigFile {
     fn default() -> Self {
         Self {
-            threshold_mb: 16,
-            local_cache: true,
+            threshold_mb: 256,
+            local_cache: false,
         }
     }
 }
@@ -468,7 +455,6 @@ impl From<ConfigFile> for AppConfig {
         config.storage = value.storage.into();
         config.navigation.end_of_folder = value.navigation.end_of_folder.into();
         config.navigation.sort = value.navigation.sort.into();
-        config.navigation.archive = value.navigation.archive.into();
         config.runtime = value.runtime.into();
         config.runtime.workaround.thumbnail = value.filesystem.thumbnail.into();
         config
@@ -504,7 +490,6 @@ impl ConfigFile {
             navigation: NavigationConfigFile {
                 end_of_folder: value.navigation.end_of_folder.into(),
                 sort: value.navigation.sort.into(),
-                archive: value.navigation.archive.into(),
             },
             runtime: RuntimeConfigFile {
                 current_file: current_path.map(|path| path.to_path_buf()),
@@ -563,11 +548,6 @@ impl From<crate::options::ArchiveWorkaroundOptions> for ArchiveWorkaroundConfigF
 
 impl From<ZipWorkaroundConfigFile> for crate::options::ZipWorkaroundOptions {
     fn from(value: ZipWorkaroundConfigFile) -> Self {
-        if value.threshold_mb == LEGACY_ZIP_WORKAROUND_THRESHOLD_MB
-            && value.local_cache == LEGACY_ZIP_WORKAROUND_LOCAL_CACHE
-        {
-            return Self::default();
-        }
         Self {
             threshold_mb: value.threshold_mb,
             local_cache: value.local_cache,
@@ -967,58 +947,5 @@ impl From<NavigationSortOption> for NavigationSortConfigFile {
             NavigationSortOption::Date => Self::Date,
             NavigationSortOption::Size => Self::Size,
         }
-    }
-}
-
-impl From<ArchiveBrowseConfigFile> for crate::options::ArchiveBrowseOption {
-    fn from(value: ArchiveBrowseConfigFile) -> Self {
-        match value {
-            ArchiveBrowseConfigFile::Folder => Self::Folder,
-            ArchiveBrowseConfigFile::Skip => Self::Skip,
-            ArchiveBrowseConfigFile::Archiver => Self::Archiver,
-        }
-    }
-}
-
-impl From<crate::options::ArchiveBrowseOption> for ArchiveBrowseConfigFile {
-    fn from(value: crate::options::ArchiveBrowseOption) -> Self {
-        match value {
-            crate::options::ArchiveBrowseOption::Folder => Self::Folder,
-            crate::options::ArchiveBrowseOption::Skip => Self::Skip,
-            crate::options::ArchiveBrowseOption::Archiver => Self::Archiver,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        LEGACY_ZIP_WORKAROUND_LOCAL_CACHE, LEGACY_ZIP_WORKAROUND_THRESHOLD_MB,
-        ZipWorkaroundConfigFile,
-    };
-    use crate::options::ZipWorkaroundOptions;
-
-    #[test]
-    fn zip_workaround_config_defaults_match_runtime_defaults() {
-        let config = ZipWorkaroundConfigFile::default();
-        let runtime = ZipWorkaroundOptions::default();
-        assert_eq!(config.threshold_mb, runtime.threshold_mb);
-        assert_eq!(config.local_cache, runtime.local_cache);
-    }
-
-    #[test]
-    fn legacy_zip_workaround_defaults_are_migrated_on_load() {
-        let runtime = ZipWorkaroundOptions::from(ZipWorkaroundConfigFile {
-            threshold_mb: LEGACY_ZIP_WORKAROUND_THRESHOLD_MB,
-            local_cache: LEGACY_ZIP_WORKAROUND_LOCAL_CACHE,
-        });
-        assert_eq!(
-            runtime.threshold_mb,
-            ZipWorkaroundOptions::default().threshold_mb
-        );
-        assert_eq!(
-            runtime.local_cache,
-            ZipWorkaroundOptions::default().local_cache
-        );
     }
 }

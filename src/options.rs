@@ -2,7 +2,6 @@
 ! prelude options
 */
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -10,8 +9,8 @@ pub use crate::configs::resourses::{FontSizePreset, ResourceOptions};
 pub use crate::dependent::plugins::PluginConfig;
 pub use crate::ui::viewer::options::{
     BackgroundStyle, MangaSeparatorOptions, MangaSeparatorStyle, PaneSide, RenderOptions,
-    RenderScaleMode, ViewerOptions, WindowOptions, WindowSize, WindowStartPosition, WindowUiTheme,
-    ZoomOption,
+    RenderScaleMode, ViewerOptions, WindowOptions, WindowSize, WindowStartPosition,
+    WindowUiTheme, ZoomOption,
 };
 
 #[derive(Clone, Default)]
@@ -35,7 +34,6 @@ pub enum ViewerAction {
     ZoomToggle,
     ToggleFullscreen,
     Reload,
-    RefreshFilerDirectory,
     NextImage,
     PrevImage,
     FirstImage,
@@ -98,7 +96,6 @@ fn default_key_mapping() -> HashMap<KeyBinding, ViewerAction> {
     );
     map.insert(KeyBinding::new("Enter"), ViewerAction::ToggleFullscreen);
     map.insert(KeyBinding::new("R").with_shift(), ViewerAction::Reload);
-    map.insert(KeyBinding::new("F5"), ViewerAction::RefreshFilerDirectory);
     map.insert(KeyBinding::new("Space"), ViewerAction::NextImage);
     map.insert(KeyBinding::new("ArrowRight"), ViewerAction::NextImage);
     map.insert(
@@ -123,20 +120,6 @@ fn default_key_mapping() -> HashMap<KeyBinding, ViewerAction> {
     map.insert(KeyBinding::new("F"), ViewerAction::ToggleFiler);
     map.insert(KeyBinding::new("P"), ViewerAction::ToggleSettings);
     map
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{InputOptions, KeyBinding, ViewerAction};
-
-    #[test]
-    fn default_keymap_includes_f5_filer_refresh() {
-        let keymap = InputOptions::default().merged_with_defaults();
-        assert_eq!(
-            keymap.get(&KeyBinding::new("F5")),
-            Some(&ViewerAction::RefreshFilerDirectory)
-        );
-    }
 }
 
 #[derive(Clone, Default)]
@@ -218,7 +201,6 @@ impl Default for ThumbnailWorkaroundOptions {
 pub struct NavigationOptions {
     pub end_of_folder: EndOfFolderOption,
     pub sort: NavigationSortOption,
-    pub archive: ArchiveBrowseOption,
 }
 
 impl Default for NavigationOptions {
@@ -226,12 +208,11 @@ impl Default for NavigationOptions {
         Self {
             end_of_folder: EndOfFolderOption::Recursive,
             sort: NavigationSortOption::OsName,
-            archive: ArchiveBrowseOption::Folder,
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EndOfFolderOption {
     Stop,
     Next,
@@ -239,17 +220,10 @@ pub enum EndOfFolderOption {
     Recursive,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavigationSortOption {
     OsName,
     Name,
     Date,
     Size,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ArchiveBrowseOption {
-    Folder,
-    Skip,
-    Archiver,
 }
