@@ -1,3 +1,4 @@
+use crate::benchlog::BenchLogger;
 use crate::configs::config::{load_app_config, load_startup_path};
 use crate::configs::resourses::apply_resources;
 use crate::dependent::plugins::set_runtime_plugin_config;
@@ -16,6 +17,7 @@ const APP_ICON_PNG: &[u8] = include_bytes!("../resources/wml2viwer.png");
 pub fn run(
     image_path: Option<PathBuf>,
     config_path: Option<PathBuf>,
+    bench_enabled: bool,
 ) -> Result<(), Box<dyn Error>> {
     let config = load_app_config(config_path.as_deref()).unwrap_or_default();
     set_runtime_plugin_config(config.plugins.clone());
@@ -41,6 +43,22 @@ pub fn run(
         )
     } else {
         (image_path.clone(), image_path.clone(), None, true)
+    };
+    let bench_logger = if bench_enabled {
+        let logger = BenchLogger::create()?;
+        logger.log(
+            "app.start",
+            serde_json::json!({
+                "image_path": image_path.display().to_string(),
+                "config_path": config_path.as_ref().map(|path| path.display().to_string()),
+                "show_filer_on_start": show_filer_on_start,
+                "startup_load_path": startup_load_path.as_ref().map(|path| path.display().to_string()),
+                "log_path": logger.path().display().to_string(),
+            }),
+        );
+        Some(logger)
+    } else {
+        None
     };
     let image = blank_image();
     let rendered = image.clone();
@@ -117,6 +135,7 @@ pub fn run(
                 rendered,
                 config,
                 config_path.clone(),
+                bench_logger.clone(),
                 show_filer_on_start,
                 startup_load_path.clone(),
             )))

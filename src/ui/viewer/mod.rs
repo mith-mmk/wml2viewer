@@ -1,3 +1,4 @@
+use crate::benchlog::BenchLogger;
 use crate::configs::config::save_app_config;
 use crate::configs::resourses::{AppliedResources, apply_resources};
 use crate::dependent::{default_download_dir, pick_save_directory};
@@ -116,6 +117,7 @@ pub(crate) struct ViewerApp {
     pub(crate) pending_resize_after_render: bool,
     pub(crate) pending_fit_recalc: bool,
     pub(crate) config_path: Option<PathBuf>,
+    pub(crate) bench_logger: Option<BenchLogger>,
     pub(crate) show_left_menu: bool,
     pub(crate) left_menu_pos: Pos2,
     pub(crate) save_dialog: SaveDialogState,
@@ -302,6 +304,7 @@ impl ViewerApp {
         rendered: LoadedImage,
         config: AppConfig,
         config_path: Option<PathBuf>,
+        bench_logger: Option<BenchLogger>,
         show_filer_on_start: bool,
         startup_load_path: Option<PathBuf>,
     ) -> Self {
@@ -410,6 +413,7 @@ impl ViewerApp {
             pending_resize_after_render: false,
             pending_fit_recalc: false,
             config_path,
+            bench_logger,
             show_left_menu: false,
             left_menu_pos: Pos2::ZERO,
             save_dialog: SaveDialogState {
@@ -1505,7 +1509,34 @@ impl ViewerApp {
     }
 
     pub(crate) fn request_load_path(&mut self, path: PathBuf) -> Result<(), Box<dyn Error>> {
-        self.request_load_target(path.clone(), path)
+            self.request_load_target(path.clone(), path)
+    }
+
+    fn log_bench_state(&self, event: &str, payload: serde_json::Value) {
+        let Some(logger) = &self.bench_logger else {
+            return;
+        };
+        logger.log(
+            event,
+            serde_json::json!({
+                "state": {
+                    "current_navigation_path": self.current_navigation_path.display().to_string(),
+                    "current_path": self.current_path.display().to_string(),
+                    "pending_navigation_path": self.pending_navigation_path.as_ref().map(|path| path.display().to_string()),
+                    "navigator_ready": self.navigator_ready,
+                    "active_request": format!("{:?}", self.active_request),
+                    "active_fs_request_id": self.active_fs_request_id,
+                    "queued_navigation": self.queued_navigation.as_ref().map(|command| format!("{command:?}")),
+                    "startup_phase": format!("{:?}", self.startup_phase),
+                    "show_filer": self.show_filer,
+                    "empty_mode": self.empty_mode,
+                    "active_preload_request_id": self.active_preload_request_id,
+                    "pending_preload_navigation_path": self.pending_preload_navigation_path.as_ref().map(|path| path.display().to_string()),
+                    "preloaded_navigation_path": self.preloaded_navigation_path.as_ref().map(|path| path.display().to_string()),
+                },
+                "event_payload": payload,
+            }),
+        );
     }
 
     pub(crate) fn request_load_target(
@@ -1519,8 +1550,23 @@ impl ViewerApp {
         if branch_changed {
             self.clear_manga_companion();
         }
+        self.log_bench_state(
+            "viewer.request_load_target",
+            serde_json::json!({
+                "navigation_path": navigation_path.display().to_string(),
+                "load_request_path": load_request_path.display().to_string(),
+                "branch_changed": branch_changed,
+                "switching_image": switching_image,
+            }),
+        );
         self.invalidate_preload();
         if self.try_take_preloaded(&navigation_path) {
+            self.log_bench_state(
+                "viewer.request_load_target.preloaded_hit",
+                serde_json::json!({
+                    "navigation_path": navigation_path.display().to_string(),
+                }),
+            );
             return Ok(());
         }
         if switching_image {
@@ -1660,6 +1706,13 @@ impl ViewerApp {
         };
         let request_id = self.alloc_fs_request_id();
         self.active_fs_request_id = Some(request_id);
+        self.log_bench_state(
+            "viewer.init_filesystem",
+            serde_json::json!({
+                "request_id": request_id,
+                "path": path.display().to_string(),
+            }),
+        );
         self.overlay
             .set_loading_message(format!("Scanning {}", path.display()));
         fs_tx
@@ -1671,14 +1724,32 @@ impl ViewerApp {
     fn request_navigation(&mut self, mut command: FilesystemCommand) -> Result<(), Box<dyn Error>> {
         self.spawn_navigation_workers();
         if !self.navigator_ready {
+            self.log_bench_state(
+                "viewer.request_navigation.queued_not_ready",
+                serde_json::json!({
+                    "command": format!("{command:?}"),
+                }),
+            );
             self.queued_navigation = Some(command);
             return Ok(());
         }
         if self.active_fs_request_id.is_some() {
+            self.log_bench_state(
+                "viewer.request_navigation.queued_busy",
+                serde_json::json!({
+                    "command": format!("{command:?}"),
+                }),
+            );
             self.queued_navigation = Some(command);
             return Ok(());
         }
         let Some(fs_tx) = self.fs_tx.clone() else {
+            self.log_bench_state(
+                "viewer.request_navigation.queued_no_worker",
+                serde_json::json!({
+                    "command": format!("{command:?}"),
+                }),
+            );
             self.queued_navigation = Some(command);
             return Ok(());
         };
@@ -1698,6 +1769,13 @@ impl ViewerApp {
             FilesystemCommand::First { .. } => FilesystemCommand::First { request_id },
             FilesystemCommand::Last { .. } => FilesystemCommand::Last { request_id },
         };
+        self.log_bench_state(
+            "viewer.request_navigation.sent",
+            serde_json::json!({
+                "request_id": request_id,
+                "command": format!("{command:?}"),
+            }),
+        );
         self.overlay.set_loading_message("Scanning folder...");
         fs_tx.send(command).map_err(filesystem_send_error)?;
         Ok(())
@@ -1709,6 +1787,14 @@ impl ViewerApp {
         source: LoadedImage,
         rendered: LoadedImage,
     ) {
+        self.log_bench_state(
+            "viewer.apply_loaded_result.begin",
+            serde_json::json!({
+                "loaded_path": path.as_ref().map(|path| path.display().to_string()),
+                "source_size": [source.canvas.width(), source.canvas.height()],
+                "rendered_size": [rendered.canvas.width(), rendered.canvas.height()],
+            }),
+        );
         let previous_navigation_path = self.current_navigation_path.clone();
         if let Some(pending_navigation_path) = self.pending_navigation_path.take() {
             self.current_navigation_path = if path
@@ -1768,11 +1854,21 @@ impl ViewerApp {
         if !self.navigator_ready && self.active_fs_request_id.is_none() {
             if self.deferred_filesystem_init_path.is_some() {
                 self.deferred_filesystem_init_path =
-                    Some(loaded_path.unwrap_or_else(|| self.current_navigation_path.clone()));
+                    Some(
+                        loaded_path
+                            .clone()
+                            .unwrap_or_else(|| self.current_navigation_path.clone()),
+                    );
                 self.defer_initial_filesystem_sync();
             }
         }
         self.schedule_preload();
+        self.log_bench_state(
+            "viewer.apply_loaded_result.end",
+            serde_json::json!({
+                "loaded_path": loaded_path.as_ref().map(|path| path.display().to_string()),
+            }),
+        );
         if self.pending_resize_after_load {
             self.pending_resize_after_load = false;
             let _ = self.request_resize_current();
@@ -1789,28 +1885,65 @@ impl ViewerApp {
 
     fn schedule_preload(&mut self) {
         if self.empty_mode || self.active_request.is_some() {
+            self.log_bench_state(
+                "viewer.schedule_preload.skipped_busy",
+                serde_json::json!({}),
+            );
             return;
         }
         if !self.navigator_ready {
+            self.log_bench_state(
+                "viewer.schedule_preload.skipped_not_ready",
+                serde_json::json!({}),
+            );
             return;
         }
         if archive_prefers_low_io(&self.current_navigation_path) {
+            self.log_bench_state(
+                "viewer.schedule_preload.skipped_low_io_current",
+                serde_json::json!({
+                    "path": self.current_navigation_path.display().to_string(),
+                }),
+            );
             return;
         }
         let Some(path) = self.next_preload_candidate() else {
+            self.log_bench_state(
+                "viewer.schedule_preload.skipped_no_candidate",
+                serde_json::json!({}),
+            );
             return;
         };
         if archive_prefers_low_io(&path) {
+            self.log_bench_state(
+                "viewer.schedule_preload.skipped_low_io_candidate",
+                serde_json::json!({
+                    "path": path.display().to_string(),
+                }),
+            );
             return;
         }
         if self.preloaded_navigation_path.as_ref() == Some(&path)
             || self.pending_preload_navigation_path.as_ref() == Some(&path)
         {
+            self.log_bench_state(
+                "viewer.schedule_preload.skipped_duplicate",
+                serde_json::json!({
+                    "path": path.display().to_string(),
+                }),
+            );
             return;
         }
         let request_id = self.alloc_preload_request_id();
         self.active_preload_request_id = Some(request_id);
         self.pending_preload_navigation_path = Some(path.clone());
+        self.log_bench_state(
+            "viewer.schedule_preload.sent",
+            serde_json::json!({
+                "request_id": request_id,
+                "path": path.display().to_string(),
+            }),
+        );
         let _ = self.preload_tx.send(RenderCommand::LoadPath {
             request_id,
             path,
@@ -1927,6 +2060,13 @@ impl ViewerApp {
                     if !request_matches {
                         continue;
                     }
+                    self.log_bench_state(
+                        "viewer.poll_worker.loaded",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "path": path.as_ref().map(|path| path.display().to_string()),
+                        }),
+                    );
                     self.apply_loaded_result(path, source, rendered);
                 }
                 Ok(RenderResult::Failed {
@@ -1944,6 +2084,14 @@ impl ViewerApp {
                     if !request_matches {
                         continue;
                     }
+                    self.log_bench_state(
+                        "viewer.poll_worker.failed",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "path": path.as_ref().map(|path| path.display().to_string()),
+                            "message": message,
+                        }),
+                    );
                     let failed_during_load =
                         matches!(active_request, ActiveRenderRequest::Load(_));
                     self.pending_navigation_path = None;
@@ -1970,6 +2118,10 @@ impl ViewerApp {
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
+                    self.log_bench_state(
+                        "viewer.poll_worker.disconnected",
+                        serde_json::json!({}),
+                    );
                     self.overlay.alert_message = Some("render worker disconnected".to_string());
                     self.overlay.clear_loading_message();
                     self.respawn_render_worker();
@@ -2127,6 +2279,14 @@ impl ViewerApp {
                     load_path,
                 }) => {
                     if self.active_fs_request_id == Some(request_id) {
+                        self.log_bench_state(
+                            "viewer.poll_filesystem.navigator_ready",
+                            serde_json::json!({
+                                "request_id": request_id,
+                                "navigation_path": navigation_path.as_ref().map(|path| path.display().to_string()),
+                                "load_path": load_path.as_ref().map(|path| path.display().to_string()),
+                            }),
+                        );
                         self.navigator_ready = true;
                         self.active_fs_request_id = None;
                         self.startup_phase = StartupPhase::MultiViewer;
@@ -2161,6 +2321,14 @@ impl ViewerApp {
                     load_path,
                 }) => {
                     if self.active_fs_request_id == Some(request_id) {
+                        self.log_bench_state(
+                            "viewer.poll_filesystem.path_resolved",
+                            serde_json::json!({
+                                "request_id": request_id,
+                                "navigation_path": navigation_path.display().to_string(),
+                                "load_path": load_path.display().to_string(),
+                            }),
+                        );
                         self.empty_mode = false;
                         self.startup_phase = StartupPhase::MultiViewer;
                         if self.current_navigation_path != navigation_path
@@ -2173,6 +2341,12 @@ impl ViewerApp {
                 }
                 Ok(FilesystemResult::NoPath { request_id }) => {
                     if self.active_fs_request_id == Some(request_id) {
+                        self.log_bench_state(
+                            "viewer.poll_filesystem.no_path",
+                            serde_json::json!({
+                                "request_id": request_id,
+                            }),
+                        );
                         self.startup_phase = StartupPhase::MultiViewer;
                         self.overlay
                             .set_loading_message("No displayable file found");
@@ -2182,6 +2356,10 @@ impl ViewerApp {
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
+                    self.log_bench_state(
+                        "viewer.poll_filesystem.disconnected",
+                        serde_json::json!({}),
+                    );
                     self.overlay
                         .set_loading_message("filesystem worker disconnected");
                     self.respawn_filesystem_worker();

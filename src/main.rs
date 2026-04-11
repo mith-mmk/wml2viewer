@@ -24,21 +24,30 @@ fn run() -> Result<(), Box<dyn Error>> {
         dependent::clean_system_integration()?;
         return Ok(());
     }
-    app::run(args.image_path, args.config_path)
+    app::run(args.image_path, args.config_path, args.bench_enabled)
 }
 
 struct CliArgs {
     image_path: Option<PathBuf>,
     config_path: Option<PathBuf>,
     clean_target: Option<String>,
+    bench_enabled: bool,
 }
 
 fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
-    let mut args = env::args_os();
+    parse_args_from(env::args_os())
+}
+
+fn parse_args_from<I>(args: I) -> Result<CliArgs, Box<dyn Error>>
+where
+    I: IntoIterator<Item = OsString>,
+{
+    let mut args = args.into_iter();
     let program = args.next().unwrap_or_else(|| OsString::from("wml2viewer"));
     let mut positional_args = Vec::new();
     let mut config_path = None;
     let mut clean_target = None;
+    let mut bench_enabled = false;
 
     while let Some(arg) = args.next() {
         if let Some(path) = parse_config_equals(&arg) {
@@ -67,6 +76,11 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
             continue;
         }
 
+        if arg == "--bench" {
+            bench_enabled = true;
+            continue;
+        }
+
         if is_ignorable_shell_argument(&arg) {
             continue;
         }
@@ -80,6 +94,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
         image_path,
         config_path,
         clean_target,
+        bench_enabled,
     })
 }
 
@@ -116,6 +131,42 @@ fn usage_error(program: &OsString) -> Box<dyn Error> {
         .to_string_lossy();
     Box::new(io::Error::new(
         io::ErrorKind::InvalidInput,
-        format!("Usage: {program} [--config <path>] [--clean system] [path]"),
+        format!("Usage: {program} [--config <path>] [--clean system] [--bench] [path]"),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_args_from;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_args_supports_bench_flag() {
+        let args = vec![
+            OsString::from("wml2viewer"),
+            OsString::from("--bench"),
+            OsString::from("sample.zip"),
+        ];
+
+        let parsed = parse_args_from(args).unwrap();
+
+        assert!(parsed.bench_enabled);
+        assert_eq!(parsed.image_path, Some(PathBuf::from("sample.zip")));
+    }
+
+    #[test]
+    fn parse_args_supports_config_and_bench_together() {
+        let args = vec![
+            OsString::from("wml2viewer"),
+            OsString::from("--config"),
+            OsString::from("config.toml"),
+            OsString::from("--bench"),
+        ];
+
+        let parsed = parse_args_from(args).unwrap();
+
+        assert!(parsed.bench_enabled);
+        assert_eq!(parsed.config_path, Some(PathBuf::from("config.toml")));
+    }
 }

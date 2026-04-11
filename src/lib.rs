@@ -1,5 +1,6 @@
 pub mod app;
 pub mod bench;
+pub mod benchlog;
 pub mod configs;
 pub mod dependent;
 pub mod drawers;

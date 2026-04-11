@@ -71,7 +71,7 @@ enum PendingDirection {
     Prev,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum FilesystemCommand {
     Init {
         request_id: u64,
