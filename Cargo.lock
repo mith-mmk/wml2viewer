@@ -4896,7 +4896,7 @@ dependencies = [
 
 [[package]]
 name = "wml2viewer"
-version = "0.0.13-beta3"
+version = "0.0.13-pre"
 dependencies = [
  "chrono",
  "directories",
