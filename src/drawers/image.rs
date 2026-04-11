@@ -3,6 +3,7 @@
 use std::io;
 use std::path::Path;
 
+use crate::wml2_formats::available_save_formats;
 use crate::dependent::plugins::{
     decode_image_from_bytes_with_plugins, decode_image_from_file_with_plugins,
 };
@@ -90,7 +91,7 @@ impl SaveFormat {
         }
     }
 
-    pub fn all() -> [SaveFormat; 5] {
+    pub fn all_known() -> [SaveFormat; 5] {
         [
             SaveFormat::Png,
             SaveFormat::Jpeg,
@@ -98,6 +99,10 @@ impl SaveFormat {
             SaveFormat::Gif,
             SaveFormat::Webp,
         ]
+    }
+
+    pub fn all() -> Vec<SaveFormat> {
+        available_save_formats()
     }
 }
 

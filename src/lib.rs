@@ -7,6 +7,7 @@ pub mod drawers;
 pub mod filesystem;
 pub mod options;
 pub mod ui;
+pub mod wml2_formats;
 
 pub fn get_version() -> String {
     format!("{}-lib{}", env!("CARGO_PKG_VERSION"), wml2::get_version())

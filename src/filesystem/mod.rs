@@ -14,6 +14,7 @@ use std::time::SystemTime;
 
 use crate::dependent::plugins::path_supported_by_plugins;
 use crate::options::{EndOfFolderOption, NavigationSortOption};
+use crate::wml2_formats::supports_decoder_extension;
 use listed_file::load_listed_file_entries;
 pub(crate) use sort::{compare_natural_str, compare_os_str};
 pub(crate) use zip_file::{load_zip_entries_unsorted, sort_zip_entries};
@@ -22,9 +23,6 @@ use zip_file::{
     zip_prefers_low_io,
 };
 
-const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "webp","jpe", "jpg", "jpeg", "bmp", "gif", "png", "tif", "tiff", "mag", "mki", "pi", "pic",
-];
 const LISTED_FILE_EXTENSION: &str = "wmltxt";
 const LISTED_VIRTUAL_MARKER: &str = "__wmlv__";
 const ZIP_FILE_EXTENSION: &str = "zip";
@@ -1058,12 +1056,7 @@ fn is_supported_image_name(name: &OsStr) -> bool {
     Path::new(name)
         .extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| {
-            let ext = ext.to_ascii_lowercase();
-            SUPPORTED_EXTENSIONS
-                .iter()
-                .any(|supported| *supported == ext)
-        })
+        .map(supports_decoder_extension)
         .unwrap_or(false)
 }
 

@@ -1,4 +1,5 @@
 use crate::dependent::normalize_locale_tag;
+use crate::wml2_formats::associated_file_extensions;
 use std::path::PathBuf;
 use std::process::Command;
 use std::os::windows::process::CommandExt;
@@ -107,11 +108,6 @@ fn windows_font_roots() -> Vec<PathBuf> {
 
 const PROG_ID: &str = "wml2viewer.image";
 const APPLICATION_KEY: &str = r"Applications\wml2viewer.exe";
-const ASSOCIATED_EXTENSIONS: &[&str] = &[
-    ".webp", ".jpg", ".jpeg", ".bmp", ".gif", ".png", ".tif", ".tiff", ".mag", ".mki", ".pi",
-    ".pic", ".zip", ".wmltxt",
-];
-
 pub fn available_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     for letter in b'A'..=b'Z' {
@@ -151,8 +147,8 @@ pub fn register_file_associations(
     let (open_command, _) = app_root.create_subkey(r"shell\open\command")?;
     open_command.set_value("", &command_line)?;
 
-    for ext in ASSOCIATED_EXTENSIONS {
-        supported_types.set_value(*ext, &"")?;
+    for ext in associated_file_extensions() {
+        supported_types.set_value(&ext, &"")?;
 
         let (open_with_progids, _) = classes.create_subkey(format!(r"{ext}\OpenWithProgids"))?;
         open_with_progids.set_value(PROG_ID, &"")?;
@@ -171,7 +167,7 @@ pub fn clean_file_associations() -> Result<(), Box<dyn std::error::Error>> {
     let _ = classes.delete_subkey_all(PROG_ID);
     let _ = classes.delete_subkey_all(APPLICATION_KEY);
 
-    for ext in ASSOCIATED_EXTENSIONS {
+    for ext in associated_file_extensions() {
         if let Ok(key) =
             classes.open_subkey_with_flags(format!(r"{ext}\OpenWithProgids"), KEY_READ | KEY_WRITE)
         {
