@@ -32,11 +32,11 @@ P5 = 優先度低い
     - 現在の主戦場は `filer` / `subfiler` / `viewer current` / `request ordering`
     - タイミング依存が強く、条件再現が難しい
     - 主な症状:
-      - 完全に固まる
-      - 固まるがしばらくすると復旧
-      - 最初の 1 つだけ表示されて止まる
-        - ナビゲーションだけが死んでいる
-        - ファイラーからの選択はできる
+      - [x] 完全に固まる
+      - [x] 固まるがしばらくすると復旧
+      - [x] 最初の 1 つだけ表示されて止まる
+        - [x] ナビゲーションだけが死んでいる
+        - [x] ファイラーからの選択はできる
     - 仮説:
       - `accepted user request` / `pending request` / `committed viewer state` の衝突
       - zip -> zip browse 中に `sync_filer_directory_with_current_path()` が古い current で filer を引き戻す
@@ -44,11 +44,12 @@ P5 = 優先度低い
     - ベンチ:
       - `--bench-scenario filer_refresh_race`
       - `--bench-scenario zip_subfiler`
+    - ログ:
+      - `--log` こっちが決め手
 - [ ] P1 filesystem: Recursive navigation が大きい実ディレクトリで止まる問題
     - `state-1775968737116-58500.jsonl` の計測で、停止の主因は zip 展開ではなく `kind=real` の directory scan だった
     - `filesystem.navigation.resolved elapsed_ms=71657` と `filesystem.scan_directory_listing kind=real elapsed_ms=71656` が一致
     - zip/listed の全 child 展開を lazy にしたことで `state-1775969500278-61124.jsonl` では最大 `1593ms` まで改善
-    - 残りの主因は `F:\\comics\\[同人]` のような親 real directory の `dirs` 走査
     - 次にやること:
       - `Recursive` 用の親ディレクトリ列挙 cache を分離する
       - `child_directories()` 用の軽量 listing を導入して `files` 情報と分ける
@@ -76,9 +77,9 @@ P5 = 優先度低い
         - [ ] issue: ファイラーでzipを選んだときロード中の画面が出ない問題
     - [ ] UXファースト
     - [ ] 0.0.12と比較して改善していることを確認すること（毎回悪化している）
-- [ ] 漫画モードは条件を満たしたときは2枚束ねて表示
+- [x] 漫画モードは条件を満たしたときは2枚束ねて表示
     - 片側だけ更新が追従できないバグの温床になっている
-- [ ] I/Oストリームの改善(zipのパフォーマンスの改善。FileSystemが面倒をみる。)
+- [+] I/Oストリームの改善(zipのパフォーマンスの改善。FileSystemが面倒をみる。)
     - [*] 優先度によるI/O調停
       - viewer / companion / preload が同時に archive を触る burst を抑える
       - まずは render worker 側で `primary > companion > preload` の優先度を持たせる
