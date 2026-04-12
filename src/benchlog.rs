@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
@@ -63,6 +63,27 @@ impl BenchLogger {
     }
 }
 
+pub fn set_global_bench_logger(logger: Option<BenchLogger>) {
+    if let Ok(mut slot) = global_bench_logger().lock() {
+        *slot = logger;
+    }
+}
+
+pub fn log_global_bench_event(event: &str, payload: Value) {
+    let logger = global_bench_logger()
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone());
+    if let Some(logger) = logger {
+        logger.log(event, payload);
+    }
+}
+
+fn global_bench_logger() -> &'static Mutex<Option<BenchLogger>> {
+    static GLOBAL_BENCH_LOGGER: OnceLock<Mutex<Option<BenchLogger>>> = OnceLock::new();
+    GLOBAL_BENCH_LOGGER.get_or_init(|| Mutex::new(None))
+}
+
 fn timestamp_token() -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -73,7 +94,7 @@ fn timestamp_token() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::BenchLogger;
+    use super::{BenchLogger, log_global_bench_event, set_global_bench_logger};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -93,5 +114,25 @@ mod tests {
         let text = fs::read_to_string(path).unwrap();
         assert!(text.contains("\"event\":\"test.event\""));
         assert!(text.contains("\"value\":1"));
+    }
+
+    #[test]
+    fn global_bench_logger_writes_jsonl_line() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir()
+            .join("wml2viewer-tests")
+            .join(format!("benchlog-global-{unique}.jsonl"));
+        let logger = BenchLogger::create_at_path(path.clone()).unwrap();
+
+        set_global_bench_logger(Some(logger));
+        log_global_bench_event("test.global", serde_json::json!({ "value": 2 }));
+        set_global_bench_logger(None);
+
+        let text = fs::read_to_string(path).unwrap();
+        assert!(text.contains("\"event\":\"test.global\""));
+        assert!(text.contains("\"value\":2"));
     }
 }

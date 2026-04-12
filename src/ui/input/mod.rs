@@ -6,6 +6,7 @@ use crate::ui::viewer::ViewerApp;
 use eframe::egui;
 use std::time::Instant;
 
+#[derive(Debug)]
 enum PointerIntent {
     ToggleFit,
     NextImageAfterDelay,
@@ -43,6 +44,13 @@ impl ViewerApp {
             if self.show_settings && !matches!(action, ViewerAction::ToggleSettings) {
                 continue;
             }
+            self.log_bench_state(
+                "viewer.input_action",
+                serde_json::json!({
+                    "action": format!("{action:?}"),
+                    "source": "keyboard",
+                }),
+            );
             match action {
                 ViewerAction::ZoomIn => {
                     let _ = self.set_zoom(self.zoom * 1.25);
@@ -123,6 +131,12 @@ impl ViewerApp {
         }
 
         if let Some(intent) = self.pointer_intent_from_response(response) {
+            self.log_bench_state(
+                "viewer.pointer_action",
+                serde_json::json!({
+                    "intent": format!("{intent:?}"),
+                }),
+            );
             self.perform_pointer_intent(response, intent);
             return true;
         }

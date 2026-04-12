@@ -12,6 +12,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::SystemTime;
 
+use crate::benchlog::log_global_bench_event;
 use crate::dependent::plugins::path_supported_by_plugins;
 use crate::options::{EndOfFolderOption, NavigationSortOption};
 use crate::wml2_formats::supports_decoder_extension;
@@ -476,15 +477,45 @@ pub fn spawn_filesystem_worker(
         while let Ok(command) = command_rx.recv() {
             match command {
                 FilesystemCommand::Init { request_id, path } => {
+                    log_global_bench_event(
+                        "filesystem.init.begin",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "path": path.display().to_string(),
+                        }),
+                    );
                     let Some(start_path) = resolve_navigation_path(&path, &mut cache) else {
+                        log_global_bench_event(
+                            "filesystem.init.no_path",
+                            serde_json::json!({
+                                "request_id": request_id,
+                                "path": path.display().to_string(),
+                            }),
+                        );
                         let _ = result_tx.send(FilesystemResult::NoPath { request_id });
                         continue;
                     };
 
+                    log_global_bench_event(
+                        "filesystem.init.resolved",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "path": path.display().to_string(),
+                            "start_path": start_path.display().to_string(),
+                        }),
+                    );
                     navigator = Some(FileNavigator::from_current_path(start_path, &mut cache));
                     let initial_target = navigator
                         .as_ref()
                         .and_then(|nav| navigation_outcome_to_target(nav.current_target()));
+                    log_global_bench_event(
+                        "filesystem.init.ready",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "navigation_path": initial_target.as_ref().map(|target| target.navigation_path.display().to_string()),
+                            "load_path": initial_target.as_ref().map(|target| target.load_path.display().to_string()),
+                        }),
+                    );
                     let _ = result_tx.send(FilesystemResult::NavigatorReady {
                         request_id,
                         navigation_path: initial_target.as_ref().map(|target| target.navigation_path.clone()),
@@ -656,11 +687,11 @@ fn edge_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Vec<PathBuf>
 
 fn flat_container_dir(path: &Path) -> Option<PathBuf> {
     if let Some(zip_root) = zip_virtual_root(path) {
-        return zip_root.parent().map(Path::to_path_buf);
+        return Some(zip_root);
     }
 
     if let Some(listed_root) = listed_virtual_root(path) {
-        return listed_root.parent().map(Path::to_path_buf);
+        return Some(listed_root);
     }
 
     path.parent().map(Path::to_path_buf)
@@ -1474,6 +1505,64 @@ mod tests {
         assert_eq!(listed_virtual_root(&last), Some(listed.clone()));
         assert_eq!(resolve_start_path(&first), Some(page1));
         assert_eq!(resolve_start_path(&last), Some(page3));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn virtual_zip_child_navigation_stays_inside_zip_entries() {
+        let root = make_temp_dir();
+        let archive = root.join("images.zip");
+        make_zip_with_entries(&archive, &["001.png", "002.png", "003.png"]);
+
+        let mut cache = FilesystemCache::default();
+        let zip_children = build_zip_virtual_children(&archive);
+        let mut nav = FileNavigator::from_current_path(zip_children[1].clone(), &mut cache);
+
+        let next = nav.next(&mut cache).expect("next zip entry");
+        let prev = nav.prev(&mut cache).expect("prev zip entry");
+
+        assert_eq!(zip_virtual_root(&next), Some(archive.clone()));
+        assert_eq!(zip_virtual_root(&prev), Some(archive.clone()));
+        assert_eq!(resolve_virtual_zip_child(&next), Some((archive.clone(), 2)));
+        assert_eq!(resolve_virtual_zip_child(&prev), Some((archive.clone(), 1)));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn virtual_listed_child_navigation_stays_inside_listed_entries() {
+        let root = make_temp_dir();
+        let listed = root.join("pages.wmltxt");
+        let page1 = root.join("001.png");
+        let page2 = root.join("002.png");
+        let page3 = root.join("003.png");
+
+        fs::write(&page1, []).unwrap();
+        fs::write(&page2, []).unwrap();
+        fs::write(&page3, []).unwrap();
+        fs::write(
+            &listed,
+            format!(
+                "#!WMLViewer2 ListedFile 1.0\n{}\n{}\n{}\n",
+                page1.display(),
+                page2.display(),
+                page3.display()
+            ),
+        )
+        .unwrap();
+
+        let mut cache = FilesystemCache::default();
+        let listed_children = build_listed_virtual_children(&listed);
+        let mut nav = FileNavigator::from_current_path(listed_children[1].clone(), &mut cache);
+
+        let next = nav.next(&mut cache).expect("next listed entry");
+        let prev = nav.prev(&mut cache).expect("prev listed entry");
+
+        assert_eq!(listed_virtual_root(&next), Some(listed.clone()));
+        assert_eq!(listed_virtual_root(&prev), Some(listed.clone()));
+        assert_eq!(resolve_start_path(&next), Some(page3));
+        assert_eq!(resolve_start_path(&prev), Some(page2));
 
         let _ = fs::remove_dir_all(root);
     }

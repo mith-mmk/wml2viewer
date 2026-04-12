@@ -469,6 +469,7 @@ impl ViewerApp {
         config: AppConfig,
         config_path: Option<PathBuf>,
         bench_logger: Option<BenchLogger>,
+        bench_enabled: bool,
         bench_scenario: Option<String>,
         show_filer_on_start: bool,
         startup_load_path: Option<PathBuf>,
@@ -500,7 +501,6 @@ impl ViewerApp {
         let resource_locale_input = config.resources.locale.clone().unwrap_or_default();
         let resource_font_paths_input = join_search_paths(&config.resources.font_paths);
         let defer_navigation_workers = !show_filer_on_start;
-        let bench_mode = bench_logger.is_some();
         let startup_phase = if defer_navigation_workers {
             StartupPhase::SingleViewer
         } else {
@@ -612,7 +612,7 @@ impl ViewerApp {
             pending_primary_click_deadline: None,
             bench_initial_load_logged: false,
             bench_startup_sync_logged: false,
-            bench_automation: bench_mode.then_some(BenchAutomationState {
+            bench_automation: bench_enabled.then_some(BenchAutomationState {
                 scenario_name: bench_scenario_name.to_string(),
                 actions: bench_actions,
                 next_index: 0,
@@ -2520,6 +2520,20 @@ impl ViewerApp {
     fn init_filesystem(&mut self, path: PathBuf) -> Result<(), Box<dyn Error>> {
         self.spawn_navigation_workers();
         self.deferred_filesystem_sync_frame = None;
+        if should_queue_filesystem_init(self.active_fs_request_id) {
+            self.log_bench_state(
+                "viewer.init_filesystem.queued_busy",
+                serde_json::json!({
+                    "path": path.display().to_string(),
+                    "active_fs_request_id": self.active_fs_request_id,
+                }),
+            );
+            self.queued_navigation = Some(FilesystemCommand::Init {
+                request_id: 0,
+                path,
+            });
+            return Ok(());
+        }
         let Some(fs_tx) = self.fs_tx.clone() else {
             return Ok(());
         };
@@ -2633,13 +2647,29 @@ impl ViewerApp {
                 &previous_navigation_path,
                 &self.current_navigation_path,
             );
+            let committed_filer_select = should_cancel_filesystem_request_for_filer_select(
+                self.filer.pending_user_request.as_ref(),
+                &self.current_navigation_path,
+                self.active_fs_request_id,
+            );
             self.current_path = path.clone();
             self.save_dialog.file_name = default_save_file_name(&path);
             if folder_changed {
                 self.clear_manga_companion();
                 self.prev_texture = None;
             }
-            if folder_changed {
+            if committed_filer_select {
+                self.log_bench_state(
+                    "viewer.filesystem.restarted_for_filer_select",
+                    serde_json::json!({
+                        "active_fs_request_id": self.active_fs_request_id,
+                        "navigation_path": self.current_navigation_path.display().to_string(),
+                    }),
+                );
+                self.navigator_ready = false;
+                self.queued_navigation = None;
+                self.respawn_filesystem_worker();
+            } else if folder_changed {
                 self.navigator_ready = false;
                 self.queued_navigation = None;
                 let _ = self.init_filesystem(self.current_navigation_path.clone());
@@ -3716,6 +3746,23 @@ fn should_clear_filer_select_request_for_current(
     )
 }
 
+fn should_queue_filesystem_init(active_fs_request_id: Option<u64>) -> bool {
+    active_fs_request_id.is_some()
+}
+
+fn should_cancel_filesystem_request_for_filer_select(
+    pending_user_request: Option<&FilerUserRequest>,
+    current_navigation_path: &Path,
+    active_fs_request_id: Option<u64>,
+) -> bool {
+    active_fs_request_id.is_some()
+        && matches!(
+            pending_user_request,
+            Some(FilerUserRequest::SelectFile { navigation_path })
+                if navigation_path == current_navigation_path
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3903,6 +3950,35 @@ mod tests {
                 directory: PathBuf::from("dir"),
             }),
             Path::new("dir\\current.png"),
+        ));
+    }
+
+    #[test]
+    fn queues_filesystem_init_when_request_is_already_active() {
+        assert!(should_queue_filesystem_init(Some(1)));
+        assert!(!should_queue_filesystem_init(None));
+    }
+
+    #[test]
+    fn cancels_busy_filesystem_request_for_matching_filer_select() {
+        let pending = FilerUserRequest::SelectFile {
+            navigation_path: PathBuf::from("dir\\current.png"),
+        };
+
+        assert!(should_cancel_filesystem_request_for_filer_select(
+            Some(&pending),
+            Path::new("dir\\current.png"),
+            Some(7),
+        ));
+        assert!(!should_cancel_filesystem_request_for_filer_select(
+            Some(&pending),
+            Path::new("dir\\other.png"),
+            Some(7),
+        ));
+        assert!(!should_cancel_filesystem_request_for_filer_select(
+            Some(&pending),
+            Path::new("dir\\current.png"),
+            None,
         ));
     }
 }

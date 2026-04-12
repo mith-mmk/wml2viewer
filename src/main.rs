@@ -28,6 +28,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         args.image_path,
         args.config_path,
         args.bench_enabled,
+        args.log_enabled,
         args.bench_scenario,
     )
 }
@@ -37,6 +38,7 @@ struct CliArgs {
     config_path: Option<PathBuf>,
     clean_target: Option<String>,
     bench_enabled: bool,
+    log_enabled: bool,
     bench_scenario: Option<String>,
 }
 
@@ -54,6 +56,7 @@ where
     let mut config_path = None;
     let mut clean_target = None;
     let mut bench_enabled = false;
+    let mut log_enabled = false;
     let mut bench_scenario = None;
 
     while let Some(arg) = args.next() {
@@ -88,6 +91,11 @@ where
             continue;
         }
 
+        if arg == "--log" {
+            log_enabled = true;
+            continue;
+        }
+
         if let Some(value) = arg.to_string_lossy().strip_prefix("--bench-scenario=") {
             bench_scenario = Some(value.to_owned());
             continue;
@@ -115,6 +123,7 @@ where
         config_path,
         clean_target,
         bench_enabled,
+        log_enabled,
         bench_scenario,
     })
 }
@@ -153,7 +162,7 @@ fn usage_error(program: &OsString) -> Box<dyn Error> {
     Box::new(io::Error::new(
         io::ErrorKind::InvalidInput,
         format!(
-            "Usage: {program} [--config <path>] [--clean system] [--bench] [--bench-scenario <name>] [path]"
+            "Usage: {program} [--config <path>] [--clean system] [--bench] [--log] [--bench-scenario <name>] [path]"
         ),
     ))
 }
@@ -206,5 +215,19 @@ mod tests {
 
         assert!(parsed.bench_enabled);
         assert_eq!(parsed.bench_scenario.as_deref(), Some("zip_subfiler"));
+    }
+
+    #[test]
+    fn parse_args_supports_log_flag() {
+        let args = vec![
+            OsString::from("wml2viewer"),
+            OsString::from("--log"),
+            OsString::from("sample.zip"),
+        ];
+
+        let parsed = parse_args_from(args).unwrap();
+
+        assert!(parsed.log_enabled);
+        assert_eq!(parsed.image_path, Some(PathBuf::from("sample.zip")));
     }
 }
