@@ -13,7 +13,7 @@ eframe = "0.33"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-wml2 = { version = "0.0.19", features = ["multithread"] }
+wml2 = { version = "0.0.20", features = ["multithread"] }
 directories = "6.0.0"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 encoding_rs = "0.8"
@@ -34,3 +34,4 @@ winres = "0.1"
 [dev-dependencies]
 filetime = "0.2"
 
+#wml2 = { path="../wml2/wml2", features = ["multithread"] }
