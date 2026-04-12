@@ -20,7 +20,7 @@ use crate::ui::menu::fileviewer::thumbnail::{
 };
 use crate::ui::menu::fileviewer::worker::{FilerCommand, FilerResult, spawn_filer_worker};
 use crate::ui::render::{
-    ActiveRenderRequest, RenderCommand, RenderLoadMetrics, RenderResult, aligned_offset,
+    ActiveRenderRequest, LoadedRenderPage, RenderCommand, RenderLoadMetrics, RenderResult, aligned_offset,
     canvas_to_color_image, downscale_for_texture_limit, spawn_render_worker, worker_send_error,
 };
 use crate::ui::viewer::options::{
@@ -95,6 +95,7 @@ pub(crate) struct ViewerApp {
     pub(crate) fs_rx: Option<Receiver<FilesystemResult>>,
     pub(crate) next_fs_request_id: u64,
     pub(crate) active_fs_request_id: Option<u64>,
+    pub(crate) background_fs_request_id: Option<u64>,
     pub(crate) queued_navigation: Option<FilesystemCommand>,
     pub(crate) deferred_filesystem_init_path: Option<PathBuf>,
     pub(crate) filer_tx: Option<Sender<FilerCommand>>,
@@ -555,6 +556,7 @@ impl ViewerApp {
             fs_rx: None,
             next_fs_request_id: 0,
             active_fs_request_id: None,
+            background_fs_request_id: None,
             queued_navigation: None,
             deferred_filesystem_init_path: None,
             filer_tx: None,
@@ -1610,10 +1612,15 @@ impl ViewerApp {
         {
             return None;
         }
-        let companion = adjacent_entry(&self.current_navigation_path, self.navigation_sort, 1)?;
-        let current_branch = navigation_branch_path(&self.current_navigation_path);
-        let companion_branch = navigation_branch_path(&companion);
-        (current_branch == companion_branch).then_some(companion)
+        spread_companion_path_for_navigation(
+            &self.current_navigation_path,
+            self.navigation_sort,
+            self.options.manga_mode,
+        )
+    }
+
+    fn desired_manga_companion_path_for_navigation(&self, navigation_path: &Path) -> Option<PathBuf> {
+        spread_companion_path_for_navigation(navigation_path, self.navigation_sort, self.options.manga_mode)
     }
 
     fn clear_manga_companion(&mut self) {
@@ -1672,6 +1679,7 @@ impl ViewerApp {
             .send(RenderCommand::LoadPath {
                 request_id,
                 path,
+                companion_path: None,
                 zoom: self.zoom,
                 method: self.render_options.zoom_method,
                 scale_mode: self.render_options.scale_mode,
@@ -1698,6 +1706,9 @@ impl ViewerApp {
     }
 
     fn sync_manga_companion(&mut self, ctx: &egui::Context) {
+        if should_defer_companion_sync_during_primary_load(self.active_request) {
+            return;
+        }
         let desired = self.desired_manga_companion_path();
         if desired == self.companion_navigation_path && self.visible_companion().is_some() {
             return;
@@ -1849,6 +1860,7 @@ impl ViewerApp {
                     "navigator_ready": self.navigator_ready,
                     "active_request": format!("{:?}", self.active_request),
                     "active_fs_request_id": self.active_fs_request_id,
+                    "background_fs_request_id": self.background_fs_request_id,
                     "queued_navigation": self.queued_navigation.as_ref().map(|command| format!("{command:?}")),
                     "startup_phase": format!("{:?}", self.startup_phase),
                     "show_filer": self.show_filer,
@@ -2308,15 +2320,24 @@ impl ViewerApp {
         self.overlay
             .set_loading_message(format!("Loading {}", navigation_path.display()));
         let load_zoom = if switching_image { 1.0 } else { self.zoom };
+        let spread_companion_path = self.desired_manga_companion_path_for_navigation(&navigation_path);
         self.worker_tx
             .send(RenderCommand::LoadPath {
                 request_id,
                 path: load_request_path,
+                companion_path: spread_companion_path.clone(),
                 zoom: load_zoom,
                 method: self.render_options.zoom_method,
                 scale_mode: self.render_options.scale_mode,
             })
             .map_err(worker_send_error)?;
+        self.log_bench_state(
+            "viewer.request_load_target.spread_plan",
+            serde_json::json!({
+                "navigation_path": navigation_path.display().to_string(),
+                "companion_path": spread_companion_path.as_ref().map(|path| path.display().to_string()),
+            }),
+        );
         Ok(())
     }
 
@@ -2499,6 +2520,27 @@ impl ViewerApp {
         self.companion_active_request = None;
     }
 
+    fn apply_spread_companion_result(&mut self, companion: Option<LoadedRenderPage>) {
+        let desired = self.desired_manga_companion_path_for_navigation(&self.current_navigation_path);
+        match companion {
+            Some(companion) if desired.as_ref() == Some(&companion.path) => {
+                self.companion_navigation_path = Some(companion.path.clone());
+                self.apply_companion_loaded(
+                    Some(companion.path),
+                    DisplayedPageState {
+                        source: companion.source,
+                        rendered: companion.rendered,
+                        texture: None,
+                        texture_display_scale: 1.0,
+                    },
+                );
+            }
+            _ => {
+                self.clear_manga_companion();
+            }
+        }
+    }
+
     fn spawn_navigation_workers(&mut self) {
         if self.fs_tx.is_none() || self.fs_rx.is_none() {
             let (tx, rx) = spawn_filesystem_worker(self.navigation_sort);
@@ -2518,6 +2560,14 @@ impl ViewerApp {
     }
 
     fn init_filesystem(&mut self, path: PathBuf) -> Result<(), Box<dyn Error>> {
+        self.init_filesystem_with_overlay(path, true)
+    }
+
+    fn init_filesystem_with_overlay(
+        &mut self,
+        path: PathBuf,
+        show_overlay: bool,
+    ) -> Result<(), Box<dyn Error>> {
         self.spawn_navigation_workers();
         self.deferred_filesystem_sync_frame = None;
         if should_queue_filesystem_init(self.active_fs_request_id) {
@@ -2538,16 +2588,25 @@ impl ViewerApp {
             return Ok(());
         };
         let request_id = self.alloc_fs_request_id();
-        self.active_fs_request_id = Some(request_id);
+        if should_track_filesystem_init_in_background(show_overlay) {
+            self.background_fs_request_id = Some(request_id);
+        } else {
+            self.active_fs_request_id = Some(request_id);
+        }
         self.log_bench_state(
             "viewer.init_filesystem",
             serde_json::json!({
                 "request_id": request_id,
                 "path": path.display().to_string(),
+                "show_overlay": show_overlay,
             }),
         );
-        self.overlay
-            .set_loading_message(format!("Scanning {}", path.display()));
+        if show_overlay {
+            self.overlay
+                .set_loading_message(format!("Scanning {}", path.display()));
+        } else {
+            self.overlay.clear_loading_message();
+        }
         fs_tx
             .send(FilesystemCommand::Init { request_id, path })
             .map_err(filesystem_send_error)?;
@@ -2619,6 +2678,7 @@ impl ViewerApp {
         path: Option<PathBuf>,
         source: LoadedImage,
         rendered: LoadedImage,
+        companion: Option<LoadedRenderPage>,
     ) {
         self.log_bench_state(
             "viewer.apply_loaded_result.begin",
@@ -2666,13 +2726,13 @@ impl ViewerApp {
                         "navigation_path": self.current_navigation_path.display().to_string(),
                     }),
                 );
-                self.navigator_ready = false;
                 self.queued_navigation = None;
                 self.respawn_filesystem_worker();
+                self.overlay.clear_loading_message();
+                let _ = self.init_filesystem_with_overlay(self.current_navigation_path.clone(), false);
             } else if folder_changed {
-                self.navigator_ready = false;
                 self.queued_navigation = None;
-                let _ = self.init_filesystem(self.current_navigation_path.clone());
+                let _ = self.init_filesystem_with_overlay(self.current_navigation_path.clone(), false);
             } else if let Some(fs_tx) = self.fs_tx.clone() {
                 let request_id = self.alloc_fs_request_id();
                 let _ = fs_tx.send(FilesystemCommand::SetCurrent {
@@ -2685,6 +2745,7 @@ impl ViewerApp {
             }
             self.clear_committed_filer_user_request();
             self.sync_filer_directory_with_current_path();
+            self.apply_spread_companion_result(companion);
         }
         self.source = source;
         self.rendered = rendered;
@@ -2834,6 +2895,7 @@ impl ViewerApp {
         let _ = self.preload_tx.send(RenderCommand::LoadPath {
             request_id,
             path,
+            companion_path: None,
             zoom: self.zoom,
             method: self.render_options.zoom_method,
             scale_mode: self.render_options.scale_mode,
@@ -2859,7 +2921,7 @@ impl ViewerApp {
         }
         self.pending_navigation_path = Some(path.to_path_buf());
         self.overlay.clear_loading_message();
-        self.apply_loaded_result(entry.load_path, entry.display.source, entry.display.rendered);
+        self.apply_loaded_result(entry.load_path, entry.display.source, entry.display.rendered, None);
         true
     }
 
@@ -2931,6 +2993,7 @@ impl ViewerApp {
                     path,
                     source,
                     rendered,
+                    companion,
                     metrics,
                 }) => {
                     let Some(active_request) = self.active_request else {
@@ -2948,10 +3011,11 @@ impl ViewerApp {
                         serde_json::json!({
                             "request_id": request_id,
                             "path": path.as_ref().map(|path| path.display().to_string()),
+                            "companion_path": companion.as_ref().map(|page| page.path.display().to_string()),
                             "metrics": Self::bench_metrics_payload(&metrics),
                         }),
                     );
-                    self.apply_loaded_result(path, source, rendered);
+                    self.apply_loaded_result(path, source, rendered, companion);
                 }
                 Ok(RenderResult::Failed {
                     request_id,
@@ -3048,6 +3112,7 @@ impl ViewerApp {
                     path,
                     source,
                     rendered,
+                    companion: _,
                     metrics,
                 }) => {
                     if self.active_preload_request_id != Some(request_id) {
@@ -3119,6 +3184,7 @@ impl ViewerApp {
                     path,
                     source,
                     rendered,
+                    companion: _,
                     metrics,
                 }) => {
                     let Some(active_request) = self.companion_active_request else {
@@ -3235,7 +3301,9 @@ impl ViewerApp {
                     navigation_path,
                     load_path,
                 }) => {
-                    if self.active_fs_request_id == Some(request_id) {
+                    if self.active_fs_request_id == Some(request_id)
+                        || self.background_fs_request_id == Some(request_id)
+                    {
                         self.log_bench_state(
                             "viewer.poll_filesystem.navigator_ready",
                             serde_json::json!({
@@ -3245,7 +3313,12 @@ impl ViewerApp {
                             }),
                         );
                         self.navigator_ready = true;
-                        self.active_fs_request_id = None;
+                        if self.active_fs_request_id == Some(request_id) {
+                            self.active_fs_request_id = None;
+                        }
+                        if self.background_fs_request_id == Some(request_id) {
+                            self.background_fs_request_id = None;
+                        }
                         self.startup_phase = StartupPhase::MultiViewer;
                         self.log_bench_startup_sync_once("navigator_ready");
                         match (navigation_path, load_path) {
@@ -3278,7 +3351,9 @@ impl ViewerApp {
                     navigation_path,
                     load_path,
                 }) => {
-                    if self.active_fs_request_id == Some(request_id) {
+                    if self.active_fs_request_id == Some(request_id)
+                        || self.background_fs_request_id == Some(request_id)
+                    {
                         self.log_bench_state(
                             "viewer.poll_filesystem.path_resolved",
                             serde_json::json!({
@@ -3295,11 +3370,18 @@ impl ViewerApp {
                         {
                             let _ = self.request_load_target(navigation_path, load_path);
                         }
-                        self.active_fs_request_id = None;
+                        if self.active_fs_request_id == Some(request_id) {
+                            self.active_fs_request_id = None;
+                        }
+                        if self.background_fs_request_id == Some(request_id) {
+                            self.background_fs_request_id = None;
+                        }
                     }
                 }
                 Ok(FilesystemResult::NoPath { request_id }) => {
-                    if self.active_fs_request_id == Some(request_id) {
+                    if self.active_fs_request_id == Some(request_id)
+                        || self.background_fs_request_id == Some(request_id)
+                    {
                         self.log_bench_state(
                             "viewer.poll_filesystem.no_path",
                             serde_json::json!({
@@ -3311,7 +3393,12 @@ impl ViewerApp {
                         self.overlay
                             .set_loading_message("No displayable file found");
                         self.show_filer = true;
-                        self.active_fs_request_id = None;
+                        if self.active_fs_request_id == Some(request_id) {
+                            self.active_fs_request_id = None;
+                        }
+                        if self.background_fs_request_id == Some(request_id) {
+                            self.background_fs_request_id = None;
+                        }
                     }
                 }
                 Err(TryRecvError::Empty) => break,
@@ -3750,6 +3837,30 @@ fn should_queue_filesystem_init(active_fs_request_id: Option<u64>) -> bool {
     active_fs_request_id.is_some()
 }
 
+fn should_defer_companion_sync_during_primary_load(
+    active_request: Option<ActiveRenderRequest>,
+) -> bool {
+    matches!(active_request, Some(ActiveRenderRequest::Load(_)))
+}
+
+fn should_track_filesystem_init_in_background(show_overlay: bool) -> bool {
+    !show_overlay
+}
+
+fn spread_companion_path_for_navigation(
+    navigation_path: &Path,
+    navigation_sort: NavigationSortOption,
+    manga_mode: bool,
+) -> Option<PathBuf> {
+    if !manga_mode {
+        return None;
+    }
+    let companion = adjacent_entry(navigation_path, navigation_sort, 1)?;
+    let current_branch = navigation_branch_path(navigation_path);
+    let companion_branch = navigation_branch_path(&companion);
+    (current_branch == companion_branch).then_some(companion)
+}
+
 fn should_cancel_filesystem_request_for_filer_select(
     pending_user_request: Option<&FilerUserRequest>,
     current_navigation_path: &Path,
@@ -3767,6 +3878,8 @@ fn should_cancel_filesystem_request_for_filer_select(
 mod tests {
     use super::*;
     use crate::drawers::canvas::Canvas;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn dummy_loaded_image(width: u32, height: u32) -> LoadedImage {
         LoadedImage {
@@ -3960,6 +4073,23 @@ mod tests {
     }
 
     #[test]
+    fn defers_companion_sync_while_primary_load_is_active() {
+        assert!(should_defer_companion_sync_during_primary_load(Some(
+            ActiveRenderRequest::Load(7),
+        )));
+        assert!(!should_defer_companion_sync_during_primary_load(Some(
+            ActiveRenderRequest::Resize(7),
+        )));
+        assert!(!should_defer_companion_sync_during_primary_load(None));
+    }
+
+    #[test]
+    fn tracks_overlayless_filesystem_init_as_background() {
+        assert!(should_track_filesystem_init_in_background(false));
+        assert!(!should_track_filesystem_init_in_background(true));
+    }
+
+    #[test]
     fn cancels_busy_filesystem_request_for_matching_filer_select() {
         let pending = FilerUserRequest::SelectFile {
             navigation_path: PathBuf::from("dir\\current.png"),
@@ -3980,5 +4110,29 @@ mod tests {
             Path::new("dir\\current.png"),
             None,
         ));
+    }
+
+    #[test]
+    fn spread_companion_path_for_navigation_uses_same_branch_neighbor() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("wml2viewer-spread-{unique}"));
+        let first = root.join("001.png");
+        let second = root.join("002.png");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&first, []).unwrap();
+        fs::write(&second, []).unwrap();
+
+        let companion = spread_companion_path_for_navigation(
+            &first,
+            NavigationSortOption::Name,
+            true,
+        );
+
+        assert_eq!(companion.as_deref(), Some(second.as_path()));
+
+        let _ = fs::remove_dir_all(root);
     }
 }
