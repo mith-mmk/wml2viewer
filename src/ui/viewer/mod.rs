@@ -46,6 +46,7 @@ const NAVIGATION_REPEAT_INTERVAL: Duration = Duration::from_millis(180);
 const POINTER_SINGLE_CLICK_DELAY: Duration = Duration::from_millis(500);
 const WAITING_CARD_DELAY: Duration = Duration::from_millis(180);
 const PRELOAD_CACHE_CAPACITY: usize = 2;
+const ZIP_TO_ZIP_RANDOM_WALK_ROUNDS: usize = 8;
 
 pub(crate) struct ViewerApp {
     pub(crate) current_navigation_path: PathBuf,
@@ -244,41 +245,28 @@ fn should_prioritize_companion_preload(
     }
 }
 
+fn zip_to_zip_random_walk_actions(rounds: usize) -> Vec<BenchAction> {
+    let mut actions = Vec::with_capacity(rounds * 10);
+    for _ in 0..rounds {
+        actions.push(BenchAction::BrowseParentDirectory);
+        actions.push(BenchAction::BrowseRandomContainer);
+        actions.push(BenchAction::SelectRandomFileFromFiler);
+        actions.push(BenchAction::Next);
+        actions.push(BenchAction::Prev);
+        actions.push(BenchAction::SelectRandomFileFromFiler);
+        actions.push(BenchAction::Next);
+        actions.push(BenchAction::SelectRandomFileFromFiler);
+        actions.push(BenchAction::Prev);
+        actions.push(BenchAction::RefreshFiler);
+    }
+    actions
+}
+
 fn bench_automation_plan(name: Option<&str>) -> (&'static str, Vec<BenchAction>) {
     match name {
         Some("zip_to_zip_random") => (
             "zip_to_zip_random",
-            vec![
-                BenchAction::BrowseParentDirectory,
-                BenchAction::BrowseRandomContainer,
-                BenchAction::SelectRandomFileFromFiler,
-                BenchAction::Next,
-                BenchAction::Prev,
-                BenchAction::SelectRandomFileFromFiler,
-                BenchAction::Next,
-                BenchAction::SelectRandomFileFromFiler,
-                BenchAction::Prev,
-                BenchAction::RefreshFiler,
-                BenchAction::BrowseParentDirectory,
-                BenchAction::BrowseRandomContainer,
-                BenchAction::SelectRandomFileFromFiler,
-                BenchAction::Next,
-                BenchAction::Prev,
-                BenchAction::SelectRandomFileFromFiler,
-                BenchAction::Next,
-                BenchAction::SelectRandomFileFromFiler,
-                BenchAction::Prev,
-                BenchAction::RefreshFiler,
-                BenchAction::BrowseParentDirectory,
-                BenchAction::BrowseRandomContainer,
-                BenchAction::SelectRandomFileFromFiler,
-                BenchAction::Next,
-                BenchAction::Prev,
-                BenchAction::SelectRandomFileFromFiler,
-                BenchAction::Next,
-                BenchAction::SelectRandomFileFromFiler,
-                BenchAction::Prev,
-            ],
+            zip_to_zip_random_walk_actions(ZIP_TO_ZIP_RANDOM_WALK_ROUNDS),
         ),
         Some("zip_to_zip") => (
             "zip_to_zip",
@@ -3843,6 +3831,20 @@ mod tests {
         assert!(actions.contains(&BenchAction::SelectRandomFileFromFiler));
         assert!(actions.contains(&BenchAction::Next));
         assert!(actions.contains(&BenchAction::Prev));
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| **action == BenchAction::BrowseRandomContainer)
+                .count(),
+            ZIP_TO_ZIP_RANDOM_WALK_ROUNDS,
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| **action == BenchAction::RefreshFiler)
+                .count(),
+            ZIP_TO_ZIP_RANDOM_WALK_ROUNDS,
+        );
     }
 
     #[test]
