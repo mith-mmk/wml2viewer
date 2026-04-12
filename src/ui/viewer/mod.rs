@@ -95,7 +95,6 @@ pub(crate) struct ViewerApp {
     pub(crate) fs_rx: Option<Receiver<FilesystemResult>>,
     pub(crate) next_fs_request_id: u64,
     pub(crate) active_fs_request_id: Option<u64>,
-    pub(crate) background_fs_request_id: Option<u64>,
     pub(crate) queued_navigation: Option<FilesystemCommand>,
     pub(crate) deferred_filesystem_init_path: Option<PathBuf>,
     pub(crate) filer_tx: Option<Sender<FilerCommand>>,
@@ -556,7 +555,6 @@ impl ViewerApp {
             fs_rx: None,
             next_fs_request_id: 0,
             active_fs_request_id: None,
-            background_fs_request_id: None,
             queued_navigation: None,
             deferred_filesystem_init_path: None,
             filer_tx: None,
@@ -1860,7 +1858,6 @@ impl ViewerApp {
                     "navigator_ready": self.navigator_ready,
                     "active_request": format!("{:?}", self.active_request),
                     "active_fs_request_id": self.active_fs_request_id,
-                    "background_fs_request_id": self.background_fs_request_id,
                     "queued_navigation": self.queued_navigation.as_ref().map(|command| format!("{command:?}")),
                     "startup_phase": format!("{:?}", self.startup_phase),
                     "show_filer": self.show_filer,
@@ -2560,14 +2557,6 @@ impl ViewerApp {
     }
 
     fn init_filesystem(&mut self, path: PathBuf) -> Result<(), Box<dyn Error>> {
-        self.init_filesystem_with_overlay(path, true)
-    }
-
-    fn init_filesystem_with_overlay(
-        &mut self,
-        path: PathBuf,
-        show_overlay: bool,
-    ) -> Result<(), Box<dyn Error>> {
         self.spawn_navigation_workers();
         self.deferred_filesystem_sync_frame = None;
         if should_queue_filesystem_init(self.active_fs_request_id) {
@@ -2588,25 +2577,16 @@ impl ViewerApp {
             return Ok(());
         };
         let request_id = self.alloc_fs_request_id();
-        if should_track_filesystem_init_in_background(show_overlay) {
-            self.background_fs_request_id = Some(request_id);
-        } else {
-            self.active_fs_request_id = Some(request_id);
-        }
+        self.active_fs_request_id = Some(request_id);
         self.log_bench_state(
             "viewer.init_filesystem",
             serde_json::json!({
                 "request_id": request_id,
                 "path": path.display().to_string(),
-                "show_overlay": show_overlay,
             }),
         );
-        if show_overlay {
-            self.overlay
-                .set_loading_message(format!("Scanning {}", path.display()));
-        } else {
-            self.overlay.clear_loading_message();
-        }
+        self.overlay
+            .set_loading_message(format!("Scanning {}", path.display()));
         fs_tx
             .send(FilesystemCommand::Init { request_id, path })
             .map_err(filesystem_send_error)?;
@@ -2726,13 +2706,14 @@ impl ViewerApp {
                         "navigation_path": self.current_navigation_path.display().to_string(),
                     }),
                 );
+                self.navigator_ready = false;
                 self.queued_navigation = None;
                 self.respawn_filesystem_worker();
-                self.overlay.clear_loading_message();
-                let _ = self.init_filesystem_with_overlay(self.current_navigation_path.clone(), false);
+                let _ = self.init_filesystem(self.current_navigation_path.clone());
             } else if folder_changed {
+                self.navigator_ready = false;
                 self.queued_navigation = None;
-                let _ = self.init_filesystem_with_overlay(self.current_navigation_path.clone(), false);
+                let _ = self.init_filesystem(self.current_navigation_path.clone());
             } else if let Some(fs_tx) = self.fs_tx.clone() {
                 let request_id = self.alloc_fs_request_id();
                 let _ = fs_tx.send(FilesystemCommand::SetCurrent {
@@ -3301,9 +3282,7 @@ impl ViewerApp {
                     navigation_path,
                     load_path,
                 }) => {
-                    if self.active_fs_request_id == Some(request_id)
-                        || self.background_fs_request_id == Some(request_id)
-                    {
+                    if self.active_fs_request_id == Some(request_id) {
                         self.log_bench_state(
                             "viewer.poll_filesystem.navigator_ready",
                             serde_json::json!({
@@ -3313,12 +3292,7 @@ impl ViewerApp {
                             }),
                         );
                         self.navigator_ready = true;
-                        if self.active_fs_request_id == Some(request_id) {
-                            self.active_fs_request_id = None;
-                        }
-                        if self.background_fs_request_id == Some(request_id) {
-                            self.background_fs_request_id = None;
-                        }
+                        self.active_fs_request_id = None;
                         self.startup_phase = StartupPhase::MultiViewer;
                         self.log_bench_startup_sync_once("navigator_ready");
                         match (navigation_path, load_path) {
@@ -3351,9 +3325,7 @@ impl ViewerApp {
                     navigation_path,
                     load_path,
                 }) => {
-                    if self.active_fs_request_id == Some(request_id)
-                        || self.background_fs_request_id == Some(request_id)
-                    {
+                    if self.active_fs_request_id == Some(request_id) {
                         self.log_bench_state(
                             "viewer.poll_filesystem.path_resolved",
                             serde_json::json!({
@@ -3370,18 +3342,11 @@ impl ViewerApp {
                         {
                             let _ = self.request_load_target(navigation_path, load_path);
                         }
-                        if self.active_fs_request_id == Some(request_id) {
-                            self.active_fs_request_id = None;
-                        }
-                        if self.background_fs_request_id == Some(request_id) {
-                            self.background_fs_request_id = None;
-                        }
+                        self.active_fs_request_id = None;
                     }
                 }
                 Ok(FilesystemResult::NoPath { request_id }) => {
-                    if self.active_fs_request_id == Some(request_id)
-                        || self.background_fs_request_id == Some(request_id)
-                    {
+                    if self.active_fs_request_id == Some(request_id) {
                         self.log_bench_state(
                             "viewer.poll_filesystem.no_path",
                             serde_json::json!({
@@ -3393,12 +3358,7 @@ impl ViewerApp {
                         self.overlay
                             .set_loading_message("No displayable file found");
                         self.show_filer = true;
-                        if self.active_fs_request_id == Some(request_id) {
-                            self.active_fs_request_id = None;
-                        }
-                        if self.background_fs_request_id == Some(request_id) {
-                            self.background_fs_request_id = None;
-                        }
+                        self.active_fs_request_id = None;
                     }
                 }
                 Err(TryRecvError::Empty) => break,
@@ -3843,10 +3803,6 @@ fn should_defer_companion_sync_during_primary_load(
     matches!(active_request, Some(ActiveRenderRequest::Load(_)))
 }
 
-fn should_track_filesystem_init_in_background(show_overlay: bool) -> bool {
-    !show_overlay
-}
-
 fn spread_companion_path_for_navigation(
     navigation_path: &Path,
     navigation_sort: NavigationSortOption,
@@ -4083,11 +4039,6 @@ mod tests {
         assert!(!should_defer_companion_sync_during_primary_load(None));
     }
 
-    #[test]
-    fn tracks_overlayless_filesystem_init_as_background() {
-        assert!(should_track_filesystem_init_in_background(false));
-        assert!(!should_track_filesystem_init_in_background(true));
-    }
 
     #[test]
     fn cancels_busy_filesystem_request_for_matching_filer_select() {
