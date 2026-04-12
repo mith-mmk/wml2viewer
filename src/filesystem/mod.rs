@@ -10,7 +10,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
 use crate::benchlog::log_global_bench_event;
 use crate::dependent::plugins::path_supported_by_plugins;
@@ -59,6 +59,8 @@ impl Default for FilesystemCache {
 #[derive(Clone, Default)]
 struct DirectoryListing {
     files: Vec<PathBuf>,
+    file_entries: Vec<PathBuf>,
+    files_expanded: bool,
     dirs: Vec<PathBuf>,
     first_file: Option<PathBuf>,
     last_file: Option<PathBuf>,
@@ -603,6 +605,8 @@ fn handle_navigation_request(
     policy: EndOfFolderOption,
     direction: PendingDirection,
 ) {
+    let started_at = Instant::now();
+    let current_path = navigator.as_ref().map(|nav| nav.current().display().to_string());
     let outcome = match navigator {
         Some(nav) => match direction {
             PendingDirection::Next => nav.next_with_policy(policy, cache),
@@ -610,8 +614,23 @@ fn handle_navigation_request(
         },
         None => NavigationOutcome::NoPath,
     };
-
-    let _ = send_nav_result(tx, request_id, navigation_outcome_to_target(outcome));
+    let target = navigation_outcome_to_target(outcome);
+    log_global_bench_event(
+        "filesystem.navigation.resolved",
+        serde_json::json!({
+            "request_id": request_id,
+            "direction": match direction {
+                PendingDirection::Next => "next",
+                PendingDirection::Prev => "prev",
+            },
+            "policy": format!("{policy:?}"),
+            "current_path": current_path,
+            "navigation_path": target.as_ref().map(|target| target.navigation_path.display().to_string()),
+            "load_path": target.as_ref().map(|target| target.load_path.display().to_string()),
+            "elapsed_ms": started_at.elapsed().as_millis() as u64,
+        }),
+    );
+    let _ = send_nav_result(tx, request_id, target);
 }
 
 fn navigation_outcome_to_target(outcome: NavigationOutcome) -> Option<NavigationTarget> {
@@ -791,13 +810,13 @@ fn last_path_in_subtree(cache: &mut FilesystemCache, dir: &Path) -> Option<PathB
 }
 
 impl FilesystemCache {
-    fn listing(&mut self, dir: &Path) -> &DirectoryListing {
+    fn listing(&mut self, dir: &Path) -> &mut DirectoryListing {
         if is_listed_file_path(dir) {
             let listing = scan_directory_listing(dir, self.sort);
             self.listings_by_dir.insert(dir.to_path_buf(), listing);
             return self
                 .listings_by_dir
-                .get(dir)
+                .get_mut(dir)
                 .expect("listed file listing inserted");
         }
         let sort = self.sort;
@@ -807,7 +826,22 @@ impl FilesystemCache {
     }
 
     fn supported_entries(&mut self, dir: &Path) -> Vec<PathBuf> {
-        self.listing(dir).files.clone()
+        let listing = self.listing(dir);
+        if !listing.files_expanded {
+            let mut files = Vec::new();
+            for path in listing.file_entries.clone() {
+                if is_listed_file_path(&path) {
+                    files.extend(build_listed_virtual_children(&path));
+                } else if is_zip_file_path(&path) {
+                    files.extend(build_zip_virtual_children(&path));
+                } else {
+                    files.push(path);
+                }
+            }
+            listing.files = files;
+            listing.files_expanded = true;
+        }
+        listing.files.clone()
     }
 
     fn child_directories(&mut self, dir: &Path) -> Vec<PathBuf> {
@@ -824,21 +858,57 @@ impl FilesystemCache {
 }
 
 fn scan_directory_listing(dir: &Path, sort: NavigationSortOption) -> DirectoryListing {
+    let started_at = Instant::now();
     if is_zip_file_path(dir) {
-        return scan_zip_virtual_directory(dir);
+        let listing = scan_zip_virtual_directory(dir);
+        log_global_bench_event(
+            "filesystem.scan_directory_listing",
+            serde_json::json!({
+                "directory": dir.display().to_string(),
+                "kind": "zip",
+                "file_count": listing.files.len(),
+                "dir_count": listing.dirs.len(),
+                "elapsed_ms": started_at.elapsed().as_millis() as u64,
+            }),
+        );
+        return listing;
     }
 
     if is_listed_file_path(dir) {
-        return scan_listed_virtual_directory(dir);
+        let listing = scan_listed_virtual_directory(dir);
+        log_global_bench_event(
+            "filesystem.scan_directory_listing",
+            serde_json::json!({
+                "directory": dir.display().to_string(),
+                "kind": "listed",
+                "file_count": listing.files.len(),
+                "dir_count": listing.dirs.len(),
+                "elapsed_ms": started_at.elapsed().as_millis() as u64,
+            }),
+        );
+        return listing;
     }
 
-    scan_real_directory_listing(dir, sort)
+    let listing = scan_real_directory_listing(dir, sort);
+    log_global_bench_event(
+        "filesystem.scan_directory_listing",
+        serde_json::json!({
+            "directory": dir.display().to_string(),
+            "kind": "real",
+            "file_count": listing.files.len(),
+            "dir_count": listing.dirs.len(),
+            "elapsed_ms": started_at.elapsed().as_millis() as u64,
+        }),
+    );
+    listing
 }
 
 fn scan_listed_virtual_directory(listed_file: &Path) -> DirectoryListing {
     let files = build_listed_virtual_children(listed_file);
 
     DirectoryListing {
+        file_entries: files.clone(),
+        files_expanded: true,
         first_file: files.first().cloned(),
         last_file: files.last().cloned(),
         files,
@@ -854,6 +924,8 @@ fn scan_zip_virtual_directory(zip_file: &Path) -> DirectoryListing {
         .collect::<Vec<_>>();
 
     DirectoryListing {
+        file_entries: files.clone(),
+        files_expanded: true,
         first_file: files.first().cloned(),
         last_file: files.last().cloned(),
         files,
@@ -883,24 +955,42 @@ fn scan_real_directory_listing(dir: &Path, sort: NavigationSortOption) -> Direct
 
     sort_paths(&mut raw_files, sort);
     sort_paths(&mut raw_dirs, sort);
-
-    let mut files = Vec::new();
-    for path in raw_files {
-        if is_listed_file_path(&path) {
-            files.extend(build_listed_virtual_children(&path));
-        } else if is_zip_file_path(&path) {
-            files.extend(build_zip_virtual_children(&path));
-        } else {
-            files.push(path);
-        }
-    }
+    let first_file = raw_files
+        .iter()
+        .find_map(|path| first_supported_path_for_entry(path));
+    let last_file = raw_files
+        .iter()
+        .rev()
+        .find_map(|path| last_supported_path_for_entry(path));
 
     DirectoryListing {
-        first_file: files.first().cloned(),
-        last_file: files.last().cloned(),
-        files,
+        first_file,
+        last_file,
+        file_entries: raw_files,
+        files: Vec::new(),
+        files_expanded: false,
         dirs: raw_dirs,
     }
+}
+
+fn first_supported_path_for_entry(path: &Path) -> Option<PathBuf> {
+    if is_listed_file_path(path) {
+        return build_listed_virtual_children(path).into_iter().next();
+    }
+    if is_zip_file_path(path) {
+        return build_zip_virtual_children(path).into_iter().next();
+    }
+    resolve_start_path(path)
+}
+
+fn last_supported_path_for_entry(path: &Path) -> Option<PathBuf> {
+    if is_listed_file_path(path) {
+        return build_listed_virtual_children(path).into_iter().last();
+    }
+    if is_zip_file_path(path) {
+        return build_zip_virtual_children(path).into_iter().last();
+    }
+    resolve_start_path(path)
 }
 
 pub(crate) fn browser_entry_path_from_dir_entry(entry: &fs::DirEntry) -> Option<PathBuf> {

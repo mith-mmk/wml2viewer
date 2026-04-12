@@ -44,6 +44,15 @@ P5 = 優先度低い
     - ベンチ:
       - `--bench-scenario filer_refresh_race`
       - `--bench-scenario zip_subfiler`
+- [ ] P1 filesystem: Recursive navigation が大きい実ディレクトリで止まる問題
+    - `state-1775968737116-58500.jsonl` の計測で、停止の主因は zip 展開ではなく `kind=real` の directory scan だった
+    - `filesystem.navigation.resolved elapsed_ms=71657` と `filesystem.scan_directory_listing kind=real elapsed_ms=71656` が一致
+    - zip/listed の全 child 展開を lazy にしたことで `state-1775969500278-61124.jsonl` では最大 `1593ms` まで改善
+    - 残りの主因は `F:\\comics\\[同人]` のような親 real directory の `dirs` 走査
+    - 次にやること:
+      - `Recursive` 用の親ディレクトリ列挙 cache を分離する
+      - `child_directories()` 用の軽量 listing を導入して `files` 情報と分ける
+      - `Next/Prev/Last` の request が large parent scan に巻き込まれないようにする
 - [ ] --helpが出ない
 - [ ] 引数エラーのチェックが弱い
 - [ ] inputイベント処理ルーチンの作り直し keyバインドUIを考慮した**zero baseの完全再実装**
