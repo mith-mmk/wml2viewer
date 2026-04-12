@@ -252,20 +252,32 @@ fn bench_automation_plan(name: Option<&str>) -> (&'static str, Vec<BenchAction>)
                 BenchAction::BrowseParentDirectory,
                 BenchAction::BrowseRandomContainer,
                 BenchAction::SelectRandomFileFromFiler,
+                BenchAction::Next,
+                BenchAction::Prev,
                 BenchAction::SelectRandomFileFromFiler,
+                BenchAction::Next,
                 BenchAction::SelectRandomFileFromFiler,
+                BenchAction::Prev,
                 BenchAction::RefreshFiler,
                 BenchAction::BrowseParentDirectory,
                 BenchAction::BrowseRandomContainer,
                 BenchAction::SelectRandomFileFromFiler,
+                BenchAction::Next,
+                BenchAction::Prev,
                 BenchAction::SelectRandomFileFromFiler,
+                BenchAction::Next,
                 BenchAction::SelectRandomFileFromFiler,
+                BenchAction::Prev,
                 BenchAction::RefreshFiler,
                 BenchAction::BrowseParentDirectory,
                 BenchAction::BrowseRandomContainer,
                 BenchAction::SelectRandomFileFromFiler,
+                BenchAction::Next,
+                BenchAction::Prev,
                 BenchAction::SelectRandomFileFromFiler,
+                BenchAction::Next,
                 BenchAction::SelectRandomFileFromFiler,
+                BenchAction::Prev,
             ],
         ),
         Some("zip_to_zip") => (
@@ -1221,12 +1233,10 @@ impl ViewerApp {
     }
 
     fn clear_committed_filer_user_request(&mut self) {
-        let should_clear = match &self.filer.pending_user_request {
-            Some(FilerUserRequest::SelectFile { navigation_path }) => {
-                *navigation_path == self.current_navigation_path
-            }
-            _ => false,
-        };
+        let should_clear = should_clear_filer_select_request_for_current(
+            self.filer.pending_user_request.as_ref(),
+            &self.current_navigation_path,
+        );
         if should_clear {
             self.filer.pending_user_request = None;
             self.filer.committed_browse_directory = None;
@@ -2655,6 +2665,7 @@ impl ViewerApp {
             if self.show_subfiler {
                 self.pending_subfiler_focus_path = Some(self.current_navigation_path.clone());
             }
+            self.clear_committed_filer_user_request();
             self.sync_filer_directory_with_current_path();
         }
         self.source = source;
@@ -2687,8 +2698,6 @@ impl ViewerApp {
             &cache_source,
             &cache_rendered,
         );
-        self.clear_committed_filer_user_request();
-
         if !self.navigator_ready && self.active_fs_request_id.is_none() {
             if self.deferred_filesystem_init_path.is_some() {
                 self.deferred_filesystem_init_path =
@@ -3708,6 +3717,17 @@ fn should_advance_after_load_failure(
         .is_some_and(|path| path == current_navigation_path)
 }
 
+fn should_clear_filer_select_request_for_current(
+    pending_user_request: Option<&FilerUserRequest>,
+    current_navigation_path: &Path,
+) -> bool {
+    matches!(
+        pending_user_request,
+        Some(FilerUserRequest::SelectFile { navigation_path })
+            if navigation_path == current_navigation_path
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3821,6 +3841,8 @@ mod tests {
         assert_eq!(name, "zip_to_zip_random");
         assert!(actions.contains(&BenchAction::BrowseRandomContainer));
         assert!(actions.contains(&BenchAction::SelectRandomFileFromFiler));
+        assert!(actions.contains(&BenchAction::Next));
+        assert!(actions.contains(&BenchAction::Prev));
     }
 
     #[test]
@@ -3857,6 +3879,28 @@ mod tests {
         assert!(!should_advance_after_load_failure(
             Path::new("dir\\current.png"),
             None,
+        ));
+    }
+
+    #[test]
+    fn clears_matching_filer_select_request_for_current_path() {
+        assert!(should_clear_filer_select_request_for_current(
+            Some(&FilerUserRequest::SelectFile {
+                navigation_path: PathBuf::from("dir\\current.png"),
+            }),
+            Path::new("dir\\current.png"),
+        ));
+        assert!(!should_clear_filer_select_request_for_current(
+            Some(&FilerUserRequest::SelectFile {
+                navigation_path: PathBuf::from("dir\\other.png"),
+            }),
+            Path::new("dir\\current.png"),
+        ));
+        assert!(!should_clear_filer_select_request_for_current(
+            Some(&FilerUserRequest::BrowseDirectory {
+                directory: PathBuf::from("dir"),
+            }),
+            Path::new("dir\\current.png"),
         ));
     }
 }
