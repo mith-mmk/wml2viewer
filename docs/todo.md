@@ -24,11 +24,35 @@ P5 = 優先度低い
 ## 優先度1
 - [x] ベンチマークモード（デバッグ用）
 - [x] WML2からロード可能な画像形式をハードコーディングではなくAPI経由(get_encode_extentions, get_decoder_extentions)で取得する
+- [ ] P0 Recursive branch change: ファイラーのファイルは更新されるが、viewerが更新されないバグ
+    - 症状:
+      - filer の表示は更新されるが viewer の更新が適用されない
+      - 停止時に `No Displayable file found` へ落ちることがある
+      - filesystem cache を消すと一時的に治る
+    - `state-1775980641059-45700.jsonl`
+      - `Init` が `Next` に上書きされると再同期が消えて `No Displayable file found` や sync 崩れになる
+    - `state-1775981590816-62468.jsonl`
+      - `Recursive` の branch change で viewer commit が先、filer snapshot が後になってズレる
+    - 実際の問題:
+      - filer 単独ではなく `filesystem` の `Recursive` resolve と branch change commit の整合不良
+    - 次にやること:
+      - `Init` と `Next/Prev` のキュー優先度を分離し、再同期 request が入力で潰れないようにする
+      - branch change を含む `PathResolved` の commit 条件を tighten する
+      - stale filesystem cache に依存した `Recursive` branch resolve を再検証する
+- [ ] P1 filesystem: Recursive navigation が大きい実ディレクトリで止まる問題
+    - `state-1775968737116-58500.jsonl` の計測で、停止の主因は zip 展開ではなく `kind=real` の directory scan だった
+    - `filesystem.navigation.resolved elapsed_ms=71657` と `filesystem.scan_directory_listing kind=real elapsed_ms=71656` が一致
+    - zip/listed の全 child 展開を lazy にしたことで `state-1775969500278-61124.jsonl` では最大 `1593ms` まで改善
+    - 次にやること:
+      - `Recursive` 用の親ディレクトリ列挙 cache を分離する
+      - `child_directories()` 用の軽量 listing を導入して `files` 情報と分ける
+      - `Next/Prev/Last` の request が large parent scan に巻き込まれないようにする
+      - 上の `Recursive branch change` issue と密接に関連している
 - [ ] サブファイラー：右→左表示の修正（表示位置の固定）
 - [ ] サブファイラー：カレントのファイルではなく最後から読み始める
 - [x] 表示位置が現在のファイルと連動していない
-- [ ] P0 filer: フォルダ移動（特に zip -> zip）で高確率に固まる問題
-    - 最優先で対処する
+- [+] filer: フォルダ移動（特に zip -> zip）で高確率に固まる問題
+    - 最優先で対処する(P1がつぶれたのでP3へ移行)
     - 現在の主戦場は `filer` / `subfiler` / `viewer current` / `request ordering`
     - タイミング依存が強く、条件再現が難しい
     - 主な症状:
@@ -46,16 +70,32 @@ P5 = 優先度低い
       - `--bench-scenario zip_subfiler`
     - ログ:
       - `--log` こっちが決め手
-- [ ] P1 filesystem: Recursive navigation が大きい実ディレクトリで止まる問題
-    - `state-1775968737116-58500.jsonl` の計測で、停止の主因は zip 展開ではなく `kind=real` の directory scan だった
-    - `filesystem.navigation.resolved elapsed_ms=71657` と `filesystem.scan_directory_listing kind=real elapsed_ms=71656` が一致
-    - zip/listed の全 child 展開を lazy にしたことで `state-1775969500278-61124.jsonl` では最大 `1593ms` まで改善
-    - 次にやること:
-      - `Recursive` 用の親ディレクトリ列挙 cache を分離する
-      - `child_directories()` 用の軽量 listing を導入して `files` 情報と分ける
-      - `Next/Prev/Last` の request が large parent scan に巻き込まれないようにする
 - [ ] --helpが出ない
 - [ ] 引数エラーのチェックが弱い
+- [x] 漫画モードは条件を満たしたときは2枚束ねて表示
+    - 片側だけ更新が追従できないバグの温床になっている
+
+# 0.0.13で実装されたが一部キャンセル
+- [+] I/Oストリームの改善(zipのパフォーマンスの改善。FileSystemが面倒をみる。)
+    - [*] 優先度によるI/O調停
+      - viewer / companion / preload が同時に archive を触る burst を抑える
+      - まずは render worker 側で `primary > companion > preload` の優先度を持たせる
+      - thumbnail worker も render worker と同じ low-I/O gate に乗せ、primary / companion 中は `Preload` 相当の低優先度として扱う
+      - browser / filer scan も primary load 中は低優先度として扱い、古い request は worker 側で途中キャンセルできるようにする
+      - 現状の問題点:
+        - render(primary/companion/preload) が別 worker のままで、archive read queue が一本化されていない
+        - manga mode は `current + companion + preload` が絡み、通常表示より I/O burst しやすい
+        - filer / thumbnail は低優先度化したが、visible 時の direct request は still UI 側から個別に発火する
+      - 次にやること:
+        - zip/tiff だけでも `current > companion > preload > filer > thumbnail` の単一 queue に寄せる
+        - companion と preload の read path を統合し、同じ page の二重 open をなくす
+        - thumbnail hint は worker 側で drop できるようにし、viewer 側の後段判定に頼らない
+    - [*] ロードキャンセル/SKIPの実装(重いzip対策)
+      - まずは zip 読み出し中に古い companion / preload を早めに打ち切れるようにする
+      - ただし cancel は「別 worker が既に read 開始済み」の分までは止めきれていない
+      - queue 一本化前提で cancel / skip を整理し直す
+
+## 0.0.15へ移動か？
 - [ ] inputイベント処理ルーチンの作り直し keyバインドUIを考慮した**zero baseの完全再実装**
     - [ ] メッセージ受け渡しの受け渡しの問題の対処(イベントマネージャによる対応)
       - [ ] イベントをマネージャーに分離することで、イベントの衝突、抜けを防ぐ
@@ -77,26 +117,6 @@ P5 = 優先度低い
         - [ ] issue: ファイラーでzipを選んだときロード中の画面が出ない問題
     - [ ] UXファースト
     - [ ] 0.0.12と比較して改善していることを確認すること（毎回悪化している）
-- [x] 漫画モードは条件を満たしたときは2枚束ねて表示
-    - 片側だけ更新が追従できないバグの温床になっている
-- [+] I/Oストリームの改善(zipのパフォーマンスの改善。FileSystemが面倒をみる。)
-    - [*] 優先度によるI/O調停
-      - viewer / companion / preload が同時に archive を触る burst を抑える
-      - まずは render worker 側で `primary > companion > preload` の優先度を持たせる
-      - thumbnail worker も render worker と同じ low-I/O gate に乗せ、primary / companion 中は `Preload` 相当の低優先度として扱う
-      - browser / filer scan も primary load 中は低優先度として扱い、古い request は worker 側で途中キャンセルできるようにする
-      - 現状の問題点:
-        - render(primary/companion/preload) が別 worker のままで、archive read queue が一本化されていない
-        - manga mode は `current + companion + preload` が絡み、通常表示より I/O burst しやすい
-        - filer / thumbnail は低優先度化したが、visible 時の direct request は still UI 側から個別に発火する
-      - 次にやること:
-        - zip/tiff だけでも `current > companion > preload > filer > thumbnail` の単一 queue に寄せる
-        - companion と preload の read path を統合し、同じ page の二重 open をなくす
-        - thumbnail hint は worker 側で drop できるようにし、viewer 側の後段判定に頼らない
-    - [*] ロードキャンセル/SKIPの実装(重いzip対策)
-      - まずは zip 読み出し中に古い companion / preload を早めに打ち切れるようにする
-      - ただし cancel は「別 worker が既に read 開始済み」の分までは止めきれていない
-      - queue 一本化前提で cancel / skip を整理し直す
 - [ ] キーバインドのカスタマイズ 
   - [ ] デフォルト・キーバインドの変更
   - [ ] 設定UI

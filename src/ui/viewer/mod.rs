@@ -95,6 +95,7 @@ pub(crate) struct ViewerApp {
     pub(crate) fs_rx: Option<Receiver<FilesystemResult>>,
     pub(crate) next_fs_request_id: u64,
     pub(crate) active_fs_request_id: Option<u64>,
+    pub(crate) queued_filesystem_init_path: Option<PathBuf>,
     pub(crate) queued_navigation: Option<FilesystemCommand>,
     pub(crate) deferred_filesystem_init_path: Option<PathBuf>,
     pub(crate) filer_tx: Option<Sender<FilerCommand>>,
@@ -555,6 +556,7 @@ impl ViewerApp {
             fs_rx: None,
             next_fs_request_id: 0,
             active_fs_request_id: None,
+            queued_filesystem_init_path: None,
             queued_navigation: None,
             deferred_filesystem_init_path: None,
             filer_tx: None,
@@ -1858,6 +1860,7 @@ impl ViewerApp {
                     "navigator_ready": self.navigator_ready,
                     "active_request": format!("{:?}", self.active_request),
                     "active_fs_request_id": self.active_fs_request_id,
+                    "queued_filesystem_init_path": self.queued_filesystem_init_path.as_ref().map(|path| path.display().to_string()),
                     "queued_navigation": self.queued_navigation.as_ref().map(|command| format!("{command:?}")),
                     "startup_phase": format!("{:?}", self.startup_phase),
                     "show_filer": self.show_filer,
@@ -2567,10 +2570,7 @@ impl ViewerApp {
                     "active_fs_request_id": self.active_fs_request_id,
                 }),
             );
-            self.queued_navigation = Some(FilesystemCommand::Init {
-                request_id: 0,
-                path,
-            });
+            queue_filesystem_init_path(&mut self.queued_filesystem_init_path, path);
             return Ok(());
         }
         let Some(fs_tx) = self.fs_tx.clone() else {
@@ -3375,7 +3375,9 @@ impl ViewerApp {
             }
         }
         if self.active_fs_request_id.is_none() {
-            if let Some(command) = self.queued_navigation.take() {
+            if let Some(path) = self.queued_filesystem_init_path.take() {
+                let _ = self.init_filesystem(path);
+            } else if let Some(command) = self.queued_navigation.take() {
                 let _ = self.request_navigation(command);
             }
         }
@@ -3797,6 +3799,10 @@ fn should_queue_filesystem_init(active_fs_request_id: Option<u64>) -> bool {
     active_fs_request_id.is_some()
 }
 
+fn queue_filesystem_init_path(slot: &mut Option<PathBuf>, path: PathBuf) {
+    *slot = Some(path);
+}
+
 fn should_defer_companion_sync_during_primary_load(
     active_request: Option<ActiveRenderRequest>,
 ) -> bool {
@@ -4026,6 +4032,30 @@ mod tests {
     fn queues_filesystem_init_when_request_is_already_active() {
         assert!(should_queue_filesystem_init(Some(1)));
         assert!(!should_queue_filesystem_init(None));
+    }
+
+    #[test]
+    fn queued_filesystem_init_is_not_overwritten_by_navigation_queue() {
+        let mut queued_init = None;
+        queue_filesystem_init_path(&mut queued_init, PathBuf::from("dir-a"));
+        let mut queued_navigation = Some(FilesystemCommand::Next {
+            request_id: 0,
+            policy: EndOfFolderOption::Recursive,
+        });
+
+        queued_navigation = Some(FilesystemCommand::Prev {
+            request_id: 0,
+            policy: EndOfFolderOption::Recursive,
+        });
+
+        assert_eq!(queued_init, Some(PathBuf::from("dir-a")));
+        assert!(matches!(
+            queued_navigation,
+            Some(FilesystemCommand::Prev {
+                policy: EndOfFolderOption::Recursive,
+                ..
+            })
+        ));
     }
 
     #[test]
