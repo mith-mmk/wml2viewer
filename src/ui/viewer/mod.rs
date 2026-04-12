@@ -179,6 +179,11 @@ enum PendingViewerNavigation {
     Last,
 }
 
+enum PendingFilesystemWork {
+    Init(PathBuf),
+    Command(FilesystemCommand),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BenchAction {
     Reload,
@@ -320,6 +325,23 @@ fn should_clear_filer_user_request_after_snapshot(request: Option<&FilerUserRequ
 
 fn should_reinitialize_filesystem_after_load(previous: &Path, current: &Path) -> bool {
     navigation_branch_path(previous) != navigation_branch_path(current)
+}
+
+fn queue_navigation_command(slot: &mut Option<FilesystemCommand>, command: FilesystemCommand) {
+    *slot = Some(command);
+}
+
+fn take_next_queued_filesystem_work(
+    queued_filesystem_init_path: &mut Option<PathBuf>,
+    queued_navigation: &mut Option<FilesystemCommand>,
+) -> Option<PendingFilesystemWork> {
+    if let Some(path) = queued_filesystem_init_path.take() {
+        Some(PendingFilesystemWork::Init(path))
+    } else {
+        queued_navigation
+            .take()
+            .map(PendingFilesystemWork::Command)
+    }
 }
 
 fn calc_fit_zoom(ctx_size: egui::Vec2, image_size: egui::Vec2, option: &ZoomOption) -> f32 {
@@ -2602,7 +2624,7 @@ impl ViewerApp {
                     "command": format!("{command:?}"),
                 }),
             );
-            self.queued_navigation = Some(command);
+            queue_navigation_command(&mut self.queued_navigation, command);
             return Ok(());
         }
         if self.active_fs_request_id.is_some() {
@@ -2612,7 +2634,7 @@ impl ViewerApp {
                     "command": format!("{command:?}"),
                 }),
             );
-            self.queued_navigation = Some(command);
+            queue_navigation_command(&mut self.queued_navigation, command);
             return Ok(());
         }
         let Some(fs_tx) = self.fs_tx.clone() else {
@@ -2622,7 +2644,7 @@ impl ViewerApp {
                     "command": format!("{command:?}"),
                 }),
             );
-            self.queued_navigation = Some(command);
+            queue_navigation_command(&mut self.queued_navigation, command);
             return Ok(());
         };
         let request_id = self.alloc_fs_request_id();
@@ -2723,6 +2745,18 @@ impl ViewerApp {
             }
             if self.show_subfiler {
                 self.pending_subfiler_focus_path = Some(self.current_navigation_path.clone());
+            }
+            if should_clear_stale_filer_refresh_request(
+                self.filer.pending_user_request.as_ref(),
+                self.current_directory().as_deref(),
+            ) {
+                self.log_bench_state(
+                    "viewer.filer.refresh_request_cleared_after_branch_change",
+                    serde_json::json!({
+                        "current_directory": self.current_directory().map(|path| path.display().to_string()),
+                    }),
+                );
+                self.filer.pending_user_request = None;
             }
             self.clear_committed_filer_user_request();
             self.sync_filer_directory_with_current_path();
@@ -3375,10 +3409,17 @@ impl ViewerApp {
             }
         }
         if self.active_fs_request_id.is_none() {
-            if let Some(path) = self.queued_filesystem_init_path.take() {
-                let _ = self.init_filesystem(path);
-            } else if let Some(command) = self.queued_navigation.take() {
-                let _ = self.request_navigation(command);
+            match take_next_queued_filesystem_work(
+                &mut self.queued_filesystem_init_path,
+                &mut self.queued_navigation,
+            ) {
+                Some(PendingFilesystemWork::Init(path)) => {
+                    let _ = self.init_filesystem(path);
+                }
+                Some(PendingFilesystemWork::Command(command)) => {
+                    let _ = self.request_navigation(command);
+                }
+                None => {}
             }
         }
     }
@@ -3795,6 +3836,19 @@ fn should_clear_filer_select_request_for_current(
     )
 }
 
+fn should_clear_stale_filer_refresh_request(
+    pending_user_request: Option<&FilerUserRequest>,
+    current_directory: Option<&Path>,
+) -> bool {
+    matches!(
+        (pending_user_request, current_directory),
+        (
+            Some(FilerUserRequest::Refresh { directory, .. }),
+            Some(current_directory),
+        ) if directory != current_directory
+    )
+}
+
 fn should_queue_filesystem_init(active_fs_request_id: Option<u64>) -> bool {
     active_fs_request_id.is_some()
 }
@@ -4029,6 +4083,37 @@ mod tests {
     }
 
     #[test]
+    fn clears_stale_filer_refresh_request_after_directory_change() {
+        assert!(should_clear_stale_filer_refresh_request(
+            Some(&FilerUserRequest::Refresh {
+                directory: PathBuf::from("dir-a"),
+                selected: Some(PathBuf::from("dir-a\\current.png")),
+            }),
+            Some(Path::new("dir-b")),
+        ));
+        assert!(!should_clear_stale_filer_refresh_request(
+            Some(&FilerUserRequest::Refresh {
+                directory: PathBuf::from("dir-a"),
+                selected: Some(PathBuf::from("dir-a\\current.png")),
+            }),
+            Some(Path::new("dir-a")),
+        ));
+        assert!(!should_clear_stale_filer_refresh_request(
+            Some(&FilerUserRequest::SelectFile {
+                navigation_path: PathBuf::from("dir-a\\current.png"),
+            }),
+            Some(Path::new("dir-b")),
+        ));
+        assert!(!should_clear_stale_filer_refresh_request(
+            Some(&FilerUserRequest::Refresh {
+                directory: PathBuf::from("dir-a"),
+                selected: None,
+            }),
+            None,
+        ));
+    }
+
+    #[test]
     fn queues_filesystem_init_when_request_is_already_active() {
         assert!(should_queue_filesystem_init(Some(1)));
         assert!(!should_queue_filesystem_init(None));
@@ -4038,12 +4123,12 @@ mod tests {
     fn queued_filesystem_init_is_not_overwritten_by_navigation_queue() {
         let mut queued_init = None;
         queue_filesystem_init_path(&mut queued_init, PathBuf::from("dir-a"));
-        let mut queued_navigation = Some(FilesystemCommand::Next {
+        let mut queued_navigation = None;
+        queue_navigation_command(&mut queued_navigation, FilesystemCommand::Next {
             request_id: 0,
             policy: EndOfFolderOption::Recursive,
         });
-
-        queued_navigation = Some(FilesystemCommand::Prev {
+        queue_navigation_command(&mut queued_navigation, FilesystemCommand::Prev {
             request_id: 0,
             policy: EndOfFolderOption::Recursive,
         });
@@ -4056,6 +4141,32 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn queued_filesystem_work_prioritizes_init_before_navigation() {
+        let mut queued_init = Some(PathBuf::from("dir-a"));
+        let mut queued_navigation = Some(FilesystemCommand::Next {
+            request_id: 0,
+            policy: EndOfFolderOption::Recursive,
+        });
+
+        let first = take_next_queued_filesystem_work(&mut queued_init, &mut queued_navigation);
+        let second = take_next_queued_filesystem_work(&mut queued_init, &mut queued_navigation);
+
+        assert!(matches!(
+            first,
+            Some(PendingFilesystemWork::Init(path)) if path == PathBuf::from("dir-a")
+        ));
+        assert!(matches!(
+            second,
+            Some(PendingFilesystemWork::Command(FilesystemCommand::Next {
+                policy: EndOfFolderOption::Recursive,
+                ..
+            }))
+        ));
+        assert!(queued_init.is_none());
+        assert!(queued_navigation.is_none());
     }
 
     #[test]

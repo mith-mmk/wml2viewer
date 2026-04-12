@@ -24,7 +24,10 @@ P5 = 優先度低い
 ## 優先度1
 - [x] ベンチマークモード（デバッグ用）
 - [x] WML2からロード可能な画像形式をハードコーディングではなくAPI経由(get_encode_extentions, get_decoder_extentions)で取得する
-- [ ] P0 Recursive branch change: ファイラーのファイルは更新されるが、viewerが更新されないバグ
+- [ ] --helpが出ない
+- [ ] 引数エラーのチェックが弱い
+- [ ] フォントサイズのデフォルトがSになっているので自動に変更
+- [ ] P3 Recursive branch change: ファイラーのファイルは更新されるが、viewerが更新されないバグ（継続調査）
     - 症状:
       - filer の表示は更新されるが viewer の更新が適用されない
       - 停止時に `No Displayable file found` へ落ちることがある
@@ -39,7 +42,7 @@ P5 = 優先度低い
       - `Init` と `Next/Prev` のキュー優先度を分離し、再同期 request が入力で潰れないようにする
       - branch change を含む `PathResolved` の commit 条件を tighten する
       - stale filesystem cache に依存した `Recursive` branch resolve を再検証する
-- [ ] P1 filesystem: Recursive navigation が大きい実ディレクトリで止まる問題
+- [ ] P3 filesystem: Recursive navigation が大きい実ディレクトリで止まる問題（継続調査）
     - `state-1775968737116-58500.jsonl` の計測で、停止の主因は zip 展開ではなく `kind=real` の directory scan だった
     - `filesystem.navigation.resolved elapsed_ms=71657` と `filesystem.scan_directory_listing kind=real elapsed_ms=71656` が一致
     - zip/listed の全 child 展開を lazy にしたことで `state-1775969500278-61124.jsonl` では最大 `1593ms` まで改善
@@ -48,9 +51,29 @@ P5 = 優先度低い
       - `child_directories()` 用の軽量 listing を導入して `files` 情報と分ける
       - `Next/Prev/Last` の request が large parent scan に巻き込まれないようにする
       - 上の `Recursive branch change` issue と密接に関連している
-- [ ] サブファイラー：右→左表示の修正（表示位置の固定）
-- [ ] サブファイラー：カレントのファイルではなく最後から読み始める
+- [ ] P3 サブファイラー：右→左表示の修正（表示位置の固定）
+- [ ] P3 サブファイラー：カレントのファイルではなく最後から読み始める
 - [x] 表示位置が現在のファイルと連動していない
+- [ ] P2 filer / subfiler 総合整理
+    - 現在の残課題を filer 単独ではなく `viewer / filesystem / filer / subfiler` の同期問題としてまとめて扱う
+    - sort の truth を 1 か所に寄せる
+      - filer の sort が viewer navigation に反映されない
+      - viewer の current order と filer の表示順がズレる
+    - scroll / focus の追従
+      - filer の表示位置が current に追従しない
+      - 毎回下までスクロールしないといけない
+      - subfiler も current 近傍を基準に表示したい
+    - request / snapshot / current sync
+      - filer scan 完了前後で viewer current と selected がズレる
+      - branch change / recursive navigation / filer click の完了順で再発しやすい
+    - scan / thumbnail / visible range
+      - subfiler thumbnail が current 近傍優先ではない
+      - visible range と current 近傍を優先する
+    - 含める issue
+      - zip -> zip で固まる / 1枚目で止まる
+      - ファイラーのファイルは更新されるが viewer が更新されない
+      - zip内のファイルで終了したときそのファイルではなくファイラーを起動してしまう
+      - ファイラーで zip を選んだとき loading / wait 表示が弱い
 - [+] filer: フォルダ移動（特に zip -> zip）で高確率に固まる問題
     - 最優先で対処する(P1がつぶれたのでP3へ移行)
     - 現在の主戦場は `filer` / `subfiler` / `viewer current` / `request ordering`
@@ -70,8 +93,7 @@ P5 = 優先度低い
       - `--bench-scenario zip_subfiler`
     - ログ:
       - `--log` こっちが決め手
-- [ ] --helpが出ない
-- [ ] 引数エラーのチェックが弱い
+
 - [x] 漫画モードは条件を満たしたときは2枚束ねて表示
     - 片側だけ更新が追従できないバグの温床になっている
 
@@ -120,7 +142,7 @@ P5 = 優先度低い
 - [ ] キーバインドのカスタマイズ 
   - [ ] デフォルト・キーバインドの変更
   - [ ] 設定UI
-- [ ] フォントサイズのデフォルトがSになっているので自動に変更
+
 - [ ] 右クリックメニューの変更
     ```
     ファイル -> 再読み込み/移動/コピー/削除

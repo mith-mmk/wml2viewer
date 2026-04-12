@@ -239,6 +239,9 @@ impl FileNavigator {
         if self.next(cache).is_some() {
             return self.current_target();
         }
+        if self.refresh_current_container_listing(cache) && self.next(cache).is_some() {
+            return self.current_target();
+        }
 
         match policy {
             EndOfFolderOption::Stop => NavigationOutcome::NoPath,
@@ -266,6 +269,9 @@ impl FileNavigator {
         cache: &mut FilesystemCache,
     ) -> NavigationOutcome {
         if self.prev(cache).is_some() {
+            return self.current_target();
+        }
+        if self.refresh_current_container_listing(cache) && self.prev(cache).is_some() {
             return self.current_target();
         }
 
@@ -318,6 +324,16 @@ impl FileNavigator {
         self.files = None;
         self.current = 0;
         Some(self.current_target())
+    }
+
+    fn refresh_current_container_listing(&mut self, cache: &mut FilesystemCache) -> bool {
+        let Some(container_dir) = flat_container_dir(self.current()) else {
+            return false;
+        };
+        cache.refresh_listing(&container_dir);
+        self.files = None;
+        let files = self.ensure_files(cache);
+        !files.is_empty()
     }
 }
 
@@ -810,10 +826,14 @@ fn last_path_in_subtree(cache: &mut FilesystemCache, dir: &Path) -> Option<PathB
 }
 
 impl FilesystemCache {
+    fn refresh_listing(&mut self, dir: &Path) {
+        let listing = scan_directory_listing(dir, self.sort);
+        self.listings_by_dir.insert(dir.to_path_buf(), listing);
+    }
+
     fn listing(&mut self, dir: &Path) -> &mut DirectoryListing {
         if is_listed_file_path(dir) {
-            let listing = scan_directory_listing(dir, self.sort);
-            self.listings_by_dir.insert(dir.to_path_buf(), listing);
+            self.refresh_listing(dir);
             return self
                 .listings_by_dir
                 .get_mut(dir)
@@ -1745,6 +1765,39 @@ mod tests {
         assert_ne!(rebased, old_page2);
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn next_refreshes_stale_directory_listing_before_recursive_branch_change() {
+        let parent = make_temp_dir();
+        let current_dir = parent.join("000_current");
+        let next_dir = parent.join("001_next");
+        let current = current_dir.join("001_current.png");
+        let stale_last = current_dir.join("002_last.png");
+        let appended = current_dir.join("003_appended.png");
+        let sibling_image = next_dir.join("000_sibling.png");
+
+        fs::create_dir_all(&current_dir).unwrap();
+        fs::create_dir_all(&next_dir).unwrap();
+        fs::write(&current, []).unwrap();
+        fs::write(&stale_last, []).unwrap();
+        fs::write(&sibling_image, []).unwrap();
+
+        let mut cache = FilesystemCache::default();
+        let mut nav = FileNavigator::from_current_path(stale_last.clone(), &mut cache);
+
+        fs::write(&appended, []).unwrap();
+
+        let NavigationOutcome::Resolved(target) =
+            nav.next_with_policy(EndOfFolderOption::Recursive, &mut cache)
+        else {
+            panic!("expected appended file from refreshed listing");
+        };
+
+        assert_eq!(target.navigation_path, appended);
+        assert_eq!(target.load_path, appended);
+
+        let _ = fs::remove_dir_all(parent);
     }
 
     #[test]
