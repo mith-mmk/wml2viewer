@@ -192,6 +192,7 @@ enum BenchAction {
     BrowseSiblingContainer,
     BrowseRandomContainer,
     SelectNeighborFromFiler,
+    SelectRandomFileFromFiler,
 }
 
 struct BenchAutomationState {
@@ -250,12 +251,21 @@ fn bench_automation_plan(name: Option<&str>) -> (&'static str, Vec<BenchAction>)
             vec![
                 BenchAction::BrowseParentDirectory,
                 BenchAction::BrowseRandomContainer,
+                BenchAction::SelectRandomFileFromFiler,
+                BenchAction::SelectRandomFileFromFiler,
+                BenchAction::SelectRandomFileFromFiler,
                 BenchAction::RefreshFiler,
                 BenchAction::BrowseParentDirectory,
                 BenchAction::BrowseRandomContainer,
+                BenchAction::SelectRandomFileFromFiler,
+                BenchAction::SelectRandomFileFromFiler,
+                BenchAction::SelectRandomFileFromFiler,
                 BenchAction::RefreshFiler,
                 BenchAction::BrowseParentDirectory,
                 BenchAction::BrowseRandomContainer,
+                BenchAction::SelectRandomFileFromFiler,
+                BenchAction::SelectRandomFileFromFiler,
+                BenchAction::SelectRandomFileFromFiler,
             ],
         ),
         Some("zip_to_zip") => (
@@ -305,6 +315,10 @@ fn bench_automation_plan(name: Option<&str>) -> (&'static str, Vec<BenchAction>)
 
 fn should_clear_filer_user_request_after_snapshot(request: Option<&FilerUserRequest>) -> bool {
     matches!(request, Some(FilerUserRequest::Refresh { .. }))
+}
+
+fn should_reinitialize_filesystem_after_load(previous: &Path, current: &Path) -> bool {
+    navigation_branch_path(previous) != navigation_branch_path(current)
 }
 
 fn calc_fit_zoom(ctx_size: egui::Vec2, image_size: egui::Vec2, option: &ZoomOption) -> f32 {
@@ -1846,6 +1860,7 @@ impl ViewerApp {
                     "filer_selected": self.filer.selected.as_ref().map(|path| path.display().to_string()),
                     "filer_pending_request_id": self.filer.pending_request_id,
                     "filer_pending_user_request": self.filer.pending_user_request.as_ref().map(|request| format!("{request:?}")),
+                    "filer_committed_browse_directory": self.filer.committed_browse_directory.as_ref().map(|path| path.display().to_string()),
                     "pending_subfiler_focus_path": self.pending_subfiler_focus_path.as_ref().map(|path| path.display().to_string()),
                     "active_preload_request_id": self.active_preload_request_id,
                     "pending_preload_navigation_path": self.pending_preload_navigation_path.as_ref().map(|path| path.display().to_string()),
@@ -1968,6 +1983,32 @@ impl ViewerApp {
                     .find(|entry| !entry.is_container)
                     .map(|entry| entry.path.clone())
             })
+    }
+
+    fn bench_random_file_entry(&mut self) -> Option<crate::ui::menu::fileviewer::state::FilerEntry> {
+        let entries = self
+            .filer
+            .entries
+            .iter()
+            .filter(|entry| !entry.is_container)
+            .cloned()
+            .collect::<Vec<_>>();
+        let index = self.next_bench_random_index(entries.len())?;
+        entries.get(index).cloned()
+    }
+
+    fn bench_random_container_entry(
+        &mut self,
+    ) -> Option<crate::ui::menu::fileviewer::state::FilerEntry> {
+        let entries = self
+            .filer
+            .entries
+            .iter()
+            .filter(|entry| entry.is_container)
+            .cloned()
+            .collect::<Vec<_>>();
+        let index = self.next_bench_random_index(entries.len())?;
+        entries.get(index).cloned()
     }
 
     fn bench_sibling_container_path(&self) -> Option<PathBuf> {
@@ -2143,6 +2184,16 @@ impl ViewerApp {
                     self.pending_subfiler_focus_path = Some(path.clone());
                 }
                 let _ = self.request_load_target(path, load_path);
+                true
+            }
+            BenchAction::SelectRandomFileFromFiler => {
+                let Some(entry) = self
+                    .bench_random_file_entry()
+                    .or_else(|| self.bench_random_container_entry())
+                else {
+                    return false;
+                };
+                self.bench_activate_filer_entry(entry);
                 true
             }
         }
@@ -2580,16 +2631,22 @@ impl ViewerApp {
         }
         let loaded_path = path.clone();
         if let Some(path) = path {
-            let request_id = self.alloc_fs_request_id();
-            let folder_changed = navigation_branch_path(&previous_navigation_path)
-                != navigation_branch_path(&self.current_navigation_path);
+            let folder_changed = should_reinitialize_filesystem_after_load(
+                &previous_navigation_path,
+                &self.current_navigation_path,
+            );
             self.current_path = path.clone();
             self.save_dialog.file_name = default_save_file_name(&path);
             if folder_changed {
                 self.clear_manga_companion();
                 self.prev_texture = None;
             }
-            if let Some(fs_tx) = &self.fs_tx {
+            if folder_changed {
+                self.navigator_ready = false;
+                self.queued_navigation = None;
+                let _ = self.init_filesystem(self.current_navigation_path.clone());
+            } else if let Some(fs_tx) = self.fs_tx.clone() {
+                let request_id = self.alloc_fs_request_id();
                 let _ = fs_tx.send(FilesystemCommand::SetCurrent {
                     request_id,
                     path: self.current_navigation_path.clone(),
@@ -2896,7 +2953,12 @@ impl ViewerApp {
                     );
                     let failed_during_load =
                         matches!(active_request, ActiveRenderRequest::Load(_));
-                    self.pending_navigation_path = None;
+                    let failed_navigation_path = self.pending_navigation_path.take();
+                    let should_advance = failed_during_load
+                        && should_advance_after_load_failure(
+                            &self.current_navigation_path,
+                            failed_navigation_path.as_deref(),
+                        );
                     let label = path
                         .as_ref()
                         .and_then(|path| path.file_name())
@@ -2907,6 +2969,20 @@ impl ViewerApp {
                     self.show_loading_texture(true);
                     self.overlay.clear_loading_message();
                     self.active_request = None;
+                    if matches!(
+                        self.filer.pending_user_request,
+                        Some(FilerUserRequest::SelectFile { .. })
+                    ) {
+                        self.log_bench_state(
+                            "viewer.filer.select_request_cleared_after_load_failure",
+                            serde_json::json!({
+                                "failed_navigation_path": failed_navigation_path
+                                    .as_ref()
+                                    .map(|path| path.display().to_string()),
+                            }),
+                        );
+                        self.filer.pending_user_request = None;
+                    }
                     self.flush_pending_viewer_navigation();
                     if !self.navigator_ready && self.active_fs_request_id.is_none() {
                         if self.deferred_filesystem_init_path.is_some() {
@@ -2915,7 +2991,7 @@ impl ViewerApp {
                             self.defer_initial_filesystem_sync();
                         }
                     }
-                    if failed_during_load {
+                    if should_advance {
                         let _ = self.next_image();
                     }
                 }
@@ -3624,6 +3700,14 @@ fn filesystem_send_error(err: mpsc::SendError<FilesystemCommand>) -> Box<dyn Err
     Box::new(std::io::Error::other(err.to_string()))
 }
 
+fn should_advance_after_load_failure(
+    current_navigation_path: &Path,
+    failed_navigation_path: Option<&Path>,
+) -> bool {
+    failed_navigation_path
+        .is_some_and(|path| path == current_navigation_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3736,6 +3820,7 @@ mod tests {
 
         assert_eq!(name, "zip_to_zip_random");
         assert!(actions.contains(&BenchAction::BrowseRandomContainer));
+        assert!(actions.contains(&BenchAction::SelectRandomFileFromFiler));
     }
 
     #[test]
@@ -3745,5 +3830,33 @@ mod tests {
                 directory: PathBuf::from("dir"),
             },
         )));
+    }
+
+    #[test]
+    fn branch_change_requires_filesystem_reinit_after_load() {
+        assert!(should_reinitialize_filesystem_after_load(
+            Path::new("a.zip\\__zipv__\\0001.jpg"),
+            Path::new("b.zip\\__zipv__\\0001.jpg"),
+        ));
+        assert!(!should_reinitialize_filesystem_after_load(
+            Path::new("a.zip\\__zipv__\\0001.jpg"),
+            Path::new("a.zip\\__zipv__\\0002.jpg"),
+        ));
+    }
+
+    #[test]
+    fn load_failure_only_auto_advances_when_current_image_failed() {
+        assert!(should_advance_after_load_failure(
+            Path::new("dir\\current.png"),
+            Some(Path::new("dir\\current.png")),
+        ));
+        assert!(!should_advance_after_load_failure(
+            Path::new("dir\\current.png"),
+            Some(Path::new("dir\\other.png")),
+        ));
+        assert!(!should_advance_after_load_failure(
+            Path::new("dir\\current.png"),
+            None,
+        ));
     }
 }
