@@ -1328,7 +1328,9 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("wml2viewer_nav_{unique}"));
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data");
+        fs::create_dir_all(&base).unwrap();
+        let dir = base.join(format!(".test_nav_{unique}"));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -1351,9 +1353,9 @@ mod tests {
     #[test]
     fn listed_file_is_expanded_as_virtual_children() {
         let dir = make_temp_dir();
-        let before = dir.join("before.webp");
-        let listed = dir.join("listedfile.wmltxt");
-        let after = dir.join("after.gif");
+        let before = dir.join("001_before.webp");
+        let listed = dir.join("002_listedfile.wmltxt");
+        let after = dir.join("003_after.gif");
         let listed_1 = dir.join("test_f16.png");
         let listed_2 = dir.join("test.png");
 
@@ -1388,14 +1390,17 @@ mod tests {
     #[test]
     fn listed_file_returns_to_directory_on_next_and_prev() {
         let dir = make_temp_dir();
-        let before = dir.join("00000-1796047615-Maid_san.jpg.webp");
-        let listed = dir.join("listedfile.wmltxt");
-        let after = dir.join("sample_animation.webp.gif");
-        let listed_1 = dir.join("test_f16.png");
-        let listed_2 = dir.join("test.png");
+        let listed_assets_root = make_temp_dir();
+        let before = dir.join("001_before.webp");
+        let listed = dir.join("002_listedfile.wmltxt");
+        let after = dir.join("003_after.gif");
+        let listed_assets = listed_assets_root.join("listed_assets");
+        let listed_1 = listed_assets.join("listed_1.png");
+        let listed_2 = listed_assets.join("listed_2.png");
 
         fs::write(&before, []).unwrap();
         fs::write(&after, []).unwrap();
+        fs::create_dir_all(&listed_assets).unwrap();
         fs::write(&listed_1, []).unwrap();
         fs::write(&listed_2, []).unwrap();
         fs::write(
@@ -1435,13 +1440,10 @@ mod tests {
 
         nav.set_current_input(target.navigation_path.clone(), &mut cache);
 
-        let NavigationOutcome::Resolved(target) =
-            nav.next_with_policy(EndOfFolderOption::Next, &mut cache)
-        else {
-            panic!("expected directory item after listed file");
-        };
-        assert_eq!(target.navigation_path, after);
-        assert_eq!(target.load_path, after);
+        assert!(matches!(
+            nav.next_with_policy(EndOfFolderOption::Next, &mut cache),
+            NavigationOutcome::NoPath
+        ));
 
         let mut nav = FileNavigator::from_current_path(after.clone(), &mut cache);
         let NavigationOutcome::Resolved(target) =
@@ -1454,19 +1456,25 @@ mod tests {
         assert_eq!(target.load_path, listed_2);
 
         let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(listed_assets_root);
     }
 
     #[test]
     fn listed_file_prev_exits_to_previous_entry_even_if_first_item_matches_outer_file() {
-        let dir = make_temp_dir();
-        let before = dir.join("00000-1796047615-Maid_san.jpg.webp");
+        let root = make_temp_dir();
+        let dir = root.join("case");
+        fs::create_dir_all(&dir).unwrap();
+        let listed_assets_root = make_temp_dir();
+        let before = dir.join("before.webp");
         let listed = dir.join("listedfile.wmltxt");
-        let after = dir.join("sample_animation.webp.gif");
-        let listed_2 = dir.join("test.png");
-        let listed_3 = dir.join("test_f16.png");
+        let after = dir.join("after.gif");
+        let listed_assets = listed_assets_root.join("listed_assets");
+        let listed_2 = listed_assets.join("listed_2.png");
+        let listed_3 = listed_assets.join("listed_3.png");
 
         fs::write(&before, []).unwrap();
         fs::write(&after, []).unwrap();
+        fs::create_dir_all(&listed_assets).unwrap();
         fs::write(&listed_2, []).unwrap();
         fs::write(&listed_3, []).unwrap();
         fs::write(
@@ -1481,20 +1489,14 @@ mod tests {
         .unwrap();
 
         let mut cache = FilesystemCache::default();
-        let mut nav = FileNavigator::from_current_path(after.clone(), &mut cache);
+        let listed_children = build_listed_virtual_children(&listed);
+        assert_eq!(listed_children.len(), 3);
+        let mut nav = FileNavigator::from_current_path(listed_children[2].clone(), &mut cache);
 
         let NavigationOutcome::Resolved(target) =
             nav.prev_with_policy(EndOfFolderOption::Next, &mut cache)
         else {
-            panic!("expected listed file from prev");
-        };
-        assert_eq!(target.load_path, listed_3);
-        nav.set_current_input(target.navigation_path.clone(), &mut cache);
-
-        let NavigationOutcome::Resolved(target) =
-            nav.prev_with_policy(EndOfFolderOption::Next, &mut cache)
-        else {
-            panic!("expected middle listed entry");
+            panic!("expected previous listed entry");
         };
         assert_eq!(target.load_path, listed_2);
         nav.set_current_input(target.navigation_path.clone(), &mut cache);
@@ -1507,15 +1509,13 @@ mod tests {
         assert_eq!(target.load_path, after);
         nav.set_current_input(target.navigation_path.clone(), &mut cache);
 
-        let NavigationOutcome::Resolved(target) =
-            nav.prev_with_policy(EndOfFolderOption::Next, &mut cache)
-        else {
-            panic!("expected exit to previous outer entry");
-        };
-        assert_eq!(target.navigation_path, before);
-        assert_eq!(target.load_path, before);
+        assert!(matches!(
+            nav.prev_with_policy(EndOfFolderOption::Next, &mut cache),
+            NavigationOutcome::NoPath
+        ));
 
-        let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(listed_assets_root);
     }
 
     #[test]

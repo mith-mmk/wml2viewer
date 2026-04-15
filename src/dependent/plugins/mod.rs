@@ -578,14 +578,13 @@ fn runtime_plugin_extensions() -> &'static Mutex<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::path::PathBuf;
     use std::sync::{Mutex, OnceLock};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn repo_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .to_path_buf()
+    fn test_data_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data")
     }
 
     fn runtime_lock() -> &'static Mutex<()> {
@@ -594,11 +593,23 @@ mod tests {
     }
 
     fn sample_path(name: &str) -> PathBuf {
-        repo_root().join("samples").join(name)
+        test_data_root().join("samples").join(name)
     }
 
     fn plugin_path(provider: &str) -> PathBuf {
-        repo_root().join("test").join("plugins").join(provider)
+        test_data_root().join("plugins").join(provider)
+    }
+
+    fn make_temp_dir() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = test_data_root();
+        fs::create_dir_all(&base).unwrap();
+        let dir = base.join(format!(".test_plugins_{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     #[test]
@@ -631,18 +642,23 @@ mod tests {
 
     #[test]
     fn discovers_ffmpeg_modules_from_test_plugins() {
+        let dir = make_temp_dir();
+        let ffmpeg_exe = dir.join("ffmpeg-test.exe");
+        fs::write(&ffmpeg_exe, b"").unwrap();
+        fs::write(dir.join("readme.txt"), b"").unwrap();
         let config = PluginProviderConfig {
             enable: true,
             priority: 100,
-            search_path: vec![plugin_path("ffmpeg")],
+            search_path: vec![dir.clone()],
             modules: Vec::new(),
         };
         let modules = discover_plugin_modules("ffmpeg", &config);
         assert!(
             modules
                 .iter()
-                .any(|module| module.plugin_name.contains("ffmpeg"))
+                .any(|module| module.path.as_ref() == Some(&ffmpeg_exe))
         );
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[cfg(target_os = "windows")]
@@ -663,8 +679,12 @@ mod tests {
         if discover_plugin_modules("ffmpeg", &config.ffmpeg).is_empty() {
             return;
         }
+        let sample = sample_path("WML2Viewer.avif");
+        if !sample.exists() {
+            return;
+        }
         set_runtime_plugin_config(config);
-        let decoded = decode_image_from_file_with_plugins(&sample_path("WML2Viewer.avif"));
+        let decoded = decode_image_from_file_with_plugins(&sample);
         assert!(decoded.is_some());
         let decoded = decoded.unwrap();
         assert!(decoded.canvas.width() > 0);
@@ -689,8 +709,12 @@ mod tests {
         if discover_plugin_modules("susie64", &config.susie64).is_empty() {
             return;
         }
+        let sample = sample_path("WML2Viewer.jp2");
+        if !sample.exists() {
+            return;
+        }
         set_runtime_plugin_config(config);
-        let decoded = decode_image_from_file_with_plugins(&sample_path("WML2Viewer.jp2"));
+        let decoded = decode_image_from_file_with_plugins(&sample);
         assert!(decoded.is_some());
         let decoded = decoded.unwrap();
         assert!(decoded.canvas.width() > 0);

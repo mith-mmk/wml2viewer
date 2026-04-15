@@ -63,7 +63,9 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("wml2viewer_listed_file_{unique}"));
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data");
+        fs::create_dir_all(&base).unwrap();
+        let dir = base.join(format!(".test_listed_file_{unique}"));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
