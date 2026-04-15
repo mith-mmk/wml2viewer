@@ -1868,6 +1868,16 @@ impl ViewerApp {
             self.queue_viewer_navigation(PendingViewerNavigation::First);
             return Ok(());
         }
+        if self.navigation_edge_reached(PendingViewerNavigation::First) {
+            self.log_bench_state(
+                "viewer.navigation.edge_noop",
+                serde_json::json!({
+                    "navigation": "First",
+                    "path": self.current_navigation_path.display().to_string(),
+                }),
+            );
+            return Ok(());
+        }
         if let Some(target) = self.filer_edge_navigation_target(PendingViewerNavigation::First) {
             self.request_load_path(target)?;
             self.last_navigation_at = Some(Instant::now());
@@ -1890,6 +1900,16 @@ impl ViewerApp {
         }
         if self.navigation_blocked_by_active_load() {
             self.queue_viewer_navigation(PendingViewerNavigation::Last);
+            return Ok(());
+        }
+        if self.navigation_edge_reached(PendingViewerNavigation::Last) {
+            self.log_bench_state(
+                "viewer.navigation.edge_noop",
+                serde_json::json!({
+                    "navigation": "Last",
+                    "path": self.current_navigation_path.display().to_string(),
+                }),
+            );
             return Ok(());
         }
         if let Some(target) = self.filer_edge_navigation_target(PendingViewerNavigation::Last) {
@@ -2064,6 +2084,9 @@ impl ViewerApp {
                 }
             }
             PendingViewerNavigation::First => {
+                if self.navigation_edge_reached(PendingViewerNavigation::First) {
+                    return;
+                }
                 if let Some(target) = self.filer_edge_navigation_target(PendingViewerNavigation::First)
                 {
                     self.request_load_path(target)
@@ -2077,6 +2100,9 @@ impl ViewerApp {
                 }
             }
             PendingViewerNavigation::Last => {
+                if self.navigation_edge_reached(PendingViewerNavigation::Last) {
+                    return;
+                }
                 if let Some(target) = self.filer_edge_navigation_target(PendingViewerNavigation::Last)
                 {
                     self.request_load_path(target)
@@ -2158,6 +2184,16 @@ impl ViewerApp {
         } else {
             files.last().cloned()
         }
+    }
+
+    fn navigation_edge_reached(&self, navigation: PendingViewerNavigation) -> bool {
+        let direction = self.navigation_direction_sign();
+        let step = match navigation {
+            PendingViewerNavigation::First => -direction,
+            PendingViewerNavigation::Last => direction,
+            PendingViewerNavigation::Next | PendingViewerNavigation::Prev => return false,
+        };
+        adjacent_entry(&self.current_navigation_path, self.navigation_sort, step).is_none()
     }
 
     fn bench_random_file_entry(&mut self) -> Option<crate::ui::menu::fileviewer::state::FilerEntry> {

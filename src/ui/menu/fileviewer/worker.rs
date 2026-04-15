@@ -215,8 +215,6 @@ fn collect_browser_entries(
     let Ok(read_dir) = fs::read_dir(dir) else {
         return collected;
     };
-
-    let mut preview_chunk = Vec::new();
     for entry in read_dir.filter_map(Result::ok) {
         if request_is_stale(latest_request_id, request_id) {
             return Vec::new();
@@ -229,11 +227,17 @@ fn collect_browser_entries(
             continue;
         }
         collected.push(path);
-        preview_chunk.push(preview_entry);
+    }
+
+    sort_paths_for_navigation(&mut collected, sort);
+
+    let mut preview_chunk = Vec::new();
+    for path in &collected {
+        if request_is_stale(latest_request_id, request_id) {
+            return Vec::new();
+        }
+        preview_chunk.push(build_preview_entry(path.clone(), archive_as_container_in_sort));
         if preview_chunk.len() >= 64 {
-            if request_is_stale(latest_request_id, request_id) {
-                return Vec::new();
-            }
             let _ = result_tx.send(FilerResult::Append {
                 request_id,
                 entries: std::mem::take(&mut preview_chunk),
@@ -241,9 +245,6 @@ fn collect_browser_entries(
         }
     }
     if !preview_chunk.is_empty() {
-        if request_is_stale(latest_request_id, request_id) {
-            return Vec::new();
-        }
         let _ = result_tx.send(FilerResult::Append {
             request_id,
             entries: preview_chunk,
@@ -383,6 +384,53 @@ fn compare_name(left: &str, right: &str, mode: NameSortMode) -> std::cmp::Orderi
     }
 }
 
+fn sort_paths_for_navigation(paths: &mut [PathBuf], sort: NavigationSortOption) {
+    match sort {
+        NavigationSortOption::OsName => {
+            paths.sort_by(|left, right| compare_os_str(&label_for_path(left), &label_for_path(right)));
+        }
+        NavigationSortOption::Name => {
+            paths.sort_by(|left, right| {
+                compare_natural_str(&label_for_path(left), &label_for_path(right), false)
+            });
+        }
+        NavigationSortOption::NameCaseSensitive => {
+            paths.sort_by(|left, right| {
+                compare_natural_str(&label_for_path(left), &label_for_path(right), true)
+            });
+        }
+        NavigationSortOption::NameCaseInsensitive => {
+            paths.sort_by(|left, right| {
+                compare_natural_str(&label_for_path(left), &label_for_path(right), false)
+            });
+        }
+        NavigationSortOption::Date => {
+            paths.sort_by_cached_key(|path| {
+                (
+                    fs::metadata(path)
+                        .and_then(|metadata| metadata.modified())
+                        .ok(),
+                    label_for_path(path),
+                )
+            });
+        }
+        NavigationSortOption::Size => {
+            paths.sort_by_cached_key(|path| {
+                (
+                    fs::metadata(path).map(|metadata| metadata.len()).ok(),
+                    label_for_path(path),
+                )
+            });
+        }
+    }
+}
+
+fn label_for_path(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,5 +520,20 @@ mod tests {
 
         assert!(!request_is_stale(&latest_request_id, 42));
         assert!(request_is_stale(&latest_request_id, 41));
+    }
+
+    #[test]
+    fn os_sort_orders_zip_names_naturally() {
+        let mut paths = vec![
+            PathBuf::from("pack10.zip"),
+            PathBuf::from("pack2.zip"),
+            PathBuf::from("pack1.zip"),
+        ];
+        sort_paths_for_navigation(&mut paths, NavigationSortOption::OsName);
+        let labels = paths
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(labels, vec!["pack1.zip", "pack2.zip", "pack10.zip"]);
     }
 }
