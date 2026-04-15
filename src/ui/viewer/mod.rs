@@ -50,6 +50,7 @@ const POINTER_SINGLE_CLICK_DELAY: Duration = Duration::from_millis(500);
 const WAITING_CARD_DELAY: Duration = Duration::from_millis(180);
 const PRELOAD_CACHE_CAPACITY: usize = 2;
 const ZIP_TO_ZIP_RANDOM_WALK_ROUNDS: usize = 8;
+const RENDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) struct ViewerApp {
     pub(crate) current_navigation_path: PathBuf,
@@ -92,6 +93,7 @@ pub(crate) struct ViewerApp {
     pub(crate) worker_join: Option<JoinHandle<()>>,
     pub(crate) next_request_id: u64,
     pub(crate) active_request: Option<ActiveRenderRequest>,
+    active_request_started_at: Option<Instant>,
     pub(crate) pending_navigation_path: Option<PathBuf>,
     pending_viewer_navigation: Option<PendingViewerNavigation>,
     pub(crate) fs_tx: Option<Sender<FilesystemCommand>>,
@@ -577,6 +579,7 @@ impl ViewerApp {
             worker_join: Some(worker_join),
             next_request_id: 0,
             active_request: None,
+            active_request_started_at: None,
             pending_navigation_path: None,
             pending_viewer_navigation: None,
             fs_tx: None,
@@ -2411,12 +2414,19 @@ impl ViewerApp {
 //        self.clear_current_image_display();
         let request_id = self.alloc_request_id();
         self.active_request = Some(ActiveRenderRequest::Load(request_id));
+        self.active_request_started_at = Some(Instant::now());
         self.pending_navigation_path = Some(navigation_path.clone());
         self.pending_fit_recalc = !matches!(self.render_options.zoom_option, ZoomOption::None);
         self.overlay
             .set_loading_message(format!("Loading {}", navigation_path.display()));
         let load_zoom = if switching_image { 1.0 } else { self.zoom };
-        let spread_companion_path = self.desired_manga_companion_path_for_navigation(&navigation_path);
+        // Folder/branch switch can trigger expensive synchronous adjacent lookup.
+        // Prioritize primary image load to avoid UI stalls; companion will be synced afterward.
+        let spread_companion_path = if branch_changed {
+            None
+        } else {
+            self.desired_manga_companion_path_for_navigation(&navigation_path)
+        };
         self.worker_tx
             .send(RenderCommand::LoadPath {
                 request_id,
@@ -2463,6 +2473,7 @@ impl ViewerApp {
         self.invalidate_preload();
         let request_id = self.alloc_request_id();
         self.active_request = Some(ActiveRenderRequest::Resize(request_id));
+        self.active_request_started_at = Some(Instant::now());
         self.overlay
             .set_loading_message(format!("Rendering {:.0}%", self.zoom * 100.0));
         self.worker_tx
@@ -2845,6 +2856,7 @@ impl ViewerApp {
         self.completed_loops = 0;
         self.last_frame_at = Instant::now();
         self.active_request = None;
+        self.active_request_started_at = None;
 
         let source_size = vec2(self.source.canvas.width() as f32, self.source.canvas.height() as f32);
         let defer_precise_display =
@@ -3020,6 +3032,7 @@ impl ViewerApp {
         self.worker_rx = worker_rx;
         self.worker_join = Some(worker_join);
         self.active_request = None;
+        self.active_request_started_at = None;
     }
 
     fn respawn_companion_worker(&mut self) {
@@ -3149,6 +3162,7 @@ impl ViewerApp {
                     self.show_loading_texture(true);
                     self.overlay.clear_loading_message();
                     self.active_request = None;
+                    self.active_request_started_at = None;
                     if matches!(
                         self.filer.pending_user_request,
                         Some(FilerUserRequest::SelectFile { .. })
@@ -3711,6 +3725,58 @@ impl ViewerApp {
             }
         }
     }
+
+    fn poll_render_request_timeout(&mut self) {
+        let Some(active_request) = self.active_request else {
+            self.active_request_started_at = None;
+            return;
+        };
+        let Some(started_at) = self.active_request_started_at else {
+            self.active_request_started_at = Some(Instant::now());
+            return;
+        };
+        if started_at.elapsed() < RENDER_REQUEST_TIMEOUT {
+            return;
+        }
+
+        let timed_out_navigation_path = self.pending_navigation_path.take();
+        self.log_bench_state(
+            "viewer.poll_worker.timeout",
+            serde_json::json!({
+                "active_request": format!("{active_request:?}"),
+                "elapsed_ms": started_at.elapsed().as_millis() as u64,
+                "timeout_ms": RENDER_REQUEST_TIMEOUT.as_millis() as u64,
+                "timed_out_navigation_path": timed_out_navigation_path.as_ref().map(|path| path.display().to_string()),
+            }),
+        );
+
+        let timed_out_during_load = matches!(active_request, ActiveRenderRequest::Load(_));
+        let should_advance = timed_out_during_load
+            && should_advance_after_load_failure(
+                &self.current_navigation_path,
+                timed_out_navigation_path.as_deref(),
+            );
+
+        self.save_dialog.message = Some("Load timeout: request skipped".to_string());
+        self.clear_current_image_display();
+        self.show_loading_texture(true);
+        self.overlay.clear_loading_message();
+        self.active_request = None;
+        self.active_request_started_at = None;
+        self.respawn_render_worker();
+
+        if matches!(
+            self.filer.pending_user_request,
+            Some(FilerUserRequest::SelectFile { .. })
+        ) {
+            self.filer.pending_user_request = None;
+        }
+
+        self.flush_pending_viewer_navigation();
+        if should_advance {
+            let _ = self.next_image();
+        }
+    }
 }
 
 impl eframe::App for ViewerApp {
@@ -3718,6 +3784,7 @@ impl eframe::App for ViewerApp {
         self.sync_window_state(ctx);
         self.update_window_title(ctx);
         self.poll_worker();
+        self.poll_render_request_timeout();
         self.poll_companion_worker();
         self.poll_preload_worker();
         self.poll_filesystem();

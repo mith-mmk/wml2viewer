@@ -13,8 +13,15 @@
 # 0.0.14
 ## 優先度1
 - [x] ベンチマークモード（デバッグ用）
+- [x] ロギング（デバッグ用）
+  - [x] ロガーの実装
+  - [x] ログ出力の追加（特にファイラーの状態変化、branch change、navigation など）
 - [x] WML2からロード可能な画像形式をハードコーディングではなくAPI経由(get_encode_extentions, get_decoder_extentions)で取得する
 - [x] フォントサイズのデフォルトがSになっているので自動に変更
+- [ ] ファイラーソート順のバグ
+  - [+] filerとviewerのソート順がおかしいバグ
+  - [ ] 親フォルダのHome Endがおかしい（子フォルダに移動してしまう）
+
 - [ ] P2 filer / subfiler 総合整理
     - 現在の残課題を filer 単独ではなく `viewer / filesystem / filer / subfiler` の同期問題としてまとめて扱う
     - sort の truth を 1 か所に寄せる
@@ -28,6 +35,7 @@
       - filer scan 完了前後で viewer current と selected がズレる
       - branch change / recursive navigation / filer click の完了順で再発しやすい
       - [+] filer snapshot 変化時に current directory なら filesystem を再初期化して viewer/filer のズレを抑制
+      - [*] viewer: branch change 時は相方ページ探索（adjacent lookup）を同期実行しない（主画像ロード優先で固まり回避）
     - scan / thumbnail / visible range
       - subfiler thumbnail が current 近傍優先ではない
       - visible range と current 近傍を優先する

@@ -717,7 +717,28 @@ fn edge_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Vec<PathBuf>
         return Some(cache.supported_entries(&listed_root));
     }
 
+    if let Some(direct_entries) = direct_image_entries_for_edge(path, cache) {
+        if !direct_entries.is_empty() {
+            return Some(direct_entries);
+        }
+    }
+
     flat_container_entries(path, cache)
+}
+
+fn direct_image_entries_for_edge(path: &Path, cache: &mut FilesystemCache) -> Option<Vec<PathBuf>> {
+    let dir = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        flat_container_dir(path)?
+    };
+    if !dir.is_dir() {
+        return None;
+    }
+
+    let mut entries = cache.listing(&dir).file_entries.clone();
+    entries.retain(|entry| !is_zip_file_path(entry) && !is_listed_file_path(entry));
+    Some(entries)
 }
 
 fn flat_container_dir(path: &Path) -> Option<PathBuf> {
@@ -1560,6 +1581,29 @@ mod tests {
         assert_eq!(zip_virtual_root(&last), Some(archive.clone()));
         assert_eq!(resolve_virtual_zip_child(&first), Some((archive.clone(), 0)));
         assert_eq!(resolve_virtual_zip_child(&last), Some((archive.clone(), 2)));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn home_and_end_in_parent_directory_do_not_dive_into_zip_children() {
+        let root = make_temp_dir();
+        let image_a = root.join("001.png");
+        let image_b = root.join("002.png");
+        let archive = root.join("inner.zip");
+        fs::write(&image_a, []).unwrap();
+        fs::write(&image_b, []).unwrap();
+        make_zip_with_entries(&archive, &["100.png", "101.png"]);
+
+        let mut cache = FilesystemCache::default();
+        let mut nav = FileNavigator::from_current_path(image_b.clone(), &mut cache);
+        let first = nav.first(&mut cache).expect("first parent image");
+        let last = nav.last(&mut cache).expect("last parent image");
+
+        assert_eq!(first, image_a);
+        assert_eq!(last, image_b);
+        assert!(resolve_virtual_zip_child(&first).is_none());
+        assert!(resolve_virtual_zip_child(&last).is_none());
 
         let _ = fs::remove_dir_all(root);
     }
