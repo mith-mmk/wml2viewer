@@ -1,0 +1,40 @@
+# 0.0.12からのissue
+- [x] 表示位置が現在のファイルと連動していない
+- [+] filer: フォルダ移動（特に zip -> zip）で高確率に固まる問題
+    - 最優先で対処する(P1がつぶれたのでP3へ移行)
+    - 現在の主戦場は `filer` / `subfiler` / `viewer current` / `request ordering`
+    - タイミング依存が強く、条件再現が難しい
+    - 主な症状:
+      - [x] 完全に固まる
+      - [x] 固まるがしばらくすると復旧
+      - [x] 最初の 1 つだけ表示されて止まる
+        - [x] ナビゲーションだけが死んでいる
+        - [x] ファイラーからの選択はできる
+    - 仮説:
+      - `accepted user request` / `pending request` / `committed viewer state` の衝突
+      - zip -> zip browse 中に `sync_filer_directory_with_current_path()` が古い current で filer を引き戻す
+      - scan / snapshot / load の完了順がランダムに前後して race している
+    - ベンチ:
+      - `--bench-scenario filer_refresh_race`
+      - `--bench-scenario zip_subfiler`
+    - ログ:
+      - `--log` こっちが決め手
+
+- [x] 漫画モードは条件を満たしたときは2枚束ねて表示
+    - 片側だけ更新が追従できないバグの温床になっている
+
+- [ ] P3 Recursive branch change: ファイラーのファイルは更新されるが、viewerが更新されないバグ（継続調査）
+    - 症状:
+      - filer の表示は更新されるが viewer の更新が適用されない
+      - 停止時に `No Displayable file found` へ落ちることがある
+      - filesystem cache を消すと一時的に治る
+    - `state-1775980641059-45700.jsonl`
+      - `Init` が `Next` に上書きされると再同期が消えて `No Displayable file found` や sync 崩れになる
+    - `state-1775981590816-62468.jsonl`
+      - `Recursive` の branch change で viewer commit が先、filer snapshot が後になってズレる
+    - 実際の問題:
+      - filer 単独ではなく `filesystem` の `Recursive` resolve と branch change commit の整合不良
+    - 次にやること:
+      - `Init` と `Next/Prev` のキュー優先度を分離し、再同期 request が入力で潰れないようにする
+      - branch change を含む `PathResolved` の commit 条件を tighten する
+      - stale filesystem cache に依存した `Recursive` branch resolve を再検証する

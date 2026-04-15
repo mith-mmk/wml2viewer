@@ -14,7 +14,9 @@ use crate::options::{
     RuntimeOptions, ViewerAction,
 };
 use crate::ui::i18n::{UiTextKey, tr};
-use crate::ui::menu::fileviewer::state::{FilerState, FilerUserRequest};
+use crate::ui::menu::fileviewer::state::{
+    FilerSortField, FilerState, FilerUserRequest, NameSortMode,
+};
 use crate::ui::menu::fileviewer::thumbnail::{
     ThumbnailCommand, ThumbnailResult, set_thumbnail_workaround, spawn_thumbnail_worker,
 };
@@ -32,6 +34,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::error::Error;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
@@ -127,7 +130,9 @@ pub(crate) struct ViewerApp {
     pub(crate) show_filer: bool,
     pub(crate) show_subfiler: bool,
     pub(crate) filer: FilerState,
+    pub(crate) pending_filer_focus_path: Option<PathBuf>,
     pub(crate) pending_subfiler_focus_path: Option<PathBuf>,
+    last_filer_snapshot_signature: Option<(PathBuf, u64)>,
     pub(crate) susie64_search_paths_input: String,
     pub(crate) system_search_paths_input: String,
     pub(crate) ffmpeg_search_paths_input: String,
@@ -613,7 +618,9 @@ impl ViewerApp {
             show_filer: show_filer_on_start,
             show_subfiler: false,
             filer: FilerState::default(),
+            pending_filer_focus_path: None,
             pending_subfiler_focus_path: None,
+            last_filer_snapshot_signature: None,
             susie64_search_paths_input: String::new(),
             system_search_paths_input: String::new(),
             ffmpeg_search_paths_input: String::new(),
@@ -1307,10 +1314,12 @@ impl ViewerApp {
         }
         if self.filer.directory.as_ref() == Some(&dir) {
             self.filer.selected = selected.clone();
+            self.pending_filer_focus_path = selected.clone();
             if self.filer.entries.is_empty() && self.filer.pending_request_id.is_none() {
                 self.request_filer_directory(dir, selected);
             }
         } else {
+            self.pending_filer_focus_path = selected.clone();
             self.request_filer_directory(dir, selected);
         }
     }
@@ -1867,6 +1876,23 @@ impl ViewerApp {
         }
     }
 
+    pub(crate) fn sync_navigation_sort_with_filer_sort(&mut self) {
+        let desired = navigation_sort_for_filer(self.filer.sort_field, self.filer.name_sort_mode);
+        if self.navigation_sort == desired {
+            return;
+        }
+        self.navigation_sort = desired;
+        self.log_bench_state(
+            "viewer.navigation_sort.synced_from_filer",
+            serde_json::json!({
+                "navigation_sort": format!("{:?}", self.navigation_sort),
+                "filer_sort_field": format!("{:?}", self.filer.sort_field),
+                "filer_name_sort_mode": format!("{:?}", self.filer.name_sort_mode),
+            }),
+        );
+        self.respawn_filesystem_worker();
+    }
+
     pub(crate) fn log_bench_state(&self, event: &str, payload: serde_json::Value) {
         let Some(logger) = &self.bench_logger else {
             return;
@@ -1893,6 +1919,11 @@ impl ViewerApp {
                     "filer_pending_request_id": self.filer.pending_request_id,
                     "filer_pending_user_request": self.filer.pending_user_request.as_ref().map(|request| format!("{request:?}")),
                     "filer_committed_browse_directory": self.filer.committed_browse_directory.as_ref().map(|path| path.display().to_string()),
+                    "last_filer_snapshot_signature": self.last_filer_snapshot_signature.as_ref().map(|(directory, signature)| serde_json::json!({
+                        "directory": directory.display().to_string(),
+                        "signature": signature,
+                    })),
+                    "pending_filer_focus_path": self.pending_filer_focus_path.as_ref().map(|path| path.display().to_string()),
                     "pending_subfiler_focus_path": self.pending_subfiler_focus_path.as_ref().map(|path| path.display().to_string()),
                     "active_preload_request_id": self.active_preload_request_id,
                     "pending_preload_navigation_path": self.pending_preload_navigation_path.as_ref().map(|path| path.display().to_string()),
@@ -3505,10 +3536,39 @@ impl ViewerApp {
                     self.filer.pending_request_id = None;
                     self.filer.directory = Some(directory);
                     self.filer.entries = entries;
+                    let snapshot_signature = filer_entries_signature(&self.filer.entries);
+                    let snapshot_changed_in_same_directory = filer_snapshot_changed_in_same_directory(
+                        self.last_filer_snapshot_signature
+                            .as_ref()
+                            .map(|(directory, signature)| (directory.as_path(), *signature)),
+                        self.filer.directory.as_deref().unwrap(),
+                        snapshot_signature,
+                    );
+                    self.last_filer_snapshot_signature = Some((
+                        self.filer.directory.as_deref().unwrap().to_path_buf(),
+                        snapshot_signature,
+                    ));
                     self.filer.selected = self.filer_selected_for_directory(
                         self.filer.directory.as_deref().unwrap(),
                         selected,
                     );
+                    if snapshot_changed_in_same_directory
+                        && self.navigator_ready
+                        && self.active_fs_request_id.is_none()
+                        && self.current_directory().as_deref() == self.filer.directory.as_deref()
+                    {
+                        self.log_bench_state(
+                            "viewer.filesystem.reinit_from_filer_snapshot",
+                            serde_json::json!({
+                                "directory": self.filer.directory.as_ref().map(|path| path.display().to_string()),
+                                "entry_count": self.filer.entries.len(),
+                                "current_navigation_path": self.current_navigation_path.display().to_string(),
+                            }),
+                        );
+                        self.navigator_ready = false;
+                        self.queued_navigation = None;
+                        let _ = self.init_filesystem(self.current_navigation_path.clone());
+                    }
                     if should_clear_filer_user_request_after_snapshot(
                         self.filer.pending_user_request.as_ref(),
                     ) {
@@ -3849,6 +3909,22 @@ fn should_clear_stale_filer_refresh_request(
     )
 }
 
+fn navigation_sort_for_filer(
+    filer_sort_field: FilerSortField,
+    name_sort_mode: NameSortMode,
+) -> NavigationSortOption {
+    match filer_sort_field {
+        FilerSortField::Name => match name_sort_mode {
+            NameSortMode::Os => NavigationSortOption::OsName,
+            NameSortMode::CaseSensitive | NameSortMode::CaseInsensitive => {
+                NavigationSortOption::Name
+            }
+        },
+        FilerSortField::Modified => NavigationSortOption::Date,
+        FilerSortField::Size => NavigationSortOption::Size,
+    }
+}
+
 fn should_queue_filesystem_init(active_fs_request_id: Option<u64>) -> bool {
     active_fs_request_id.is_some()
 }
@@ -3888,6 +3964,28 @@ fn should_cancel_filesystem_request_for_filer_select(
             Some(FilerUserRequest::SelectFile { navigation_path })
                 if navigation_path == current_navigation_path
         )
+}
+
+fn filer_entries_signature(entries: &[crate::ui::menu::fileviewer::state::FilerEntry]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    entries.len().hash(&mut hasher);
+    for entry in entries {
+        entry.path.hash(&mut hasher);
+        entry.is_container.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn filer_snapshot_changed_in_same_directory(
+    previous: Option<(&Path, u64)>,
+    snapshot_directory: &Path,
+    snapshot_signature: u64,
+) -> bool {
+    matches!(
+        previous,
+        Some((directory, signature))
+            if directory == snapshot_directory && signature != snapshot_signature
+    )
 }
 
 #[cfg(test)]
@@ -4114,6 +4212,26 @@ mod tests {
     }
 
     #[test]
+    fn maps_filer_sort_to_navigation_sort() {
+        assert_eq!(
+            navigation_sort_for_filer(FilerSortField::Name, NameSortMode::Os),
+            NavigationSortOption::OsName,
+        );
+        assert_eq!(
+            navigation_sort_for_filer(FilerSortField::Name, NameSortMode::CaseSensitive),
+            NavigationSortOption::Name,
+        );
+        assert_eq!(
+            navigation_sort_for_filer(FilerSortField::Modified, NameSortMode::Os),
+            NavigationSortOption::Date,
+        );
+        assert_eq!(
+            navigation_sort_for_filer(FilerSortField::Size, NameSortMode::CaseInsensitive),
+            NavigationSortOption::Size,
+        );
+    }
+
+    #[test]
     fn queues_filesystem_init_when_request_is_already_active() {
         assert!(should_queue_filesystem_init(Some(1)));
         assert!(!should_queue_filesystem_init(None));
@@ -4201,6 +4319,30 @@ mod tests {
             Some(&pending),
             Path::new("dir\\current.png"),
             None,
+        ));
+    }
+
+    #[test]
+    fn detects_filer_snapshot_change_in_same_directory_only() {
+        assert!(!filer_snapshot_changed_in_same_directory(
+            None,
+            Path::new("dir-a"),
+            10
+        ));
+        assert!(!filer_snapshot_changed_in_same_directory(
+            Some((Path::new("dir-a"), 10)),
+            Path::new("dir-a"),
+            10,
+        ));
+        assert!(filer_snapshot_changed_in_same_directory(
+            Some((Path::new("dir-a"), 10)),
+            Path::new("dir-a"),
+            11,
+        ));
+        assert!(!filer_snapshot_changed_in_same_directory(
+            Some((Path::new("dir-a"), 10)),
+            Path::new("dir-b"),
+            10,
         ));
     }
 

@@ -49,6 +49,11 @@ impl ViewerApp {
                 }
                 if ui.button(self.text(UiTextKey::ToggleFiler)).clicked() {
                     self.show_filer = !self.show_filer;
+                    if self.show_filer {
+                        self.pending_filer_focus_path = Some(self.current_navigation_path.clone());
+                    } else {
+                        self.pending_filer_focus_path = None;
+                    }
                     self.pending_fit_recalc = true;
                     self.show_left_menu = false;
                 }
@@ -338,9 +343,12 @@ impl ViewerApp {
                 }
                 ui.separator();
                 if refresh_requested {
+                    self.sync_navigation_sort_with_filer_sort();
                     self.refresh_current_filer_directory();
                 }
                 let panel_width = ui.available_width();
+                let focus_target = self.pending_filer_focus_path.clone();
+                let mut focus_consumed = false;
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -349,7 +357,12 @@ impl ViewerApp {
                         match self.filer.view_mode {
                             FilerViewMode::List | FilerViewMode::Detail => {
                                 for entry in entries {
-                                    self.filer_entry_row(ui, entry);
+                                    self.filer_entry_row(
+                                        ui,
+                                        entry,
+                                        focus_target.as_ref(),
+                                        &mut focus_consumed,
+                                    );
                                 }
                             }
                             _ => {
@@ -359,14 +372,29 @@ impl ViewerApp {
                                     FilerViewMode::ThumbnailLarge => 160.0,
                                     _ => 96.0,
                                 } * self.filer.thumbnail_scale;
-                                self.filer_thumbnail_grid(ui, entries, item_width);
+                                self.filer_thumbnail_grid(
+                                    ui,
+                                    entries,
+                                    item_width,
+                                    focus_target.as_ref(),
+                                    &mut focus_consumed,
+                                );
                             }
                         }
                     });
+                if focus_consumed {
+                    self.pending_filer_focus_path = None;
+                }
             });
     }
 
-    fn filer_entry_row(&mut self, ui: &mut egui::Ui, entry: FilerEntry) {
+    fn filer_entry_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        entry: FilerEntry,
+        focus_target: Option<&std::path::PathBuf>,
+        focus_consumed: &mut bool,
+    ) {
         let selected = self.filer.selected.as_ref() == Some(&entry.path)
             || self.current_navigation_path == entry.path;
         let text = if self.filer.view_mode == FilerViewMode::Detail {
@@ -391,6 +419,10 @@ impl ViewerApp {
             entry.label.clone()
         };
         let response = ui.selectable_label(selected, text);
+        if !*focus_consumed && focus_target == Some(&entry.path) {
+            ui.scroll_to_rect(response.rect, Some(egui::Align::Center));
+            *focus_consumed = true;
+        }
         if let Some(size) = entry.metadata.size {
             let modified = entry
                 .metadata
@@ -411,6 +443,8 @@ impl ViewerApp {
         ui: &mut egui::Ui,
         entries: Vec<FilerEntry>,
         item_width: f32,
+        focus_target: Option<&std::path::PathBuf>,
+        focus_consumed: &mut bool,
     ) {
         let available = ui.available_width().max(item_width);
         let spacing = 8.0;
@@ -422,7 +456,13 @@ impl ViewerApp {
             .spacing(egui::vec2(spacing, spacing))
             .show(ui, |ui| {
                 for (index, entry) in entries.into_iter().enumerate() {
-                    self.filer_thumbnail_tile(ui, entry, item_width);
+                    self.filer_thumbnail_tile(
+                        ui,
+                        entry,
+                        item_width,
+                        focus_target,
+                        focus_consumed,
+                    );
                     if (index + 1) % columns == 0 {
                         ui.end_row();
                     }
@@ -430,7 +470,14 @@ impl ViewerApp {
             });
     }
 
-    fn filer_thumbnail_tile(&mut self, ui: &mut egui::Ui, entry: FilerEntry, item_width: f32) {
+    fn filer_thumbnail_tile(
+        &mut self,
+        ui: &mut egui::Ui,
+        entry: FilerEntry,
+        item_width: f32,
+        focus_target: Option<&std::path::PathBuf>,
+        focus_consumed: &mut bool,
+    ) {
         let entry_label = entry.label.clone();
         let selected = self.filer.selected.as_ref() == Some(&entry.path)
             || self.current_navigation_path == entry.path;
@@ -501,6 +548,10 @@ impl ViewerApp {
                 };
                 if response.clicked() {
                     self.activate_filer_entry(entry.clone());
+                }
+                if !*focus_consumed && focus_target == Some(&entry.path) {
+                    ui.scroll_to_rect(response.rect, Some(egui::Align::Center));
+                    *focus_consumed = true;
                 }
                 let label_height = if item_width >= 180.0 { 48.0 } else { 40.0 };
                 let label = thumbnail_label(&entry_label, item_width);
