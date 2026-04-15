@@ -1868,7 +1868,17 @@ impl ViewerApp {
             self.queue_viewer_navigation(PendingViewerNavigation::First);
             return Ok(());
         }
-        self.request_navigation(FilesystemCommand::First { request_id: 0 })?;
+        if let Some(target) = self.filer_edge_navigation_target(PendingViewerNavigation::First) {
+            self.request_load_path(target)?;
+            self.last_navigation_at = Some(Instant::now());
+            return Ok(());
+        }
+        let command = if self.filer.ascending {
+            FilesystemCommand::First { request_id: 0 }
+        } else {
+            FilesystemCommand::Last { request_id: 0 }
+        };
+        self.request_navigation(command)?;
         self.last_navigation_at = Some(Instant::now());
         Ok(())
     }
@@ -1882,7 +1892,17 @@ impl ViewerApp {
             self.queue_viewer_navigation(PendingViewerNavigation::Last);
             return Ok(());
         }
-        self.request_navigation(FilesystemCommand::Last { request_id: 0 })?;
+        if let Some(target) = self.filer_edge_navigation_target(PendingViewerNavigation::Last) {
+            self.request_load_path(target)?;
+            self.last_navigation_at = Some(Instant::now());
+            return Ok(());
+        }
+        let command = if self.filer.ascending {
+            FilesystemCommand::Last { request_id: 0 }
+        } else {
+            FilesystemCommand::First { request_id: 0 }
+        };
+        self.request_navigation(command)?;
         self.last_navigation_at = Some(Instant::now());
         Ok(())
     }
@@ -2044,10 +2064,30 @@ impl ViewerApp {
                 }
             }
             PendingViewerNavigation::First => {
-                self.request_navigation(FilesystemCommand::First { request_id: 0 })
+                if let Some(target) = self.filer_edge_navigation_target(PendingViewerNavigation::First)
+                {
+                    self.request_load_path(target)
+                } else {
+                    let command = if self.filer.ascending {
+                        FilesystemCommand::First { request_id: 0 }
+                    } else {
+                        FilesystemCommand::Last { request_id: 0 }
+                    };
+                    self.request_navigation(command)
+                }
             }
             PendingViewerNavigation::Last => {
-                self.request_navigation(FilesystemCommand::Last { request_id: 0 })
+                if let Some(target) = self.filer_edge_navigation_target(PendingViewerNavigation::Last)
+                {
+                    self.request_load_path(target)
+                } else {
+                    let command = if self.filer.ascending {
+                        FilesystemCommand::Last { request_id: 0 }
+                    } else {
+                        FilesystemCommand::First { request_id: 0 }
+                    };
+                    self.request_navigation(command)
+                }
             }
         };
         if result.is_ok() {
@@ -2092,6 +2132,32 @@ impl ViewerApp {
                     .find(|entry| !entry.is_container)
                     .map(|entry| entry.path.clone())
             })
+    }
+
+    fn filer_edge_navigation_target(&self, navigation: PendingViewerNavigation) -> Option<PathBuf> {
+        if !self.show_filer {
+            return None;
+        }
+        let files = self
+            .filer
+            .entries
+            .iter()
+            .filter(|entry| !entry.is_container)
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>();
+        if files.is_empty() {
+            return None;
+        }
+        let use_front = match navigation {
+            PendingViewerNavigation::First => self.filer.ascending,
+            PendingViewerNavigation::Last => !self.filer.ascending,
+            PendingViewerNavigation::Next | PendingViewerNavigation::Prev => return None,
+        };
+        if use_front {
+            files.first().cloned()
+        } else {
+            files.last().cloned()
+        }
     }
 
     fn bench_random_file_entry(&mut self) -> Option<crate::ui::menu::fileviewer::state::FilerEntry> {
@@ -2701,6 +2767,7 @@ impl ViewerApp {
     }
 
     fn request_navigation(&mut self, mut command: FilesystemCommand) -> Result<(), Box<dyn Error>> {
+        self.sync_navigation_sort_with_filer_sort();
         self.spawn_navigation_workers();
         if !self.navigator_ready {
             self.log_bench_state(
@@ -4026,9 +4093,8 @@ fn navigation_sort_for_filer(
     match filer_sort_field {
         FilerSortField::Name => match name_sort_mode {
             NameSortMode::Os => NavigationSortOption::OsName,
-            NameSortMode::CaseSensitive | NameSortMode::CaseInsensitive => {
-                NavigationSortOption::Name
-            }
+            NameSortMode::CaseSensitive => NavigationSortOption::NameCaseSensitive,
+            NameSortMode::CaseInsensitive => NavigationSortOption::NameCaseInsensitive,
         },
         FilerSortField::Modified => NavigationSortOption::Date,
         FilerSortField::Size => NavigationSortOption::Size,
@@ -4330,7 +4396,11 @@ mod tests {
         );
         assert_eq!(
             navigation_sort_for_filer(FilerSortField::Name, NameSortMode::CaseSensitive),
-            NavigationSortOption::Name,
+            NavigationSortOption::NameCaseSensitive,
+        );
+        assert_eq!(
+            navigation_sort_for_filer(FilerSortField::Name, NameSortMode::CaseInsensitive),
+            NavigationSortOption::NameCaseInsensitive,
         );
         assert_eq!(
             navigation_sort_for_filer(FilerSortField::Modified, NameSortMode::Os),

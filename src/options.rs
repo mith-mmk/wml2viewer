@@ -237,6 +237,8 @@ pub enum EndOfFolderOption {
 pub enum NavigationSortOption {
     OsName,
     Name,
+    NameCaseSensitive,
+    NameCaseInsensitive,
     Date,
     Size,
 }

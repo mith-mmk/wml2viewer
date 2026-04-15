@@ -55,4 +55,5 @@
       - `Next/Prev/Last` の request が large parent scan に巻き込まれないようにする
       - 上の `Recursive branch change` issue と密接に関連している
 - [ ] P3 サブファイラー：右→左表示の修正（表示位置の固定）
+- [ ] P3 サブファイラー：サブファイラーの表示が current 近傍優先ではない
 - [ ] P3 サブファイラー：カレントのファイルではなく最後から読み始める

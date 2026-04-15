@@ -702,10 +702,10 @@ fn rebase_virtual_listed_child_path(
 
 fn flat_container_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Vec<PathBuf>> {
     if path.is_dir() || is_zip_file_path(path) || is_listed_file_path(path) {
-        return Some(cache.supported_entries(path));
+        return Some(cache.navigation_entries(path));
     }
     let dir = flat_container_dir(path)?;
-    Some(cache.supported_entries(&dir))
+    Some(cache.navigation_entries(&dir))
 }
 
 fn edge_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Vec<PathBuf>> {
@@ -883,6 +883,13 @@ impl FilesystemCache {
             listing.files_expanded = true;
         }
         listing.files.clone()
+    }
+
+    fn navigation_entries(&mut self, dir: &Path) -> Vec<PathBuf> {
+        if is_zip_file_path(dir) || is_listed_file_path(dir) {
+            return self.supported_entries(dir);
+        }
+        self.listing(dir).file_entries.clone()
     }
 
     fn child_directories(&mut self, dir: &Path) -> Vec<PathBuf> {
@@ -1253,7 +1260,7 @@ fn is_zip_file_name(name: &OsStr) -> bool {
 
 fn file_name_sort_key(path: &Path) -> String {
     path.file_name()
-        .map(|name| name.to_string_lossy().to_lowercase())
+        .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default()
 }
 
@@ -1272,7 +1279,17 @@ fn sort_paths(paths: &mut [PathBuf], sort: NavigationSortOption) {
         }
         NavigationSortOption::Name => {
             paths.sort_by(|left, right| {
+                compare_natural_str(&file_name_sort_key(left), &file_name_sort_key(right), false)
+            });
+        }
+        NavigationSortOption::NameCaseSensitive => {
+            paths.sort_by(|left, right| {
                 compare_natural_str(&file_name_sort_key(left), &file_name_sort_key(right), true)
+            });
+        }
+        NavigationSortOption::NameCaseInsensitive => {
+            paths.sort_by(|left, right| {
+                compare_natural_str(&file_name_sort_key(left), &file_name_sort_key(right), false)
             });
         }
         NavigationSortOption::Date => {
@@ -1604,6 +1621,24 @@ mod tests {
         assert_eq!(last, image_b);
         assert!(resolve_virtual_zip_child(&first).is_none());
         assert!(resolve_virtual_zip_child(&last).is_none());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn flat_navigation_entries_do_not_expand_sibling_zip_children() {
+        let root = make_temp_dir();
+        let image = root.join("001.png");
+        let archive = root.join("inner.zip");
+        fs::write(&image, []).unwrap();
+        make_zip_with_entries(&archive, &["100.png", "101.png"]);
+
+        let mut cache = FilesystemCache::default();
+        let entries = flat_container_entries(&image, &mut cache).unwrap_or_default();
+
+        assert!(entries.contains(&image));
+        assert!(entries.contains(&archive));
+        assert!(!entries.iter().any(|entry| is_virtual_zip_child(entry)));
 
         let _ = fs::remove_dir_all(root);
     }

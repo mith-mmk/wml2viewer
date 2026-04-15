@@ -293,6 +293,8 @@ enum EndOfFolderConfigFile {
 enum NavigationSortConfigFile {
     OsName,
     Name,
+    NameCaseSensitive,
+    NameCaseInsensitive,
     Date,
     Size,
 }
@@ -932,7 +934,13 @@ impl From<NavigationSortConfigFile> for NavigationSortOption {
     fn from(value: NavigationSortConfigFile) -> Self {
         match value {
             NavigationSortConfigFile::OsName => NavigationSortOption::OsName,
-            NavigationSortConfigFile::Name => NavigationSortOption::Name,
+            NavigationSortConfigFile::Name => NavigationSortOption::NameCaseInsensitive,
+            NavigationSortConfigFile::NameCaseSensitive => {
+                NavigationSortOption::NameCaseSensitive
+            }
+            NavigationSortConfigFile::NameCaseInsensitive => {
+                NavigationSortOption::NameCaseInsensitive
+            }
             NavigationSortConfigFile::Date => NavigationSortOption::Date,
             NavigationSortConfigFile::Size => NavigationSortOption::Size,
         }
@@ -943,7 +951,9 @@ impl From<NavigationSortOption> for NavigationSortConfigFile {
     fn from(value: NavigationSortOption) -> Self {
         match value {
             NavigationSortOption::OsName => Self::OsName,
-            NavigationSortOption::Name => Self::Name,
+            NavigationSortOption::Name => Self::NameCaseInsensitive,
+            NavigationSortOption::NameCaseSensitive => Self::NameCaseSensitive,
+            NavigationSortOption::NameCaseInsensitive => Self::NameCaseInsensitive,
             NavigationSortOption::Date => Self::Date,
             NavigationSortOption::Size => Self::Size,
         }
