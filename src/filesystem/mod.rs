@@ -408,11 +408,11 @@ pub fn list_openable_entries(dir: &Path, sort: NavigationSortOption) -> Vec<Path
 
 pub fn list_browser_entries(dir: &Path, sort: NavigationSortOption) -> Vec<PathBuf> {
     if is_zip_file_path(dir) {
-        return build_zip_virtual_children(dir);
+        return scan_zip_virtual_directory(dir, sort).files;
     }
 
     if is_listed_file_path(dir) {
-        return build_listed_virtual_children(dir);
+        return scan_listed_virtual_directory(dir, sort).files;
     }
 
     let mut entries = Vec::new();
@@ -880,7 +880,7 @@ impl FilesystemCache {
 fn scan_directory_listing(dir: &Path, sort: NavigationSortOption) -> DirectoryListing {
     let started_at = Instant::now();
     if is_zip_file_path(dir) {
-        let listing = scan_zip_virtual_directory(dir);
+        let listing = scan_zip_virtual_directory(dir, sort);
         log_global_bench_event(
             "filesystem.scan_directory_listing",
             serde_json::json!({
@@ -895,7 +895,7 @@ fn scan_directory_listing(dir: &Path, sort: NavigationSortOption) -> DirectoryLi
     }
 
     if is_listed_file_path(dir) {
-        let listing = scan_listed_virtual_directory(dir);
+        let listing = scan_listed_virtual_directory(dir, sort);
         log_global_bench_event(
             "filesystem.scan_directory_listing",
             serde_json::json!({
@@ -923,8 +923,12 @@ fn scan_directory_listing(dir: &Path, sort: NavigationSortOption) -> DirectoryLi
     listing
 }
 
-fn scan_listed_virtual_directory(listed_file: &Path) -> DirectoryListing {
-    let files = build_listed_virtual_children(listed_file);
+fn scan_listed_virtual_directory(
+    listed_file: &Path,
+    sort: NavigationSortOption,
+) -> DirectoryListing {
+    let mut files = build_listed_virtual_children(listed_file);
+    sort_paths(&mut files, sort);
 
     DirectoryListing {
         file_entries: files.clone(),
@@ -936,12 +940,13 @@ fn scan_listed_virtual_directory(listed_file: &Path) -> DirectoryListing {
     }
 }
 
-fn scan_zip_virtual_directory(zip_file: &Path) -> DirectoryListing {
+fn scan_zip_virtual_directory(zip_file: &Path, sort: NavigationSortOption) -> DirectoryListing {
     let entries = load_zip_entries(zip_file).unwrap_or_default();
-    let files = entries
+    let mut files = entries
         .iter()
         .map(|entry| zip_virtual_child_path(zip_file, entry.index, &entry.name))
         .collect::<Vec<_>>();
+    sort_paths(&mut files, sort);
 
     DirectoryListing {
         file_entries: files.clone(),
@@ -977,11 +982,11 @@ fn scan_real_directory_listing(dir: &Path, sort: NavigationSortOption) -> Direct
     sort_paths(&mut raw_dirs, sort);
     let first_file = raw_files
         .iter()
-        .find_map(|path| first_supported_path_for_entry(path));
+        .find_map(|path| first_supported_path_for_entry(path, sort));
     let last_file = raw_files
         .iter()
         .rev()
-        .find_map(|path| last_supported_path_for_entry(path));
+        .find_map(|path| last_supported_path_for_entry(path, sort));
 
     DirectoryListing {
         first_file,
@@ -993,22 +998,22 @@ fn scan_real_directory_listing(dir: &Path, sort: NavigationSortOption) -> Direct
     }
 }
 
-fn first_supported_path_for_entry(path: &Path) -> Option<PathBuf> {
+fn first_supported_path_for_entry(path: &Path, sort: NavigationSortOption) -> Option<PathBuf> {
     if is_listed_file_path(path) {
-        return build_listed_virtual_children(path).into_iter().next();
+        return scan_listed_virtual_directory(path, sort).files.into_iter().next();
     }
     if is_zip_file_path(path) {
-        return build_zip_virtual_children(path).into_iter().next();
+        return scan_zip_virtual_directory(path, sort).files.into_iter().next();
     }
     resolve_start_path(path)
 }
 
-fn last_supported_path_for_entry(path: &Path) -> Option<PathBuf> {
+fn last_supported_path_for_entry(path: &Path, sort: NavigationSortOption) -> Option<PathBuf> {
     if is_listed_file_path(path) {
-        return build_listed_virtual_children(path).into_iter().last();
+        return scan_listed_virtual_directory(path, sort).files.into_iter().last();
     }
     if is_zip_file_path(path) {
-        return build_zip_virtual_children(path).into_iter().last();
+        return scan_zip_virtual_directory(path, sort).files.into_iter().last();
     }
     resolve_start_path(path)
 }
@@ -1226,34 +1231,12 @@ fn is_zip_file_name(name: &OsStr) -> bool {
 }
 
 fn file_name_sort_key(path: &Path) -> String {
-    if let Some((archive, index)) = resolve_virtual_zip_child(path) {
-        return load_zip_entries(&archive)
-            .and_then(|entries| entries.into_iter().find(|entry| entry.index == index))
-            .map(|entry| entry.name.to_lowercase())
-            .unwrap_or_default();
-    }
-
-    if let Some(target) = resolve_virtual_listed_child(path) {
-        return file_name_sort_key(&target);
-    }
-
     path.file_name()
         .map(|name| name.to_string_lossy().to_lowercase())
         .unwrap_or_default()
 }
 
 fn os_name_sort_key(path: &Path) -> String {
-    if let Some((archive, index)) = resolve_virtual_zip_child(path) {
-        return load_zip_entries(&archive)
-            .and_then(|entries| entries.into_iter().find(|entry| entry.index == index))
-            .map(|entry| entry.name)
-            .unwrap_or_default();
-    }
-
-    if let Some(target) = resolve_virtual_listed_child(path) {
-        return os_name_sort_key(&target);
-    }
-
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default()
@@ -1577,6 +1560,23 @@ mod tests {
         assert_eq!(zip_virtual_root(&last), Some(archive.clone()));
         assert_eq!(resolve_virtual_zip_child(&first), Some((archive.clone(), 0)));
         assert_eq!(resolve_virtual_zip_child(&last), Some((archive.clone(), 2)));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn zip_virtual_listing_respects_requested_os_sort() {
+        let root = make_temp_dir();
+        let archive = root.join("images.zip");
+        make_zip_with_entries(&archive, &["b_10.png", "a_2.png"]);
+
+        let entries = list_openable_entries(&archive, NavigationSortOption::OsName);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            resolve_virtual_zip_child(&entries[0]),
+            Some((archive.clone(), 0))
+        );
+        assert_eq!(resolve_virtual_zip_child(&entries[1]), Some((archive, 1)));
 
         let _ = fs::remove_dir_all(root);
     }

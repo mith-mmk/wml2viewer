@@ -1646,12 +1646,18 @@ impl ViewerApp {
         spread_companion_path_for_navigation(
             &self.current_navigation_path,
             self.navigation_sort,
+            self.navigation_direction_sign(),
             self.options.manga_mode,
         )
     }
 
     fn desired_manga_companion_path_for_navigation(&self, navigation_path: &Path) -> Option<PathBuf> {
-        spread_companion_path_for_navigation(navigation_path, self.navigation_sort, self.options.manga_mode)
+        spread_companion_path_for_navigation(
+            navigation_path,
+            self.navigation_sort,
+            self.navigation_direction_sign(),
+            self.options.manga_mode,
+        )
     }
 
     fn clear_manga_companion(&mut self) {
@@ -1769,11 +1775,12 @@ impl ViewerApp {
         if !self.navigator_ready || !self.manga_spread_active() {
             return None;
         }
+        let direction = self.navigation_direction_sign();
 
         let boundary_target = adjacent_entry(
             &self.current_navigation_path,
             self.navigation_sort,
-            if forward { 1 } else { -1 },
+            if forward { direction } else { -direction },
         )?;
         let current_branch = navigation_branch_path(&self.current_navigation_path);
         let boundary_branch = navigation_branch_path(&boundary_target);
@@ -1781,8 +1788,12 @@ impl ViewerApp {
             return Some(boundary_target);
         }
 
-        let step = if forward { 2 } else { -2 };
+        let step = if forward { 2 * direction } else { -2 * direction };
         adjacent_entry(&self.current_navigation_path, self.navigation_sort, step)
+    }
+
+    fn navigation_direction_sign(&self) -> isize {
+        if self.filer.ascending { 1 } else { -1 }
     }
 
     pub(crate) fn next_image(&mut self) -> Result<(), Box<dyn Error>> {
@@ -1799,10 +1810,18 @@ impl ViewerApp {
             self.last_navigation_at = Some(Instant::now());
             return Ok(());
         }
-        self.request_navigation(FilesystemCommand::Next {
-            request_id: 0,
-            policy: self.end_of_folder,
-        })?;
+        let command = if self.filer.ascending {
+            FilesystemCommand::Next {
+                request_id: 0,
+                policy: self.end_of_folder,
+            }
+        } else {
+            FilesystemCommand::Prev {
+                request_id: 0,
+                policy: self.end_of_folder,
+            }
+        };
+        self.request_navigation(command)?;
         self.last_navigation_at = Some(Instant::now());
         Ok(())
     }
@@ -1821,10 +1840,18 @@ impl ViewerApp {
             self.last_navigation_at = Some(Instant::now());
             return Ok(());
         }
-        self.request_navigation(FilesystemCommand::Prev {
-            request_id: 0,
-            policy: self.end_of_folder,
-        })?;
+        let command = if self.filer.ascending {
+            FilesystemCommand::Prev {
+                request_id: 0,
+                policy: self.end_of_folder,
+            }
+        } else {
+            FilesystemCommand::Next {
+                request_id: 0,
+                policy: self.end_of_folder,
+            }
+        };
+        self.request_navigation(command)?;
         self.last_navigation_at = Some(Instant::now());
         Ok(())
     }
@@ -1981,20 +2008,36 @@ impl ViewerApp {
                 if let Some(target) = self.manga_navigation_target(true) {
                     self.request_load_path(target)
                 } else {
-                    self.request_navigation(FilesystemCommand::Next {
-                        request_id: 0,
-                        policy: self.end_of_folder,
-                    })
+                    let command = if self.filer.ascending {
+                        FilesystemCommand::Next {
+                            request_id: 0,
+                            policy: self.end_of_folder,
+                        }
+                    } else {
+                        FilesystemCommand::Prev {
+                            request_id: 0,
+                            policy: self.end_of_folder,
+                        }
+                    };
+                    self.request_navigation(command)
                 }
             }
             PendingViewerNavigation::Prev => {
                 if let Some(target) = self.manga_navigation_target(false) {
                     self.request_load_path(target)
                 } else {
-                    self.request_navigation(FilesystemCommand::Prev {
-                        request_id: 0,
-                        policy: self.end_of_folder,
-                    })
+                    let command = if self.filer.ascending {
+                        FilesystemCommand::Prev {
+                            request_id: 0,
+                            policy: self.end_of_folder,
+                        }
+                    } else {
+                        FilesystemCommand::Next {
+                            request_id: 0,
+                            policy: self.end_of_folder,
+                        }
+                    };
+                    self.request_navigation(command)
                 }
             }
             PendingViewerNavigation::First => {
@@ -2873,7 +2916,7 @@ impl ViewerApp {
                 return Some(companion);
             }
         }
-        let step = if self.manga_spread_active() { 2 } else { 1 };
+        let step = if self.manga_spread_active() { 2 } else { 1 } * self.navigation_direction_sign();
         adjacent_entry(&self.current_navigation_path, self.navigation_sort, step)
     }
 
@@ -3942,12 +3985,13 @@ fn should_defer_companion_sync_during_primary_load(
 fn spread_companion_path_for_navigation(
     navigation_path: &Path,
     navigation_sort: NavigationSortOption,
+    navigation_direction_sign: isize,
     manga_mode: bool,
 ) -> Option<PathBuf> {
     if !manga_mode {
         return None;
     }
-    let companion = adjacent_entry(navigation_path, navigation_sort, 1)?;
+    let companion = adjacent_entry(navigation_path, navigation_sort, navigation_direction_sign)?;
     let current_branch = navigation_branch_path(navigation_path);
     let companion_branch = navigation_branch_path(&companion);
     (current_branch == companion_branch).then_some(companion)
@@ -4362,6 +4406,7 @@ mod tests {
         let companion = spread_companion_path_for_navigation(
             &first,
             NavigationSortOption::Name,
+            1,
             true,
         );
 
