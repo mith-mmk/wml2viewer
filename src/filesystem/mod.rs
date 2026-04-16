@@ -372,6 +372,36 @@ pub fn resolve_start_path(path: &Path) -> Option<PathBuf> {
     is_supported_image(path).then(|| path.to_path_buf())
 }
 
+pub fn resolve_end_path(path: &Path) -> Option<PathBuf> {
+    if is_virtual_zip_child(path) {
+        return Some(path.to_path_buf());
+    }
+
+    if let Some(target) = resolve_virtual_listed_child(path) {
+        return resolve_end_path(&target);
+    }
+
+    if is_zip_file_path(path) {
+        let mut cache = FilesystemCache::default();
+        let navigation_path = cache.last_supported_file(path)?;
+        return resolve_end_path(&navigation_path);
+    }
+
+    if is_listed_file_path(path) {
+        let mut cache = FilesystemCache::default();
+        let navigation_path = cache.last_supported_file(path)?;
+        return resolve_end_path(&navigation_path);
+    }
+
+    if path.is_dir() {
+        let mut cache = FilesystemCache::default();
+        let navigation_path = cache.last_supported_file(path)?;
+        return resolve_end_path(&navigation_path);
+    }
+
+    is_supported_image(path).then(|| path.to_path_buf())
+}
+
 pub fn load_virtual_image_bytes(path: &Path) -> Option<Vec<u8>> {
     resolve_virtual_zip_child(path)
         .and_then(|(archive, index)| load_zip_entry_bytes(&archive, index))
@@ -1712,8 +1742,10 @@ mod tests {
 
         assert_eq!(listed_virtual_root(&first), Some(listed.clone()));
         assert_eq!(listed_virtual_root(&last), Some(listed.clone()));
-        assert_eq!(resolve_start_path(&first), Some(page1));
-        assert_eq!(resolve_start_path(&last), Some(page3));
+        assert_eq!(resolve_start_path(&first), Some(page1.clone()));
+        assert_eq!(resolve_start_path(&last), Some(page3.clone()));
+        assert_eq!(resolve_end_path(&first), Some(page1));
+        assert_eq!(resolve_end_path(&last), Some(page3));
 
         let _ = fs::remove_dir_all(root);
     }

@@ -6,7 +6,7 @@ use crate::drawers::canvas::Canvas;
 use crate::drawers::image::{LoadedImage, SaveFormat, save_loaded_image};
 use crate::filesystem::{
     FilesystemCommand, FilesystemResult, adjacent_entry, archive_prefers_low_io,
-    is_browser_container, navigation_branch_path, resolve_navigation_entry_path,
+    is_browser_container, navigation_branch_path, resolve_end_path, resolve_navigation_entry_path,
     resolve_start_path, set_archive_zip_workaround, spawn_filesystem_worker,
 };
 use crate::options::{
@@ -15,7 +15,7 @@ use crate::options::{
 };
 use crate::ui::i18n::{UiTextKey, tr};
 use crate::ui::menu::fileviewer::state::{
-    FilerSortField, FilerState, FilerUserRequest, NameSortMode,
+    FilerEntry, FilerSortField, FilerState, FilerUserRequest, NameSortMode,
 };
 use crate::ui::menu::fileviewer::thumbnail::{
     ThumbnailCommand, ThumbnailResult, set_thumbnail_workaround, spawn_thumbnail_worker,
@@ -1284,8 +1284,14 @@ impl ViewerApp {
             return;
         }
         if let Some(dir) = self.filer.directory.as_deref() {
-            self.filer.selected = self
+            let next_selected = self
                 .selected_path_for_filer_directory(dir, Some(self.current_navigation_path.clone()));
+            if self.filer.selected != next_selected {
+                self.filer.selected = next_selected.clone();
+                if self.show_filer {
+                    self.pending_filer_focus_path = next_selected;
+                }
+            }
         }
     }
 
@@ -1953,7 +1959,9 @@ impl ViewerApp {
             return Ok(());
         }
         self.handoff_filer_control_to_viewer_navigation();
-        if self.navigation_edge_reached(PendingViewerNavigation::First) {
+        if self.should_apply_edge_noop(PendingViewerNavigation::First)
+            && self.navigation_edge_reached(PendingViewerNavigation::First)
+        {
             self.log_bench_state(
                 "viewer.navigation.edge_noop",
                 serde_json::json!({
@@ -1963,8 +1971,28 @@ impl ViewerApp {
             );
             return Ok(());
         }
-        if let Some(target) = self.filer_edge_navigation_target(PendingViewerNavigation::First) {
-            self.request_load_path(target)?;
+        if let Some((target, is_container)) =
+            self.filer_edge_navigation_target(PendingViewerNavigation::First)
+        {
+            if should_skip_edge_navigation_for_same_target(
+                &self.current_navigation_path,
+                &target,
+                PendingViewerNavigation::First,
+            ) {
+                self.log_bench_state(
+                    "viewer.navigation.edge_noop_same_target",
+                    serde_json::json!({
+                        "navigation": "First",
+                        "path": self.current_navigation_path.display().to_string(),
+                    }),
+                );
+                return Ok(());
+            }
+            self.request_filer_edge_target_navigation(
+                target,
+                is_container,
+                PendingViewerNavigation::First,
+            )?;
             self.last_navigation_at = Some(Instant::now());
             return Ok(());
         }
@@ -1988,7 +2016,9 @@ impl ViewerApp {
             return Ok(());
         }
         self.handoff_filer_control_to_viewer_navigation();
-        if self.navigation_edge_reached(PendingViewerNavigation::Last) {
+        if self.should_apply_edge_noop(PendingViewerNavigation::Last)
+            && self.navigation_edge_reached(PendingViewerNavigation::Last)
+        {
             self.log_bench_state(
                 "viewer.navigation.edge_noop",
                 serde_json::json!({
@@ -1998,8 +2028,28 @@ impl ViewerApp {
             );
             return Ok(());
         }
-        if let Some(target) = self.filer_edge_navigation_target(PendingViewerNavigation::Last) {
-            self.request_load_path(target)?;
+        if let Some((target, is_container)) =
+            self.filer_edge_navigation_target(PendingViewerNavigation::Last)
+        {
+            if should_skip_edge_navigation_for_same_target(
+                &self.current_navigation_path,
+                &target,
+                PendingViewerNavigation::Last,
+            ) {
+                self.log_bench_state(
+                    "viewer.navigation.edge_noop_same_target",
+                    serde_json::json!({
+                        "navigation": "Last",
+                        "path": self.current_navigation_path.display().to_string(),
+                    }),
+                );
+                return Ok(());
+            }
+            self.request_filer_edge_target_navigation(
+                target,
+                is_container,
+                PendingViewerNavigation::Last,
+            )?;
             self.last_navigation_at = Some(Instant::now());
             return Ok(());
         }
@@ -2017,6 +2067,27 @@ impl ViewerApp {
         self.last_navigation_at
             .map(|last| last.elapsed() >= NAVIGATION_REPEAT_INTERVAL)
             .unwrap_or(true)
+    }
+
+    fn request_filer_edge_target_navigation(
+        &mut self,
+        target: PathBuf,
+        is_container: bool,
+        navigation: PendingViewerNavigation,
+    ) -> Result<(), Box<dyn Error>> {
+        if is_container {
+            self.browse_filer_directory(target.clone());
+            let resolved = match navigation {
+                PendingViewerNavigation::First => resolve_start_path(&target),
+                PendingViewerNavigation::Last => resolve_end_path(&target),
+                PendingViewerNavigation::Next | PendingViewerNavigation::Prev => None,
+            };
+            if let Some(path) = resolved {
+                return self.request_load_path(path);
+            }
+            return Ok(());
+        }
+        self.request_load_path(target)
     }
 
     pub(crate) fn request_load_path(&mut self, path: PathBuf) -> Result<(), Box<dyn Error>> {
@@ -2195,13 +2266,27 @@ impl ViewerApp {
                 }
             }
             PendingViewerNavigation::First => {
-                if self.navigation_edge_reached(PendingViewerNavigation::First) {
+                if self.should_apply_edge_noop(PendingViewerNavigation::First)
+                    && self.navigation_edge_reached(PendingViewerNavigation::First)
+                {
                     return;
                 }
-                if let Some(target) =
+                if let Some((target, is_container)) =
                     self.filer_edge_navigation_target(PendingViewerNavigation::First)
                 {
-                    self.request_load_path(target)
+                    if should_skip_edge_navigation_for_same_target(
+                        &self.current_navigation_path,
+                        &target,
+                        PendingViewerNavigation::First,
+                    ) {
+                        Ok(())
+                    } else {
+                        self.request_filer_edge_target_navigation(
+                            target,
+                            is_container,
+                            PendingViewerNavigation::First,
+                        )
+                    }
                 } else {
                     let command = if self.filer.ascending {
                         FilesystemCommand::First { request_id: 0 }
@@ -2212,13 +2297,27 @@ impl ViewerApp {
                 }
             }
             PendingViewerNavigation::Last => {
-                if self.navigation_edge_reached(PendingViewerNavigation::Last) {
+                if self.should_apply_edge_noop(PendingViewerNavigation::Last)
+                    && self.navigation_edge_reached(PendingViewerNavigation::Last)
+                {
                     return;
                 }
-                if let Some(target) =
+                if let Some((target, is_container)) =
                     self.filer_edge_navigation_target(PendingViewerNavigation::Last)
                 {
-                    self.request_load_path(target)
+                    if should_skip_edge_navigation_for_same_target(
+                        &self.current_navigation_path,
+                        &target,
+                        PendingViewerNavigation::Last,
+                    ) {
+                        Ok(())
+                    } else {
+                        self.request_filer_edge_target_navigation(
+                            target,
+                            is_container,
+                            PendingViewerNavigation::Last,
+                        )
+                    }
                 } else {
                     let command = if self.filer.ascending {
                         FilesystemCommand::Last { request_id: 0 }
@@ -2273,18 +2372,20 @@ impl ViewerApp {
             })
     }
 
-    fn filer_edge_navigation_target(&self, navigation: PendingViewerNavigation) -> Option<PathBuf> {
+    fn filer_edge_navigation_target(
+        &self,
+        navigation: PendingViewerNavigation,
+    ) -> Option<(PathBuf, bool)> {
         if !self.show_filer {
             return None;
         }
-        let files = self
+        let targets = self
             .filer
             .entries
             .iter()
-            .filter(|entry| !entry.is_container)
-            .map(|entry| entry.path.clone())
+            .map(|entry| (entry.path.clone(), entry.is_container))
             .collect::<Vec<_>>();
-        if files.is_empty() {
+        if targets.is_empty() {
             return None;
         }
         let use_front = match navigation {
@@ -2293,9 +2394,9 @@ impl ViewerApp {
             PendingViewerNavigation::Next | PendingViewerNavigation::Prev => return None,
         };
         if use_front {
-            files.first().cloned()
+            targets.first().cloned()
         } else {
-            files.last().cloned()
+            targets.last().cloned()
         }
     }
 
@@ -2307,6 +2408,15 @@ impl ViewerApp {
             PendingViewerNavigation::Next | PendingViewerNavigation::Prev => return false,
         };
         adjacent_entry(&self.current_navigation_path, self.navigation_sort, step).is_none()
+    }
+
+    fn should_apply_edge_noop(&self, navigation: PendingViewerNavigation) -> bool {
+        should_apply_edge_noop(
+            navigation,
+            self.show_filer,
+            self.filer.directory.as_deref(),
+            self.current_directory().as_deref(),
+        )
     }
 
     fn bench_random_file_entry(
@@ -3040,9 +3150,24 @@ impl ViewerApp {
                 self.respawn_filesystem_worker();
                 let _ = self.init_filesystem(self.current_navigation_path.clone());
             } else if folder_changed {
-                self.navigator_ready = false;
-                self.queued_navigation = None;
-                let _ = self.init_filesystem(self.current_navigation_path.clone());
+                if let Some(fs_tx) = self.fs_tx.clone() {
+                    let request_id = self.alloc_fs_request_id();
+                    self.log_bench_state(
+                        "viewer.filesystem.set_current_after_branch_change",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "navigation_path": self.current_navigation_path.display().to_string(),
+                        }),
+                    );
+                    let _ = fs_tx.send(FilesystemCommand::SetCurrent {
+                        request_id,
+                        path: self.current_navigation_path.clone(),
+                    });
+                } else {
+                    self.navigator_ready = false;
+                    self.queued_navigation = None;
+                    let _ = self.init_filesystem(self.current_navigation_path.clone());
+                }
             } else if let Some(fs_tx) = self.fs_tx.clone() {
                 let request_id = self.alloc_fs_request_id();
                 let _ = fs_tx.send(FilesystemCommand::SetCurrent {
@@ -3844,7 +3969,13 @@ impl ViewerApp {
                     if snapshot_changed_in_same_directory
                         && self.navigator_ready
                         && self.active_fs_request_id.is_none()
-                        && self.current_directory().as_deref() == self.filer.directory.as_deref()
+                        && should_reinitialize_filesystem_from_filer_snapshot(
+                            &self.current_navigation_path,
+                            self.current_directory().as_deref(),
+                            self.filer.directory.as_deref(),
+                            &self.filer.entries,
+                            self.filer.selected.as_deref(),
+                        )
                     {
                         self.log_bench_state(
                             "viewer.filesystem.reinit_from_filer_snapshot",
@@ -4293,6 +4424,58 @@ fn should_sync_filer_selected_with_current(
         && filer_directory == current_directory
 }
 
+fn should_skip_edge_navigation_for_same_target(
+    current: &Path,
+    target: &Path,
+    navigation: PendingViewerNavigation,
+) -> bool {
+    if !is_browser_container(target) {
+        return is_same_navigation_target(current, target);
+    }
+    let edge_target = match navigation {
+        PendingViewerNavigation::First => resolve_start_path(target),
+        PendingViewerNavigation::Last => resolve_end_path(target),
+        PendingViewerNavigation::Next | PendingViewerNavigation::Prev => None,
+    };
+    edge_target
+        .as_deref()
+        .map(|edge| is_same_navigation_target(current, edge))
+        .unwrap_or(false)
+}
+
+fn should_apply_edge_noop(
+    navigation: PendingViewerNavigation,
+    show_filer: bool,
+    filer_directory: Option<&Path>,
+    current_directory: Option<&Path>,
+) -> bool {
+    matches!(
+        navigation,
+        PendingViewerNavigation::First | PendingViewerNavigation::Last
+    ) && (!show_filer || filer_directory == current_directory)
+}
+
+fn should_reinitialize_filesystem_from_filer_snapshot(
+    current_navigation_path: &Path,
+    current_directory: Option<&Path>,
+    filer_directory: Option<&Path>,
+    filer_entries: &[FilerEntry],
+    filer_selected: Option<&Path>,
+) -> bool {
+    if current_directory != filer_directory {
+        return false;
+    }
+    let current_exists = filer_entries
+        .iter()
+        .any(|entry| is_same_navigation_target(&entry.path, current_navigation_path));
+    if !current_exists {
+        return true;
+    }
+    filer_selected
+        .map(|selected| !is_same_navigation_target(selected, current_navigation_path))
+        .unwrap_or(false)
+}
+
 fn is_same_navigation_target(lhs: &Path, rhs: &Path) -> bool {
     if lhs == rhs {
         return true;
@@ -4409,6 +4592,16 @@ mod tests {
                 texture: None,
                 texture_display_scale: 1.0,
             },
+        }
+    }
+
+    fn dummy_filer_entry(path: &str) -> FilerEntry {
+        FilerEntry {
+            path: PathBuf::from(path),
+            label: path.to_string(),
+            is_container: false,
+            sort_as_container: false,
+            metadata: Default::default(),
         }
     }
 
@@ -4724,6 +4917,81 @@ mod tests {
     }
 
     #[test]
+    fn skips_edge_navigation_when_target_is_current() {
+        assert!(should_skip_edge_navigation_for_same_target(
+            Path::new("dir-a\\a.png"),
+            Path::new("dir-a\\a.png"),
+            PendingViewerNavigation::First,
+        ));
+        assert!(!should_skip_edge_navigation_for_same_target(
+            Path::new("dir-a\\a.png"),
+            Path::new("dir-a\\b.png"),
+            PendingViewerNavigation::Last,
+        ));
+    }
+
+    #[test]
+    fn skips_edge_navigation_when_container_edge_is_already_current() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("wml2viewer-edge-noop-{unique}"));
+        let container = root.join("container");
+        let first = container.join("001.png");
+        let last = container.join("999.png");
+        fs::create_dir_all(&container).unwrap();
+        fs::write(&first, []).unwrap();
+        fs::write(&last, []).unwrap();
+
+        assert!(should_skip_edge_navigation_for_same_target(
+            &first,
+            &container,
+            PendingViewerNavigation::First,
+        ));
+        assert!(should_skip_edge_navigation_for_same_target(
+            &last,
+            &container,
+            PendingViewerNavigation::Last,
+        ));
+        assert!(!should_skip_edge_navigation_for_same_target(
+            &first,
+            &container,
+            PendingViewerNavigation::Last,
+        ));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn applies_edge_noop_only_when_filer_is_hidden_or_aligned() {
+        assert!(should_apply_edge_noop(
+            PendingViewerNavigation::Last,
+            false,
+            Some(Path::new("parent")),
+            Some(Path::new("child")),
+        ));
+        assert!(should_apply_edge_noop(
+            PendingViewerNavigation::First,
+            true,
+            Some(Path::new("same")),
+            Some(Path::new("same")),
+        ));
+        assert!(!should_apply_edge_noop(
+            PendingViewerNavigation::Last,
+            true,
+            Some(Path::new("parent")),
+            Some(Path::new("child")),
+        ));
+        assert!(!should_apply_edge_noop(
+            PendingViewerNavigation::Next,
+            true,
+            Some(Path::new("same")),
+            Some(Path::new("same")),
+        ));
+    }
+
+    #[test]
     fn maps_filer_sort_to_navigation_sort() {
         assert_eq!(
             navigation_sort_for_filer(FilerSortField::Name, NameSortMode::Os),
@@ -4864,6 +5132,42 @@ mod tests {
             Some((Path::new("dir-a"), 10)),
             Path::new("dir-b"),
             10,
+        ));
+    }
+
+    #[test]
+    fn reinit_snapshot_only_when_current_is_missing_or_misaligned() {
+        let entries = vec![
+            dummy_filer_entry("dir\\001.png"),
+            dummy_filer_entry("dir\\002.png"),
+        ];
+        assert!(!should_reinitialize_filesystem_from_filer_snapshot(
+            Path::new("dir\\001.png"),
+            Some(Path::new("dir")),
+            Some(Path::new("dir")),
+            &entries,
+            Some(Path::new("dir\\001.png")),
+        ));
+        assert!(should_reinitialize_filesystem_from_filer_snapshot(
+            Path::new("dir\\003.png"),
+            Some(Path::new("dir")),
+            Some(Path::new("dir")),
+            &entries,
+            Some(Path::new("dir\\001.png")),
+        ));
+        assert!(should_reinitialize_filesystem_from_filer_snapshot(
+            Path::new("dir\\001.png"),
+            Some(Path::new("dir")),
+            Some(Path::new("dir")),
+            &entries,
+            Some(Path::new("dir\\002.png")),
+        ));
+        assert!(!should_reinitialize_filesystem_from_filer_snapshot(
+            Path::new("dir\\001.png"),
+            Some(Path::new("dir-a")),
+            Some(Path::new("dir-b")),
+            &entries,
+            Some(Path::new("dir\\001.png")),
         ));
     }
 

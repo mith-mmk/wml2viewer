@@ -61,6 +61,14 @@
       - zip内のファイルで終了したときそのファイルではなくファイラーを起動してしまう
       - ファイラーで zip を選んだとき loading / wait 表示が弱い
 
+- [-] 次ラウンド送り（2026-04-16）
+  - キーバインドUIの見直し
+  - filer挙動の再設計
+  - 今回ラウンドの到達点:
+    - Home/End端連打時の無駄遷移を削減
+    - snapshot起点の不要なfilesystem再初期化を抑制
+    - branch change時の追従を `init_filesystem` 優先から `SetCurrent` 優先に変更
+
 - [ ] P3 filesystem: Recursive navigation が大きい実ディレクトリで止まる問題（継続調査）
     - `state-1775968737116-58500.jsonl` の計測で、停止の主因は zip 展開ではなく `kind=real` の directory scan だった
     - `filesystem.navigation.resolved elapsed_ms=71657` と `filesystem.scan_directory_listing kind=real elapsed_ms=71656` が一致
