@@ -48,12 +48,7 @@ impl ViewerApp {
                     self.show_left_menu = false;
                 }
                 if ui.button(self.text(UiTextKey::ToggleFiler)).clicked() {
-                    self.show_filer = !self.show_filer;
-                    if self.show_filer {
-                        self.pending_filer_focus_path = Some(self.current_navigation_path.clone());
-                    } else {
-                        self.pending_filer_focus_path = None;
-                    }
+                    self.set_show_filer(!self.show_filer);
                     self.pending_fit_recalc = true;
                     self.show_left_menu = false;
                 }
@@ -329,7 +324,7 @@ impl ViewerApp {
                                 )
                                 .clicked()
                             {
-                                self.request_filer_directory(root, None);
+                                self.browse_filer_directory(root);
                             }
                         }
                     });
@@ -337,7 +332,7 @@ impl ViewerApp {
                     ui.label(dir.display().to_string());
                     if let Some(parent) = dir.parent() {
                         if icon_toolbar_button(ui, SvgIcon::Up, false, up_text, icon_color) {
-                            self.request_filer_directory(parent.to_path_buf(), None);
+                            self.browse_filer_directory(parent.to_path_buf());
                         }
                     }
                 }
@@ -666,10 +661,6 @@ impl ViewerApp {
 
     fn activate_filer_entry(&mut self, entry: FilerEntry) {
         if entry.is_container {
-            self.filer.pending_user_request = Some(FilerUserRequest::BrowseDirectory {
-                directory: entry.path.clone(),
-            });
-            self.filer.committed_browse_directory = None;
             self.log_bench_state(
                 "viewer.filer.entry_activated",
                 serde_json::json!({
@@ -677,7 +668,7 @@ impl ViewerApp {
                     "path": entry.path.display().to_string(),
                 }),
             );
-            self.request_filer_directory(entry.path, None);
+            self.browse_filer_directory(entry.path);
             return;
         }
         let navigation_path = entry.path.clone();
@@ -697,7 +688,7 @@ impl ViewerApp {
         self.filer.committed_browse_directory = None;
         self.filer.selected = Some(navigation_path.clone());
         self.empty_mode = false;
-        self.show_filer = false;
+        self.set_show_filer(false);
         self.pending_fit_recalc = true;
         if self.show_subfiler {
             self.pending_subfiler_focus_path = Some(navigation_path.clone());

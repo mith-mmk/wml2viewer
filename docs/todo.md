@@ -18,9 +18,25 @@
   - [x] ログ出力の追加（特にファイラーの状態変化、branch change、navigation など）
 - [x] WML2からロード可能な画像形式をハードコーディングではなくAPI経由(get_encode_extentions, get_decoder_extentions)で取得する
 - [x] フォントサイズのデフォルトがSになっているので自動に変更
-- [ ] ファイラーソート順のバグ
+- [+] ファイラーソート順のバグ
   - [+] filerとviewerのソート順がおかしいバグ
-  - [ ] 親フォルダのHome Endがおかしい（子フォルダに移動してしまう）
+  - [+] 親フォルダのHome Endがおかしい（子フォルダに移動してしまう）
+
+- [ ] P0 filer / viewer 同期不整合の洗い出しと解消（subfilerは後回し）
+  - [ ] 「操作トリガーの優先順位」を固定
+    - filer click（Browse/Select）と viewer key navigation（Next/Prev/Home/End）が競合したときの採用順を明文化
+    - `pending_user_request` と `active_fs_request_id` の競合時に stale request が残らないことを保証
+  - [ ] directory同期の一貫化
+    - `filer.directory` と `viewer.current_directory()` が一致しないまま維持される条件を潰す
+    - `committed_browse_directory` が残留して `sync_with_current_path` が継続スキップされるケースを解消
+  - [ ] selection同期の一貫化
+    - `filer.selected` と `viewer.current_navigation_path` が branch change 後にズレるケースを解消
+    - snapshot/reset/append の途中状態でも selected の解釈がぶれないようにする
+  - [ ] sort truth の単一化（継続）
+    - viewer navigation と filer 表示で同一 comparator を使う
+    - ZIP を含む実ディレクトリでも append 中表示から OS準拠順を維持する
+  - [ ] no-op navigation の無駄処理を継続除去
+    - 端での Home/Home, End/End だけでなく、同一 path 再選択時の scan/reinit を削減
 
 - [ ] P2 filer / subfiler 総合整理
     - 現在の残課題を filer 単独ではなく `viewer / filesystem / filer / subfiler` の同期問題としてまとめて扱う
@@ -54,6 +70,3 @@
       - `child_directories()` 用の軽量 listing を導入して `files` 情報と分ける
       - `Next/Prev/Last` の request が large parent scan に巻き込まれないようにする
       - 上の `Recursive branch change` issue と密接に関連している
-- [ ] P3 サブファイラー：右→左表示の修正（表示位置の固定）
-- [ ] P3 サブファイラー：サブファイラーの表示が current 近傍優先ではない
-- [ ] P3 サブファイラー：カレントのファイルではなく最後から読み始める

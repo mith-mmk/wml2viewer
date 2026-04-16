@@ -1203,6 +1203,8 @@ impl ViewerApp {
         let Some(filer_tx) = self.filer_tx.clone() else {
             return;
         };
+        self.filer.directory = Some(dir.clone());
+        self.filer.selected = selected.clone();
         let request_id = self.alloc_filer_request_id();
         self.filer.pending_request_id = Some(request_id);
         self.log_bench_state(
@@ -1226,6 +1228,14 @@ impl ViewerApp {
             extension_filter: self.filer.extension_filter.clone(),
             name_sort_mode: self.filer.name_sort_mode,
         });
+    }
+
+    pub(crate) fn browse_filer_directory(&mut self, dir: PathBuf) {
+        self.filer.pending_user_request = Some(FilerUserRequest::BrowseDirectory {
+            directory: dir.clone(),
+        });
+        self.filer.committed_browse_directory = None;
+        self.request_filer_directory(dir, None);
     }
 
     fn filer_selected_for_directory(
@@ -1300,20 +1310,43 @@ impl ViewerApp {
             );
             return;
         }
-        if self
+        if let Some(committed_browse_directory) = self
             .filer
             .committed_browse_directory
             .as_ref()
-            .is_some_and(|browse_dir| browse_dir != &dir)
+            .filter(|browse_dir| *browse_dir != &dir)
+            .cloned()
         {
-            self.log_bench_state(
-                "viewer.filer.sync_with_current_path.skipped_committed_browse",
-                serde_json::json!({
-                    "directory": dir.display().to_string(),
-                    "committed_browse_directory": self.filer.committed_browse_directory.as_ref().map(|path| path.display().to_string()),
-                }),
+            let filer_already_aligned = should_clear_stale_committed_browse_when_filer_aligned(
+                self.filer.directory.as_deref(),
+                &dir,
+                self.filer.pending_user_request.as_ref(),
             );
-            return;
+            if filer_already_aligned
+                || should_clear_stale_committed_browse_for_viewer_navigation(
+                    self.show_filer,
+                    self.filer.pending_user_request.as_ref(),
+                )
+            {
+                self.log_bench_state(
+                    "viewer.filer.sync_with_current_path.cleared_stale_committed_browse",
+                    serde_json::json!({
+                        "directory": dir.display().to_string(),
+                        "committed_browse_directory": committed_browse_directory.display().to_string(),
+                        "filer_already_aligned": filer_already_aligned,
+                    }),
+                );
+                self.filer.committed_browse_directory = None;
+            } else {
+                self.log_bench_state(
+                    "viewer.filer.sync_with_current_path.skipped_committed_browse",
+                    serde_json::json!({
+                        "directory": dir.display().to_string(),
+                        "committed_browse_directory": committed_browse_directory.display().to_string(),
+                    }),
+                );
+                return;
+            }
         }
         if self.filer.directory.as_ref() == Some(&dir) {
             self.filer.selected = selected.clone();
@@ -1799,6 +1832,22 @@ impl ViewerApp {
         if self.filer.ascending { 1 } else { -1 }
     }
 
+    fn handoff_filer_control_to_viewer_navigation(&mut self) {
+        if !should_handoff_filer_control_to_viewer_navigation(
+            self.filer.pending_user_request.as_ref(),
+            self.filer.committed_browse_directory.as_deref(),
+        ) {
+            return;
+        }
+        self.log_bench_state(
+            "viewer.filer.handoff_to_viewer_navigation",
+            serde_json::json!({
+                "committed_browse_directory": self.filer.committed_browse_directory.as_ref().map(|path| path.display().to_string()),
+            }),
+        );
+        self.filer.committed_browse_directory = None;
+    }
+
     pub(crate) fn next_image(&mut self) -> Result<(), Box<dyn Error>> {
         self.cancel_pending_single_click_navigation();
         if !self.can_trigger_navigation() {
@@ -1808,6 +1857,7 @@ impl ViewerApp {
             self.queue_viewer_navigation(PendingViewerNavigation::Next);
             return Ok(());
         }
+        self.handoff_filer_control_to_viewer_navigation();
         if let Some(target) = self.manga_navigation_target(true) {
             self.request_load_path(target)?;
             self.last_navigation_at = Some(Instant::now());
@@ -1838,6 +1888,7 @@ impl ViewerApp {
             self.queue_viewer_navigation(PendingViewerNavigation::Prev);
             return Ok(());
         }
+        self.handoff_filer_control_to_viewer_navigation();
         if let Some(target) = self.manga_navigation_target(false) {
             self.request_load_path(target)?;
             self.last_navigation_at = Some(Instant::now());
@@ -1868,6 +1919,7 @@ impl ViewerApp {
             self.queue_viewer_navigation(PendingViewerNavigation::First);
             return Ok(());
         }
+        self.handoff_filer_control_to_viewer_navigation();
         if self.navigation_edge_reached(PendingViewerNavigation::First) {
             self.log_bench_state(
                 "viewer.navigation.edge_noop",
@@ -1902,6 +1954,7 @@ impl ViewerApp {
             self.queue_viewer_navigation(PendingViewerNavigation::Last);
             return Ok(());
         }
+        self.handoff_filer_control_to_viewer_navigation();
         if self.navigation_edge_reached(PendingViewerNavigation::Last) {
             self.log_bench_state(
                 "viewer.navigation.edge_noop",
@@ -1935,6 +1988,31 @@ impl ViewerApp {
 
     pub(crate) fn request_load_path(&mut self, path: PathBuf) -> Result<(), Box<dyn Error>> {
             self.request_load_target(path.clone(), path)
+    }
+
+    pub(crate) fn set_show_filer(&mut self, show: bool) {
+        if self.show_filer == show {
+            return;
+        }
+        self.show_filer = show;
+        if show {
+            self.filer.committed_browse_directory = None;
+            self.pending_filer_focus_path = Some(self.current_navigation_path.clone());
+            self.sync_filer_directory_with_current_path();
+            return;
+        }
+
+        self.pending_filer_focus_path = None;
+        self.filer.committed_browse_directory = None;
+        if should_clear_filer_request_on_hide(self.filer.pending_user_request.as_ref()) {
+            self.log_bench_state(
+                "viewer.filer.pending_request_cleared_on_hide",
+                serde_json::json!({
+                    "pending_user_request": self.filer.pending_user_request.as_ref().map(|request| format!("{request:?}")),
+                }),
+            );
+            self.filer.pending_user_request = None;
+        }
     }
 
     pub(crate) fn set_show_subfiler(&mut self, show: bool) {
@@ -2343,7 +2421,7 @@ impl ViewerApp {
                 let Some(parent) = directory.and_then(|dir| dir.parent().map(Path::to_path_buf)) else {
                     return false;
                 };
-                self.request_filer_directory(parent, None);
+                self.browse_filer_directory(parent);
                 true
             }
             BenchAction::BrowseFirstContainer => {
@@ -4122,6 +4200,37 @@ fn should_clear_stale_filer_refresh_request(
     )
 }
 
+fn should_clear_stale_committed_browse_for_viewer_navigation(
+    show_filer: bool,
+    pending_user_request: Option<&FilerUserRequest>,
+) -> bool {
+    !show_filer && pending_user_request.is_none()
+}
+
+fn should_clear_stale_committed_browse_when_filer_aligned(
+    filer_directory: Option<&Path>,
+    current_directory: &Path,
+    pending_user_request: Option<&FilerUserRequest>,
+) -> bool {
+    filer_directory == Some(current_directory) && pending_user_request.is_none()
+}
+
+fn should_clear_filer_request_on_hide(
+    pending_user_request: Option<&FilerUserRequest>,
+) -> bool {
+    matches!(
+        pending_user_request,
+        Some(FilerUserRequest::BrowseDirectory { .. } | FilerUserRequest::Refresh { .. })
+    )
+}
+
+fn should_handoff_filer_control_to_viewer_navigation(
+    pending_user_request: Option<&FilerUserRequest>,
+    committed_browse_directory: Option<&Path>,
+) -> bool {
+    pending_user_request.is_none() && committed_browse_directory.is_some()
+}
+
 fn navigation_sort_for_filer(
     filer_sort_field: FilerSortField,
     name_sort_mode: NameSortMode,
@@ -4420,6 +4529,84 @@ mod tests {
                 directory: PathBuf::from("dir-a"),
                 selected: None,
             }),
+            None,
+        ));
+    }
+
+    #[test]
+    fn clears_stale_committed_browse_only_when_filer_is_hidden_and_idle() {
+        assert!(should_clear_stale_committed_browse_for_viewer_navigation(
+            false,
+            None,
+        ));
+        assert!(!should_clear_stale_committed_browse_for_viewer_navigation(
+            true,
+            None,
+        ));
+        assert!(!should_clear_stale_committed_browse_for_viewer_navigation(
+            false,
+            Some(&FilerUserRequest::BrowseDirectory {
+                directory: PathBuf::from("dir-a"),
+            }),
+        ));
+    }
+
+    #[test]
+    fn clears_stale_committed_browse_when_filer_is_aligned_to_current_dir() {
+        assert!(should_clear_stale_committed_browse_when_filer_aligned(
+            Some(Path::new("dir-a")),
+            Path::new("dir-a"),
+            None,
+        ));
+        assert!(!should_clear_stale_committed_browse_when_filer_aligned(
+            Some(Path::new("dir-b")),
+            Path::new("dir-a"),
+            None,
+        ));
+        assert!(!should_clear_stale_committed_browse_when_filer_aligned(
+            Some(Path::new("dir-a")),
+            Path::new("dir-a"),
+            Some(&FilerUserRequest::BrowseDirectory {
+                directory: PathBuf::from("dir-a"),
+            }),
+        ));
+    }
+
+    #[test]
+    fn clears_browse_or_refresh_request_when_filer_is_hidden() {
+        assert!(should_clear_filer_request_on_hide(Some(
+            &FilerUserRequest::BrowseDirectory {
+                directory: PathBuf::from("dir-a"),
+            }
+        )));
+        assert!(should_clear_filer_request_on_hide(Some(
+            &FilerUserRequest::Refresh {
+                directory: PathBuf::from("dir-a"),
+                selected: None,
+            }
+        )));
+        assert!(!should_clear_filer_request_on_hide(Some(
+            &FilerUserRequest::SelectFile {
+                navigation_path: PathBuf::from("dir-a\\current.png"),
+            }
+        )));
+        assert!(!should_clear_filer_request_on_hide(None));
+    }
+
+    #[test]
+    fn hands_off_filer_control_when_viewer_navigation_starts() {
+        assert!(should_handoff_filer_control_to_viewer_navigation(
+            None,
+            Some(Path::new("dir-a")),
+        ));
+        assert!(!should_handoff_filer_control_to_viewer_navigation(
+            Some(&FilerUserRequest::BrowseDirectory {
+                directory: PathBuf::from("dir-a"),
+            }),
+            Some(Path::new("dir-a")),
+        ));
+        assert!(!should_handoff_filer_control_to_viewer_navigation(
+            None,
             None,
         ));
     }

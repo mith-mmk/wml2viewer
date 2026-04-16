@@ -111,12 +111,7 @@ impl ViewerApp {
                     }
                 }
                 ViewerAction::ToggleFiler => {
-                    self.show_filer = !self.show_filer;
-                    if self.show_filer {
-                        self.pending_filer_focus_path = Some(self.current_navigation_path.clone());
-                    } else {
-                        self.pending_filer_focus_path = None;
-                    }
+                    self.set_show_filer(!self.show_filer);
                     self.pending_fit_recalc = true;
                 }
                 ViewerAction::ToggleSubfiler => {
