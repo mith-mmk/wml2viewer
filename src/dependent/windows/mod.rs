@@ -1,19 +1,19 @@
 use crate::dependent::normalize_locale_tag;
 use crate::wml2_formats::associated_file_extensions;
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
-use std::os::windows::process::CommandExt;
 use std::thread;
-use winreg::RegKey;
-use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
 use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
-    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
+    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance,
+    CoInitializeEx, CoTaskMemFree, CoUninitialize,
 };
 use windows::Win32::UI::Shell::{
     FOS_FORCEFILESYSTEM, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog,
     SIGDN_FILESYSPATH,
 };
+use winreg::RegKey;
+use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
 
 const LOCALE_NAME_MAX_LENGTH: i32 = 85;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -192,8 +192,7 @@ pub fn pick_directory_dialog() -> Option<PathBuf> {
 
 fn native_pick_directory_dialog() -> Option<PathBuf> {
     unsafe {
-        let init_result =
-            CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        let init_result = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
         let needs_uninit = init_result.is_ok();
 
         let result = (|| {

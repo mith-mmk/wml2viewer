@@ -392,10 +392,7 @@ fn module_priority(
     if priorities.is_empty() {
         priorities.push(fallback_priority.max(default_priority(provider_name)));
     }
-    *priorities
-        .iter()
-        .max()
-        .unwrap_or(&fallback_priority)
+    *priorities.iter().max().unwrap_or(&fallback_priority)
 }
 
 fn default_priority(provider_name: &str) -> i32 {

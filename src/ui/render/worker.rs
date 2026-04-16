@@ -84,7 +84,11 @@ fn blank_loaded_image() -> LoadedImage {
 
 pub(crate) fn spawn_render_worker(
     initial_source: LoadedImage,
-) -> (Sender<RenderCommand>, Receiver<RenderResult>, JoinHandle<()>) {
+) -> (
+    Sender<RenderCommand>,
+    Receiver<RenderResult>,
+    JoinHandle<()>,
+) {
     let (command_tx, command_rx) = mpsc::channel::<RenderCommand>();
     let (result_tx, result_rx) = mpsc::channel::<RenderResult>();
     let current_source = Arc::new(Mutex::new(initial_source));
@@ -184,12 +188,10 @@ pub(crate) fn spawn_render_worker(
                             .lock()
                             .map(|current| current.clone())
                             .unwrap_or_else(|_| blank_loaded_image());
-                        match catch_unwind(AssertUnwindSafe(|| {
-                            match scale_mode {
-                                RenderScaleMode::FastGpu => Ok(source_snapshot.clone()),
-                                RenderScaleMode::PreciseCpu => {
-                                    resize_loaded_image(&source_snapshot, zoom, method)
-                                }
+                        match catch_unwind(AssertUnwindSafe(|| match scale_mode {
+                            RenderScaleMode::FastGpu => Ok(source_snapshot.clone()),
+                            RenderScaleMode::PreciseCpu => {
+                                resize_loaded_image(&source_snapshot, zoom, method)
                             }
                         }))
                         .unwrap_or_else(|_| {

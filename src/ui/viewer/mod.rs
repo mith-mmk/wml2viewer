@@ -6,8 +6,8 @@ use crate::drawers::canvas::Canvas;
 use crate::drawers::image::{LoadedImage, SaveFormat, save_loaded_image};
 use crate::filesystem::{
     FilesystemCommand, FilesystemResult, adjacent_entry, archive_prefers_low_io,
-    is_browser_container, navigation_branch_path, resolve_navigation_entry_path, resolve_start_path,
-    set_archive_zip_workaround, spawn_filesystem_worker,
+    is_browser_container, navigation_branch_path, resolve_navigation_entry_path,
+    resolve_start_path, set_archive_zip_workaround, spawn_filesystem_worker,
 };
 use crate::options::{
     AppConfig, EndOfFolderOption, KeyBinding, NavigationSortOption, PluginConfig, ResourceOptions,
@@ -22,8 +22,9 @@ use crate::ui::menu::fileviewer::thumbnail::{
 };
 use crate::ui::menu::fileviewer::worker::{FilerCommand, FilerResult, spawn_filer_worker};
 use crate::ui::render::{
-    ActiveRenderRequest, LoadedRenderPage, RenderCommand, RenderLoadMetrics, RenderResult, aligned_offset,
-    canvas_to_color_image, downscale_for_texture_limit, spawn_render_worker, worker_send_error,
+    ActiveRenderRequest, LoadedRenderPage, RenderCommand, RenderLoadMetrics, RenderResult,
+    aligned_offset, canvas_to_color_image, downscale_for_texture_limit, spawn_render_worker,
+    worker_send_error,
 };
 use crate::ui::viewer::options::{
     RenderOptions, RenderScaleMode, ViewerOptions, WindowOptions, WindowStartPosition,
@@ -345,9 +346,7 @@ fn take_next_queued_filesystem_work(
     if let Some(path) = queued_filesystem_init_path.take() {
         Some(PendingFilesystemWork::Init(path))
     } else {
-        queued_navigation
-            .take()
-            .map(PendingFilesystemWork::Command)
+        queued_navigation.take().map(PendingFilesystemWork::Command)
     }
 }
 
@@ -426,7 +425,10 @@ fn ellipsize_end(text: &str, max_chars: usize) -> String {
     if chars.len() <= max_chars {
         return text.to_string();
     }
-    let head = chars.iter().take(max_chars.saturating_sub(3)).collect::<String>();
+    let head = chars
+        .iter()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
     format!("{head}...")
 }
 
@@ -859,7 +861,8 @@ impl ViewerApp {
                     | crate::drawers::affine::InterpolationAlgorithm::Bilinear
             )
         {
-            self.render_options.zoom_method = crate::drawers::affine::InterpolationAlgorithm::Bilinear;
+            self.render_options.zoom_method =
+                crate::drawers::affine::InterpolationAlgorithm::Bilinear;
         }
     }
 
@@ -909,7 +912,10 @@ impl ViewerApp {
     }
 
     fn texture_options(&self) -> TextureOptions {
-        texture_options_for_scale_mode(self.render_options.scale_mode, self.render_options.zoom_method)
+        texture_options_for_scale_mode(
+            self.render_options.scale_mode,
+            self.render_options.zoom_method,
+        )
     }
 
     fn current_draw_scale(&self) -> f32 {
@@ -1011,9 +1017,9 @@ impl ViewerApp {
             self.render_options.zoom_method,
         );
         let image = self.color_image_from_canvas(&canvas);
-        let texture = self
-            .egui_ctx
-            .load_texture(texture_name.to_owned(), image, self.texture_options());
+        let texture =
+            self.egui_ctx
+                .load_texture(texture_name.to_owned(), image, self.texture_options());
         (texture, display_scale)
     }
 
@@ -1038,10 +1044,7 @@ impl ViewerApp {
         self.texture_display_scale = 1.0;
     }
 
-    fn shutdown_render_worker(
-        tx: &Sender<RenderCommand>,
-        join: &mut Option<JoinHandle<()>>,
-    ) {
+    fn shutdown_render_worker(tx: &Sender<RenderCommand>, join: &mut Option<JoinHandle<()>>) {
         let _ = tx.send(RenderCommand::Shutdown);
         if let Some(handle) = join.take() {
             let _ = handle.join();
@@ -1110,12 +1113,8 @@ impl ViewerApp {
             return false;
         }
 
-        let target_fit = calc_fit_zoom(
-            viewport,
-            source_size,
-            &self.render_options.zoom_option,
-        )
-        .clamp(0.1, 16.0);
+        let target_fit =
+            calc_fit_zoom(viewport, source_size, &self.render_options.zoom_option).clamp(0.1, 16.0);
         let target_zoom = (target_fit * self.zoom_factor.clamp(0.1, 16.0)).clamp(0.1, 16.0);
 
         if (target_zoom - 1.0).abs() < 0.01 {
@@ -1249,14 +1248,15 @@ impl ViewerApp {
                     return Some(navigation_path.clone());
                 }
             }
-            Some(FilerUserRequest::Refresh { directory: refresh_dir, selected })
-                if refresh_dir == directory =>
-            {
+            Some(FilerUserRequest::Refresh {
+                directory: refresh_dir,
+                selected,
+            }) if refresh_dir == directory => {
                 return selected.clone();
             }
-            Some(FilerUserRequest::BrowseDirectory { directory: browse_dir })
-                if browse_dir == directory =>
-            {
+            Some(FilerUserRequest::BrowseDirectory {
+                directory: browse_dir,
+            }) if browse_dir == directory => {
                 return fallback;
             }
             _ => {}
@@ -1272,6 +1272,20 @@ impl ViewerApp {
         if should_clear {
             self.filer.pending_user_request = None;
             self.filer.committed_browse_directory = None;
+        }
+    }
+
+    fn sync_filer_selected_with_current_when_aligned(&mut self) {
+        if !should_sync_filer_selected_with_current(
+            self.filer.pending_user_request.as_ref(),
+            self.filer.directory.as_deref(),
+            self.current_directory().as_deref(),
+        ) {
+            return;
+        }
+        if let Some(dir) = self.filer.directory.as_deref() {
+            self.filer.selected = self
+                .selected_path_for_filer_directory(dir, Some(self.current_navigation_path.clone()));
         }
     }
 
@@ -1687,7 +1701,10 @@ impl ViewerApp {
         )
     }
 
-    fn desired_manga_companion_path_for_navigation(&self, navigation_path: &Path) -> Option<PathBuf> {
+    fn desired_manga_companion_path_for_navigation(
+        &self,
+        navigation_path: &Path,
+    ) -> Option<PathBuf> {
         spread_companion_path_for_navigation(
             navigation_path,
             self.navigation_sort,
@@ -1703,9 +1720,11 @@ impl ViewerApp {
     }
 
     fn visible_companion_source(&self) -> Option<&LoadedImage> {
-        self.companion_navigation_path
-            .as_ref()
-            .and(self.companion_display.as_ref().map(|display| &display.source))
+        self.companion_navigation_path.as_ref().and(
+            self.companion_display
+                .as_ref()
+                .map(|display| &display.source),
+        )
     }
 
     fn visible_companion(&self) -> Option<(&LoadedImage, &TextureHandle)> {
@@ -1739,10 +1758,7 @@ impl ViewerApp {
                 }),
             );
             self.companion_navigation_path = Some(path);
-            self.apply_companion_loaded(
-                entry.load_path,
-                entry.display,
-            );
+            self.apply_companion_loaded(entry.load_path, entry.display);
             return Ok(());
         }
         let request_id = self.alloc_request_id();
@@ -1824,7 +1840,11 @@ impl ViewerApp {
             return Some(boundary_target);
         }
 
-        let step = if forward { 2 * direction } else { -2 * direction };
+        let step = if forward {
+            2 * direction
+        } else {
+            -2 * direction
+        };
         adjacent_entry(&self.current_navigation_path, self.navigation_sort, step)
     }
 
@@ -1833,6 +1853,19 @@ impl ViewerApp {
     }
 
     fn handoff_filer_control_to_viewer_navigation(&mut self) {
+        if should_cancel_filer_request_for_viewer_navigation(
+            self.filer.pending_user_request.as_ref(),
+        ) {
+            self.log_bench_state(
+                "viewer.filer.cancelled_for_viewer_navigation",
+                serde_json::json!({
+                    "pending_user_request": self.filer.pending_user_request.as_ref().map(|request| format!("{request:?}")),
+                }),
+            );
+            self.filer.pending_user_request = None;
+            self.filer.committed_browse_directory = None;
+            return;
+        }
         if !should_handoff_filer_control_to_viewer_navigation(
             self.filer.pending_user_request.as_ref(),
             self.filer.committed_browse_directory.as_deref(),
@@ -1987,7 +2020,7 @@ impl ViewerApp {
     }
 
     pub(crate) fn request_load_path(&mut self, path: PathBuf) -> Result<(), Box<dyn Error>> {
-            self.request_load_target(path.clone(), path)
+        self.request_load_target(path.clone(), path)
     }
 
     pub(crate) fn set_show_filer(&mut self, show: bool) {
@@ -2165,7 +2198,8 @@ impl ViewerApp {
                 if self.navigation_edge_reached(PendingViewerNavigation::First) {
                     return;
                 }
-                if let Some(target) = self.filer_edge_navigation_target(PendingViewerNavigation::First)
+                if let Some(target) =
+                    self.filer_edge_navigation_target(PendingViewerNavigation::First)
                 {
                     self.request_load_path(target)
                 } else {
@@ -2181,7 +2215,8 @@ impl ViewerApp {
                 if self.navigation_edge_reached(PendingViewerNavigation::Last) {
                     return;
                 }
-                if let Some(target) = self.filer_edge_navigation_target(PendingViewerNavigation::Last)
+                if let Some(target) =
+                    self.filer_edge_navigation_target(PendingViewerNavigation::Last)
                 {
                     self.request_load_path(target)
                 } else {
@@ -2274,7 +2309,9 @@ impl ViewerApp {
         adjacent_entry(&self.current_navigation_path, self.navigation_sort, step).is_none()
     }
 
-    fn bench_random_file_entry(&mut self) -> Option<crate::ui::menu::fileviewer::state::FilerEntry> {
+    fn bench_random_file_entry(
+        &mut self,
+    ) -> Option<crate::ui::menu::fileviewer::state::FilerEntry> {
         let entries = self
             .filer
             .entries
@@ -2328,7 +2365,10 @@ impl ViewerApp {
             })
     }
 
-    fn bench_container_entry_by_path(&self, path: &Path) -> Option<crate::ui::menu::fileviewer::state::FilerEntry> {
+    fn bench_container_entry_by_path(
+        &self,
+        path: &Path,
+    ) -> Option<crate::ui::menu::fileviewer::state::FilerEntry> {
         self.filer
             .entries
             .iter()
@@ -2407,7 +2447,10 @@ impl ViewerApp {
                 self.set_show_subfiler(true);
                 if let Some(dir) = self.current_directory() {
                     if self.filer.directory.as_ref() != Some(&dir) {
-                        self.request_filer_directory(dir, Some(self.current_navigation_path.clone()));
+                        self.request_filer_directory(
+                            dir,
+                            Some(self.current_navigation_path.clone()),
+                        );
                     }
                 }
                 true
@@ -2418,7 +2461,8 @@ impl ViewerApp {
                     .directory
                     .clone()
                     .or_else(|| self.current_directory());
-                let Some(parent) = directory.and_then(|dir| dir.parent().map(Path::to_path_buf)) else {
+                let Some(parent) = directory.and_then(|dir| dir.parent().map(Path::to_path_buf))
+                else {
                     return false;
                 };
                 self.browse_filer_directory(parent);
@@ -2558,8 +2602,8 @@ impl ViewerApp {
         navigation_path: PathBuf,
         load_request_path: PathBuf,
     ) -> Result<(), Box<dyn Error>> {
-        let branch_changed =
-            navigation_branch_path(&self.current_navigation_path) != navigation_branch_path(&navigation_path);
+        let branch_changed = navigation_branch_path(&self.current_navigation_path)
+            != navigation_branch_path(&navigation_path);
         let switching_image = self.current_navigation_path != navigation_path;
         if branch_changed {
             self.clear_manga_companion();
@@ -2589,9 +2633,9 @@ impl ViewerApp {
         if branch_changed {
             self.show_loading_texture(true); // フォルダ変わった時だけリセット
             self.clear_current_image_display();
-        } 
-//        self.show_loading_texture(branch_changed);
-//        self.clear_current_image_display();
+        }
+        //        self.show_loading_texture(branch_changed);
+        //        self.clear_current_image_display();
         let request_id = self.alloc_request_id();
         self.active_request = Some(ActiveRenderRequest::Load(request_id));
         self.active_request_started_at = Some(Instant::now());
@@ -2749,11 +2793,7 @@ impl ViewerApp {
         self.preload_cache.remove(index)
     }
 
-    fn apply_companion_loaded(
-        &mut self,
-        path: Option<PathBuf>,
-        display: DisplayedPageState,
-    ) {
+    fn apply_companion_loaded(&mut self, path: Option<PathBuf>, display: DisplayedPageState) {
         let previous_companion = self.companion_display.clone();
         let layout_changed = path.is_some()
             || previous_companion
@@ -2808,7 +2848,8 @@ impl ViewerApp {
     }
 
     fn apply_spread_companion_result(&mut self, companion: Option<LoadedRenderPage>) {
-        let desired = self.desired_manga_companion_path_for_navigation(&self.current_navigation_path);
+        let desired =
+            self.desired_manga_companion_path_for_navigation(&self.current_navigation_path);
         match companion {
             Some(companion) if desired.as_ref() == Some(&companion.path) => {
                 self.companion_navigation_path = Some(companion.path.clone());
@@ -3039,7 +3080,10 @@ impl ViewerApp {
         self.active_request = None;
         self.active_request_started_at = None;
 
-        let source_size = vec2(self.source.canvas.width() as f32, self.source.canvas.height() as f32);
+        let source_size = vec2(
+            self.source.canvas.width() as f32,
+            self.source.canvas.height() as f32,
+        );
         let defer_precise_display =
             self.maybe_defer_precise_display(source_size, loaded_path.as_deref());
         if defer_precise_display {
@@ -3061,12 +3105,11 @@ impl ViewerApp {
         );
         if !self.navigator_ready && self.active_fs_request_id.is_none() {
             if self.deferred_filesystem_init_path.is_some() {
-                self.deferred_filesystem_init_path =
-                    Some(
-                        loaded_path
-                            .clone()
-                            .unwrap_or_else(|| self.current_navigation_path.clone()),
-                    );
+                self.deferred_filesystem_init_path = Some(
+                    loaded_path
+                        .clone()
+                        .unwrap_or_else(|| self.current_navigation_path.clone()),
+                );
                 self.defer_initial_filesystem_sync();
             }
         }
@@ -3109,7 +3152,8 @@ impl ViewerApp {
                 return Some(companion);
             }
         }
-        let step = if self.manga_spread_active() { 2 } else { 1 } * self.navigation_direction_sign();
+        let step =
+            if self.manga_spread_active() { 2 } else { 1 } * self.navigation_direction_sign();
         adjacent_entry(&self.current_navigation_path, self.navigation_sort, step)
     }
 
@@ -3203,7 +3247,12 @@ impl ViewerApp {
         }
         self.pending_navigation_path = Some(path.to_path_buf());
         self.overlay.clear_loading_message();
-        self.apply_loaded_result(entry.load_path, entry.display.source, entry.display.rendered, None);
+        self.apply_loaded_result(
+            entry.load_path,
+            entry.display.source,
+            entry.display.rendered,
+            None,
+        );
         true
     }
 
@@ -3325,8 +3374,7 @@ impl ViewerApp {
                             "metrics": Self::bench_metrics_payload(&metrics),
                         }),
                     );
-                    let failed_during_load =
-                        matches!(active_request, ActiveRenderRequest::Load(_));
+                    let failed_during_load = matches!(active_request, ActiveRenderRequest::Load(_));
                     let failed_navigation_path = self.pending_navigation_path.take();
                     let should_advance = failed_during_load
                         && should_advance_after_load_failure(
@@ -3372,10 +3420,7 @@ impl ViewerApp {
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
-                    self.log_bench_state(
-                        "viewer.poll_worker.disconnected",
-                        serde_json::json!({}),
-                    );
+                    self.log_bench_state("viewer.poll_worker.disconnected", serde_json::json!({}));
                     self.overlay.alert_message = Some("render worker disconnected".to_string());
                     self.overlay.clear_loading_message();
                     self.respawn_render_worker();
@@ -3525,12 +3570,15 @@ impl ViewerApp {
                             },
                         });
                     }
-                    self.apply_companion_loaded(path, DisplayedPageState {
-                        source,
-                        rendered,
-                        texture: Some(texture),
-                        texture_display_scale: display_scale,
-                    });
+                    self.apply_companion_loaded(
+                        path,
+                        DisplayedPageState {
+                            source,
+                            rendered,
+                            texture: Some(texture),
+                            texture_display_scale: display_scale,
+                        },
+                    );
                 }
                 Ok(RenderResult::Failed {
                     request_id,
@@ -3738,6 +3786,7 @@ impl ViewerApp {
                         }),
                     );
                     self.filer.entries.extend(entries);
+                    self.sync_filer_selected_with_current_when_aligned();
                 }
                 Ok(FilerResult::Snapshot {
                     request_id,
@@ -3775,13 +3824,14 @@ impl ViewerApp {
                     self.filer.directory = Some(directory);
                     self.filer.entries = entries;
                     let snapshot_signature = filer_entries_signature(&self.filer.entries);
-                    let snapshot_changed_in_same_directory = filer_snapshot_changed_in_same_directory(
-                        self.last_filer_snapshot_signature
-                            .as_ref()
-                            .map(|(directory, signature)| (directory.as_path(), *signature)),
-                        self.filer.directory.as_deref().unwrap(),
-                        snapshot_signature,
-                    );
+                    let snapshot_changed_in_same_directory =
+                        filer_snapshot_changed_in_same_directory(
+                            self.last_filer_snapshot_signature
+                                .as_ref()
+                                .map(|(directory, signature)| (directory.as_path(), *signature)),
+                            self.filer.directory.as_deref().unwrap(),
+                            snapshot_signature,
+                        );
                     self.last_filer_snapshot_signature = Some((
                         self.filer.directory.as_deref().unwrap().to_path_buf(),
                         snapshot_signature,
@@ -3790,6 +3840,7 @@ impl ViewerApp {
                         self.filer.directory.as_deref().unwrap(),
                         selected,
                     );
+                    self.sync_filer_selected_with_current_when_aligned();
                     if snapshot_changed_in_same_directory
                         && self.navigator_ready
                         && self.active_fs_request_id.is_none()
@@ -4044,8 +4095,7 @@ impl eframe::App for ViewerApp {
                     let companion_draw_size = companion.map(|(companion_rendered, _)| {
                         vec2(
                             companion_rendered.canvas.width() as f32 * self.companion_draw_scale(),
-                            companion_rendered.canvas.height() as f32
-                                * self.companion_draw_scale(),
+                            companion_rendered.canvas.height() as f32 * self.companion_draw_scale(),
                         )
                     });
                     let total_draw_size = if spread_active {
@@ -4172,19 +4222,14 @@ fn should_advance_after_load_failure(
     current_navigation_path: &Path,
     failed_navigation_path: Option<&Path>,
 ) -> bool {
-    failed_navigation_path
-        .is_some_and(|path| path == current_navigation_path)
+    failed_navigation_path.is_some_and(|path| path == current_navigation_path)
 }
 
 fn should_clear_filer_select_request_for_current(
     pending_user_request: Option<&FilerUserRequest>,
     current_navigation_path: &Path,
 ) -> bool {
-    matches!(
-        pending_user_request,
-        Some(FilerUserRequest::SelectFile { navigation_path })
-            if navigation_path == current_navigation_path
-    )
+    matches!(pending_user_request, Some(FilerUserRequest::SelectFile { navigation_path }) if is_same_navigation_target(navigation_path, current_navigation_path))
 }
 
 fn should_clear_stale_filer_refresh_request(
@@ -4215,9 +4260,7 @@ fn should_clear_stale_committed_browse_when_filer_aligned(
     filer_directory == Some(current_directory) && pending_user_request.is_none()
 }
 
-fn should_clear_filer_request_on_hide(
-    pending_user_request: Option<&FilerUserRequest>,
-) -> bool {
+fn should_clear_filer_request_on_hide(pending_user_request: Option<&FilerUserRequest>) -> bool {
     matches!(
         pending_user_request,
         Some(FilerUserRequest::BrowseDirectory { .. } | FilerUserRequest::Refresh { .. })
@@ -4229,6 +4272,37 @@ fn should_handoff_filer_control_to_viewer_navigation(
     committed_browse_directory: Option<&Path>,
 ) -> bool {
     pending_user_request.is_none() && committed_browse_directory.is_some()
+}
+
+fn should_cancel_filer_request_for_viewer_navigation(
+    pending_user_request: Option<&FilerUserRequest>,
+) -> bool {
+    matches!(
+        pending_user_request,
+        Some(FilerUserRequest::BrowseDirectory { .. } | FilerUserRequest::Refresh { .. })
+    )
+}
+
+fn should_sync_filer_selected_with_current(
+    pending_user_request: Option<&FilerUserRequest>,
+    filer_directory: Option<&Path>,
+    current_directory: Option<&Path>,
+) -> bool {
+    pending_user_request.is_none()
+        && filer_directory.is_some()
+        && filer_directory == current_directory
+}
+
+fn is_same_navigation_target(lhs: &Path, rhs: &Path) -> bool {
+    if lhs == rhs {
+        return true;
+    }
+    let lhs_rebased = resolve_navigation_entry_path(lhs);
+    let rhs_rebased = resolve_navigation_entry_path(rhs);
+    match (lhs_rebased, rhs_rebased) {
+        (Some(lhs), Some(rhs)) => lhs == rhs,
+        _ => false,
+    }
 }
 
 fn navigation_sort_for_filer(
@@ -4536,12 +4610,10 @@ mod tests {
     #[test]
     fn clears_stale_committed_browse_only_when_filer_is_hidden_and_idle() {
         assert!(should_clear_stale_committed_browse_for_viewer_navigation(
-            false,
-            None,
+            false, None,
         ));
         assert!(!should_clear_stale_committed_browse_for_viewer_navigation(
-            true,
-            None,
+            true, None,
         ));
         assert!(!should_clear_stale_committed_browse_for_viewer_navigation(
             false,
@@ -4606,8 +4678,48 @@ mod tests {
             Some(Path::new("dir-a")),
         ));
         assert!(!should_handoff_filer_control_to_viewer_navigation(
+            None, None,
+        ));
+    }
+
+    #[test]
+    fn cancels_browse_or_refresh_request_when_viewer_navigation_starts() {
+        assert!(should_cancel_filer_request_for_viewer_navigation(Some(
+            &FilerUserRequest::BrowseDirectory {
+                directory: PathBuf::from("dir-a"),
+            }
+        )));
+        assert!(should_cancel_filer_request_for_viewer_navigation(Some(
+            &FilerUserRequest::Refresh {
+                directory: PathBuf::from("dir-a"),
+                selected: Some(PathBuf::from("dir-a\\a.png")),
+            }
+        )));
+        assert!(!should_cancel_filer_request_for_viewer_navigation(Some(
+            &FilerUserRequest::SelectFile {
+                navigation_path: PathBuf::from("dir-a\\a.png"),
+            }
+        )));
+    }
+
+    #[test]
+    fn syncs_filer_selected_with_current_only_when_aligned_and_idle() {
+        assert!(should_sync_filer_selected_with_current(
             None,
+            Some(Path::new("dir-a")),
+            Some(Path::new("dir-a")),
+        ));
+        assert!(!should_sync_filer_selected_with_current(
+            Some(&FilerUserRequest::BrowseDirectory {
+                directory: PathBuf::from("dir-a"),
+            }),
+            Some(Path::new("dir-a")),
+            Some(Path::new("dir-a")),
+        ));
+        assert!(!should_sync_filer_selected_with_current(
             None,
+            Some(Path::new("dir-a")),
+            Some(Path::new("dir-b")),
         ));
     }
 
@@ -4646,14 +4758,20 @@ mod tests {
         let mut queued_init = None;
         queue_filesystem_init_path(&mut queued_init, PathBuf::from("dir-a"));
         let mut queued_navigation = None;
-        queue_navigation_command(&mut queued_navigation, FilesystemCommand::Next {
-            request_id: 0,
-            policy: EndOfFolderOption::Recursive,
-        });
-        queue_navigation_command(&mut queued_navigation, FilesystemCommand::Prev {
-            request_id: 0,
-            policy: EndOfFolderOption::Recursive,
-        });
+        queue_navigation_command(
+            &mut queued_navigation,
+            FilesystemCommand::Next {
+                request_id: 0,
+                policy: EndOfFolderOption::Recursive,
+            },
+        );
+        queue_navigation_command(
+            &mut queued_navigation,
+            FilesystemCommand::Prev {
+                request_id: 0,
+                policy: EndOfFolderOption::Recursive,
+            },
+        );
 
         assert_eq!(queued_init, Some(PathBuf::from("dir-a")));
         assert!(matches!(
@@ -4701,7 +4819,6 @@ mod tests {
         )));
         assert!(!should_defer_companion_sync_during_primary_load(None));
     }
-
 
     #[test]
     fn cancels_busy_filesystem_request_for_matching_filer_select() {
@@ -4763,12 +4880,8 @@ mod tests {
         fs::write(&first, []).unwrap();
         fs::write(&second, []).unwrap();
 
-        let companion = spread_companion_path_for_navigation(
-            &first,
-            NavigationSortOption::Name,
-            1,
-            true,
-        );
+        let companion =
+            spread_companion_path_for_navigation(&first, NavigationSortOption::Name, 1, true);
 
         assert_eq!(companion.as_deref(), Some(second.as_path()));
 

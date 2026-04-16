@@ -67,7 +67,11 @@ pub(crate) fn compare_os_str(left: &str, right: &str) -> Ordering {
 
     #[cfg(not(target_os = "windows"))]
     {
-        compare_natural_str(&normalize_for_os_sort(left), &normalize_for_os_sort(right), true)
+        compare_natural_str(
+            &normalize_for_os_sort(left),
+            &normalize_for_os_sort(right),
+            true,
+        )
     }
 }
 

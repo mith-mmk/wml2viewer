@@ -51,8 +51,8 @@ fn normalize_extensions(extensions: Vec<String>) -> BTreeSet<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{available_save_formats, decoder_extensions, encoder_extensions};
     use super::associated_file_extensions;
+    use super::{available_save_formats, decoder_extensions, encoder_extensions};
 
     #[test]
     fn decoder_extensions_include_common_formats_from_wml2() {

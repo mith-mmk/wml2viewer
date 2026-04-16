@@ -935,9 +935,7 @@ impl From<NavigationSortConfigFile> for NavigationSortOption {
         match value {
             NavigationSortConfigFile::OsName => NavigationSortOption::OsName,
             NavigationSortConfigFile::Name => NavigationSortOption::NameCaseInsensitive,
-            NavigationSortConfigFile::NameCaseSensitive => {
-                NavigationSortOption::NameCaseSensitive
-            }
+            NavigationSortConfigFile::NameCaseSensitive => NavigationSortOption::NameCaseSensitive,
             NavigationSortConfigFile::NameCaseInsensitive => {
                 NavigationSortOption::NameCaseInsensitive
             }

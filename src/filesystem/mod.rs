@@ -4,8 +4,8 @@ mod zip_file;
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
-use std::fs;
 use std::ffi::OsStr;
+use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -18,11 +18,11 @@ use crate::options::{EndOfFolderOption, NavigationSortOption};
 use crate::wml2_formats::supports_decoder_extension;
 use listed_file::load_listed_file_entries;
 pub(crate) use sort::{compare_natural_str, compare_os_str};
-pub(crate) use zip_file::{load_zip_entries_unsorted, sort_zip_entries};
 use zip_file::{
     load_zip_entries, load_zip_entry_bytes, set_zip_workaround_options, zip_entry_record,
     zip_prefers_low_io,
 };
+pub(crate) use zip_file::{load_zip_entries_unsorted, sort_zip_entries};
 
 const LISTED_FILE_EXTENSION: &str = "wmltxt";
 const LISTED_VIRTUAL_MARKER: &str = "__wmlv__";
@@ -536,7 +536,9 @@ pub fn spawn_filesystem_worker(
                     );
                     let _ = result_tx.send(FilesystemResult::NavigatorReady {
                         request_id,
-                        navigation_path: initial_target.as_ref().map(|target| target.navigation_path.clone()),
+                        navigation_path: initial_target
+                            .as_ref()
+                            .map(|target| target.navigation_path.clone()),
                         load_path: initial_target.map(|target| target.load_path),
                     });
                 }
@@ -622,7 +624,9 @@ fn handle_navigation_request(
     direction: PendingDirection,
 ) {
     let started_at = Instant::now();
-    let current_path = navigator.as_ref().map(|nav| nav.current().display().to_string());
+    let current_path = navigator
+        .as_ref()
+        .map(|nav| nav.current().display().to_string());
     let outcome = match navigator {
         Some(nav) => match direction {
             PendingDirection::Next => nav.next_with_policy(policy, cache),
@@ -675,10 +679,7 @@ fn resolve_navigation_path(path: &Path, cache: &mut FilesystemCache) -> Option<P
     resolve_start_path(path).map(|_| path.to_path_buf())
 }
 
-fn rebase_virtual_listed_child_path(
-    path: &Path,
-    cache: &mut FilesystemCache,
-) -> Option<PathBuf> {
+fn rebase_virtual_listed_child_path(path: &Path, cache: &mut FilesystemCache) -> Option<PathBuf> {
     let listed_root = listed_virtual_root(path)?;
     let expected_identity = listed_virtual_identity_from_virtual_path(path);
     cache
@@ -692,11 +693,14 @@ fn rebase_virtual_listed_child_path(
         })
         .or_else(|| {
             let expected_name = listed_virtual_name_from_virtual_path(path)?;
-            cache.supported_entries(&listed_root).into_iter().find(|entry| {
-                listed_virtual_name_from_virtual_path(entry)
-                    .map(|name| name.eq_ignore_ascii_case(&expected_name))
-                    .unwrap_or(false)
-            })
+            cache
+                .supported_entries(&listed_root)
+                .into_iter()
+                .find(|entry| {
+                    listed_virtual_name_from_virtual_path(entry)
+                        .map(|name| name.eq_ignore_ascii_case(&expected_name))
+                        .unwrap_or(false)
+                })
         })
 }
 
@@ -1028,20 +1032,32 @@ fn scan_real_directory_listing(dir: &Path, sort: NavigationSortOption) -> Direct
 
 fn first_supported_path_for_entry(path: &Path, sort: NavigationSortOption) -> Option<PathBuf> {
     if is_listed_file_path(path) {
-        return scan_listed_virtual_directory(path, sort).files.into_iter().next();
+        return scan_listed_virtual_directory(path, sort)
+            .files
+            .into_iter()
+            .next();
     }
     if is_zip_file_path(path) {
-        return scan_zip_virtual_directory(path, sort).files.into_iter().next();
+        return scan_zip_virtual_directory(path, sort)
+            .files
+            .into_iter()
+            .next();
     }
     resolve_start_path(path)
 }
 
 fn last_supported_path_for_entry(path: &Path, sort: NavigationSortOption) -> Option<PathBuf> {
     if is_listed_file_path(path) {
-        return scan_listed_virtual_directory(path, sort).files.into_iter().last();
+        return scan_listed_virtual_directory(path, sort)
+            .files
+            .into_iter()
+            .last();
     }
     if is_zip_file_path(path) {
-        return scan_zip_virtual_directory(path, sort).files.into_iter().last();
+        return scan_zip_virtual_directory(path, sort)
+            .files
+            .into_iter()
+            .last();
     }
     resolve_start_path(path)
 }
@@ -1060,7 +1076,8 @@ pub(crate) fn browser_entry_path_from_dir_entry(entry: &fs::DirEntry) -> Option<
 }
 
 fn dir_entry_is_directory(entry: &fs::DirEntry) -> bool {
-    entry.file_type()
+    entry
+        .file_type()
         .map(|file_type| file_type.is_dir())
         .or_else(|_| entry.metadata().map(|metadata| metadata.is_dir()))
         .unwrap_or(false)
@@ -1596,7 +1613,10 @@ mod tests {
 
         assert_eq!(zip_virtual_root(&first), Some(archive.clone()));
         assert_eq!(zip_virtual_root(&last), Some(archive.clone()));
-        assert_eq!(resolve_virtual_zip_child(&first), Some((archive.clone(), 0)));
+        assert_eq!(
+            resolve_virtual_zip_child(&first),
+            Some((archive.clone(), 0))
+        );
         assert_eq!(resolve_virtual_zip_child(&last), Some((archive.clone(), 2)));
 
         let _ = fs::remove_dir_all(root);
@@ -1794,7 +1814,11 @@ mod tests {
 
         let second = cache.supported_entries(&listed);
         assert_eq!(second.len(), 3);
-        assert!(second.iter().any(|entry| resolve_start_path(entry) == Some(page3.clone())));
+        assert!(
+            second
+                .iter()
+                .any(|entry| resolve_start_path(entry) == Some(page3.clone()))
+        );
 
         let _ = fs::remove_dir_all(root);
     }

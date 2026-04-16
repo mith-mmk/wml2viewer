@@ -43,8 +43,12 @@ pub(crate) enum NameSortMode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum FilerUserRequest {
-    BrowseDirectory { directory: PathBuf },
-    SelectFile { navigation_path: PathBuf },
+    BrowseDirectory {
+        directory: PathBuf,
+    },
+    SelectFile {
+        navigation_path: PathBuf,
+    },
     Refresh {
         directory: PathBuf,
         selected: Option<PathBuf>,

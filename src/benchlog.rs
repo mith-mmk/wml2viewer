@@ -19,7 +19,8 @@ struct BenchLoggerInner {
 
 impl BenchLogger {
     pub fn create() -> io::Result<Self> {
-        let directory = default_temp_dir().unwrap_or_else(|| std::env::temp_dir().join("wml2viewer"));
+        let directory =
+            default_temp_dir().unwrap_or_else(|| std::env::temp_dir().join("wml2viewer"));
         fs::create_dir_all(&directory)?;
         let path = directory.join(format!("state-{}.jsonl", timestamp_token()));
         Self::create_at_path(path)

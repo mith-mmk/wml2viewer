@@ -7,9 +7,9 @@ use crate::ui::menu::fileviewer::state::{FilerEntry, FilerMetadata, FilerSortFie
 use std::fs;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
 use std::thread;
 
 pub(crate) enum FilerCommand {
@@ -236,7 +236,10 @@ fn collect_browser_entries(
         if request_is_stale(latest_request_id, request_id) {
             return Vec::new();
         }
-        preview_chunk.push(build_preview_entry(path.clone(), archive_as_container_in_sort));
+        preview_chunk.push(build_preview_entry(
+            path.clone(),
+            archive_as_container_in_sort,
+        ));
         if preview_chunk.len() >= 64 {
             let _ = result_tx.send(FilerResult::Append {
                 request_id,
@@ -387,7 +390,9 @@ fn compare_name(left: &str, right: &str, mode: NameSortMode) -> std::cmp::Orderi
 fn sort_paths_for_navigation(paths: &mut [PathBuf], sort: NavigationSortOption) {
     match sort {
         NavigationSortOption::OsName => {
-            paths.sort_by(|left, right| compare_os_str(&label_for_path(left), &label_for_path(right)));
+            paths.sort_by(|left, right| {
+                compare_os_str(&label_for_path(left), &label_for_path(right))
+            });
         }
         NavigationSortOption::Name => {
             paths.sort_by(|left, right| {

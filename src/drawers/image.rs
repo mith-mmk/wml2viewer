@@ -3,10 +3,10 @@
 use std::io;
 use std::path::Path;
 
-use crate::wml2_formats::available_save_formats;
 use crate::dependent::plugins::{
     decode_image_from_bytes_with_plugins, decode_image_from_file_with_plugins,
 };
+use crate::wml2_formats::available_save_formats;
 use wml2::color::RGBA;
 use wml2::draw::{
     AnimationLayer as WmlAnimationLayer, ImageBuffer, NextBlend, NextDispose, image_from,

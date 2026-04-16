@@ -25,7 +25,9 @@ pub fn is_bench_network_path(path: &Path) -> bool {
 }
 
 pub fn normalize_bench_path(path: &Path) -> String {
-    path.to_string_lossy().replace('/', "\\").to_ascii_lowercase()
+    path.to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase()
 }
 
 fn load_bench_path_mapping() -> Vec<BenchPathEntry> {
@@ -135,9 +137,9 @@ fn windows_drive_root(path: &Path) -> Option<std::path::PathBuf> {
         _ => return None,
     };
     match prefix {
-        Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
-            Some(std::path::PathBuf::from(format!("{}:\\", char::from(letter))))
-        }
+        Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => Some(std::path::PathBuf::from(
+            format!("{}:\\", char::from(letter)),
+        )),
         Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => {
             Some(std::path::PathBuf::from(format!(
                 r"\\{}\{}\",

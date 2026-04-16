@@ -9,8 +9,8 @@ pub use crate::configs::resourses::{FontSizePreset, ResourceOptions};
 pub use crate::dependent::plugins::PluginConfig;
 pub use crate::ui::viewer::options::{
     BackgroundStyle, MangaSeparatorOptions, MangaSeparatorStyle, PaneSide, RenderOptions,
-    RenderScaleMode, ViewerOptions, WindowOptions, WindowSize, WindowStartPosition,
-    WindowUiTheme, ZoomOption,
+    RenderScaleMode, ViewerOptions, WindowOptions, WindowSize, WindowStartPosition, WindowUiTheme,
+    ZoomOption,
 };
 
 #[derive(Clone, Default)]

@@ -451,13 +451,7 @@ impl ViewerApp {
             .spacing(egui::vec2(spacing, spacing))
             .show(ui, |ui| {
                 for (index, entry) in entries.into_iter().enumerate() {
-                    self.filer_thumbnail_tile(
-                        ui,
-                        entry,
-                        item_width,
-                        focus_target,
-                        focus_consumed,
-                    );
+                    self.filer_thumbnail_tile(ui, entry, item_width, focus_target, focus_consumed);
                     if (index + 1) % columns == 0 {
                         ui.end_row();
                     }
@@ -611,11 +605,10 @@ impl ViewerApp {
                             }
                             frame.show(ui, |ui| {
                                 if let Some(texture) = self.thumbnail_cache.get(&entry.path) {
-                                    let response = ui
-                                        .add(egui::Button::image(
-                                            egui::Image::from_texture(texture)
-                                                .fit_to_exact_size(egui::vec2(72.0, 72.0)),
-                                        ));
+                                    let response = ui.add(egui::Button::image(
+                                        egui::Image::from_texture(texture)
+                                            .fit_to_exact_size(egui::vec2(72.0, 72.0)),
+                                    ));
                                     if focus_target.as_ref() == Some(&entry.path) {
                                         ui.scroll_to_rect(
                                             response.rect,
@@ -644,7 +637,7 @@ impl ViewerApp {
                                         focus_consumed = true;
                                     }
                                     if response.clicked() {
-                                    self.activate_filer_entry(entry.clone());
+                                        self.activate_filer_entry(entry.clone());
                                     }
                                 }
                             });
@@ -672,8 +665,8 @@ impl ViewerApp {
             return;
         }
         let navigation_path = entry.path.clone();
-        let load_path = resolve_start_path(&navigation_path)
-            .unwrap_or_else(|| navigation_path.clone());
+        let load_path =
+            resolve_start_path(&navigation_path).unwrap_or_else(|| navigation_path.clone());
         self.log_bench_state(
             "viewer.filer.entry_activated",
             serde_json::json!({
@@ -779,9 +772,7 @@ fn locale_datetime_pattern(locale: &str) -> &'static str {
         "en_US" => "%m/%d/%Y %I:%M %p",
         "en_GB" | "en_AU" => "%d/%m/%Y %H:%M",
         "de" | "de_DE" | "ru" | "ru_RU" => "%d.%m.%Y %H:%M",
-        "fr" | "fr_FR" | "it" | "it_IT" | "es" | "es_ES" | "pt" | "pt_BR" => {
-            "%d/%m/%Y %H:%M"
-        }
+        "fr" | "fr_FR" | "it" | "it_IT" | "es" | "es_ES" | "pt" | "pt_BR" => "%d/%m/%Y %H:%M",
         _ if normalized.starts_with("en_") => "%m/%d/%Y %I:%M %p",
         _ if normalized.starts_with("ja")
             || normalized.starts_with("zh")
