@@ -472,13 +472,14 @@ fn locale_input_from_config(config: &AppConfig) -> String {
 }
 
 pub(crate) fn build_settings_draft(config: &AppConfig) -> SettingsDraftState {
+    let effective_keymap = config.input.merged_with_defaults();
     SettingsDraftState {
         config: config.clone(),
         resource_locale_input: locale_input_from_config(config),
         resource_font_paths_input: join_search_paths(&config.resources.font_paths),
         susie64_search_paths_input: join_search_paths(&config.plugins.susie64.search_path),
         ffmpeg_search_paths_input: join_search_paths(&config.plugins.ffmpeg.search_path),
-        key_mapping_rows: key_mapping_rows_from_map(&config.input.key_mapping),
+        key_mapping_rows: key_mapping_rows_from_map(&effective_keymap),
         key_mapping_error: None,
     }
 }
@@ -4634,6 +4635,22 @@ mod tests {
             sort_as_container: false,
             metadata: Default::default(),
         }
+    }
+
+    #[test]
+    fn build_settings_draft_starts_from_effective_keymap() {
+        let config = AppConfig::default();
+        let draft = build_settings_draft(&config);
+        let defaults = crate::options::default_key_mapping();
+
+        assert_eq!(draft.key_mapping_rows.len(), defaults.len());
+        assert!(
+            draft
+                .key_mapping_rows
+                .iter()
+                .any(|row| row.binding == KeyBinding::new("F5")
+                    && row.action == ViewerAction::Reload)
+        );
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crate::options::{
 use crate::ui::i18n::UiTextKey;
 use crate::ui::input::dispatch::{
     MOUSE_WHEEL_DOWN_BINDING, MOUSE_WHEEL_UP_BINDING, is_pointer_binding_name,
-    pointer_binding_text_key, pointer_button_binding_name,
+    pointer_button_binding_name,
 };
 use crate::ui::menu::fileviewer::thumbnail::set_thumbnail_workaround;
 use crate::ui::render::interpolation_label;
@@ -22,7 +22,7 @@ use crate::ui::viewer::options::{
 };
 use crate::ui::viewer::{
     KeyMappingRowDraft, SettingsDraftState, SettingsTab, ViewerApp, build_settings_draft,
-    format_key_binding, join_search_paths, key_mapping_rows_from_map, parse_search_paths,
+    join_search_paths, key_mapping_rows_from_map, parse_search_paths,
 };
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
@@ -344,149 +344,148 @@ impl ViewerApp {
                     .button(self.text(UiTextKey::LoadCurrentCustomBindings))
                     .clicked()
                 {
-                    draft_state.key_mapping_rows =
-                        key_mapping_rows_from_map(&self.input_options.key_mapping);
+                    draft_state.key_mapping_rows = key_mapping_rows_from_map(&self.keymap);
                 }
                 if ui.button(self.text(UiTextKey::UseDefaultOnly)).clicked() {
                     draft.input.key_mapping.clear();
                     draft.input.replace_default_keymap = false;
-                    draft_state.key_mapping_rows.clear();
+                    let defaults = default_key_mapping();
+                    draft_state.key_mapping_rows = key_mapping_rows_from_map(&defaults);
                     draft_state.key_mapping_error = None;
                 }
             });
 
             ui.separator();
-
-            // Default bindings table
-            egui::CollapsingHeader::new(self.text(UiTextKey::DefaultBindingsTable))
-                .default_open(true)
-                .show(ui, |ui| {
-                    let defaults = default_key_mapping();
-                    let mut sorted: Vec<_> = defaults.iter().collect();
-                    sorted.sort_by(
-                        |(left_binding, left_action), (right_binding, right_action)| {
-                            left_action.name().cmp(right_action.name()).then_with(|| {
-                                format_key_binding(left_binding)
-                                    .cmp(&format_key_binding(right_binding))
-                            })
-                        },
-                    );
-                    egui::ScrollArea::vertical()
-                        .id_salt("default_bindings_scroll")
-                        .max_height(200.0)
-                        .show(ui, |ui| {
-                            egui::Grid::new("default_bindings_grid")
-                                .num_columns(2)
-                                .striped(true)
-                                .spacing([40.0, 4.0])
-                                .show(ui, |ui| {
-                                    ui.strong(self.text(UiTextKey::FunctionLabel));
-                                    ui.strong(self.text(UiTextKey::KeyCaptureLabel));
-                                    ui.end_row();
-                                    for (binding, action) in &sorted {
-                                        ui.label(viewer_action_label(self, **action));
-                                        ui.label(localized_key_binding(self, binding));
-                                        ui.end_row();
-                                    }
-                                });
-                        });
-                });
-
-            ui.separator();
             let mut remove_index = None;
             let duplicate_rows = duplicate_binding_row_indices(&draft_state.key_mapping_rows);
-            for (index, row) in draft_state.key_mapping_rows.iter_mut().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.strong(self.text(UiTextKey::FunctionLabel));
-                        egui::ComboBox::from_id_salt(("input_action", index))
-                            .width(180.0)
-                            .selected_text(viewer_action_label(self, row.action))
-                            .show_ui(ui, |ui| {
-                                for action in ViewerAction::all() {
-                                    ui.selectable_value(
-                                        &mut row.action,
-                                        *action,
-                                        viewer_action_label(self, *action),
+            egui::ScrollArea::vertical()
+                .id_salt("input_bindings_scroll")
+                .max_height(320.0)
+                .show(ui, |ui| {
+                    egui::Grid::new("input_bindings_grid")
+                        .num_columns(6)
+                        .striped(true)
+                        .spacing([10.0, 6.0])
+                        .show(ui, |ui| {
+                            ui.strong(self.text(UiTextKey::FunctionLabel));
+                            ui.strong(self.text(UiTextKey::KeyCaptureLabel));
+                            ui.strong(self.text(UiTextKey::CtrlLabel));
+                            ui.strong(self.text(UiTextKey::AltLabel));
+                            ui.strong(self.text(UiTextKey::ShiftLabel));
+                            ui.label("");
+                            ui.end_row();
+
+                            for (index, row) in draft_state.key_mapping_rows.iter_mut().enumerate()
+                            {
+                                let reserved_row = is_reserved_binding(&row.binding);
+                                ui.add_enabled_ui(!reserved_row, |ui| {
+                                    egui::ComboBox::from_id_salt(("input_action", index))
+                                        .width(180.0)
+                                        .selected_text(viewer_action_label(self, row.action))
+                                        .show_ui(ui, |ui| {
+                                            for action in ViewerAction::all() {
+                                                ui.selectable_value(
+                                                    &mut row.action,
+                                                    *action,
+                                                    viewer_action_label(self, *action),
+                                                );
+                                            }
+                                        });
+                                });
+
+                                let key_response = ui.add_enabled(
+                                    !reserved_row,
+                                    egui::TextEdit::singleline(&mut row.binding.key)
+                                        .desired_width(180.0)
+                                        .hint_text(self.text(UiTextKey::PressKeyToAssign)),
+                                );
+                                if duplicate_rows.contains(&index) {
+                                    let rect = key_response.rect.expand(1.0);
+                                    ui.painter().rect_stroke(
+                                        rect,
+                                        2.0,
+                                        egui::Stroke::new(1.0, ui.visuals().warn_fg_color),
+                                        egui::StrokeKind::Outside,
                                     );
                                 }
-                            });
-                    });
-
-                    ui.add_space(8.0);
-                    ui.vertical(|ui| {
-                        ui.strong(self.text(UiTextKey::KeyCaptureLabel));
-                        let key_response = ui.add(
-                            egui::TextEdit::singleline(&mut row.binding.key)
-                                .desired_width(180.0)
-                                .hint_text(self.text(UiTextKey::PressKeyToAssign)),
-                        );
-                        if duplicate_rows.contains(&index) {
-                            let rect = key_response.rect.expand(1.0);
-                            ui.painter().rect_stroke(
-                                rect,
-                                2.0,
-                                egui::Stroke::new(1.0, ui.visuals().warn_fg_color),
-                                egui::StrokeKind::Outside,
-                            );
-                        }
-                        if key_response.has_focus() && !key_response.gained_focus() {
-                            if let Some(pressed_key_name) = capture_pressed_key_name(ui.ctx()) {
-                                if !is_pointer_binding_name(&pressed_key_name)
-                                    || key_response.hovered()
+                                if !reserved_row
+                                    && key_response.has_focus()
+                                    && !key_response.gained_focus()
                                 {
-                                    let candidate = KeyBinding {
-                                        key: pressed_key_name.clone(),
-                                        ..row.binding.clone()
-                                    };
-                                    if !is_reserved_binding(&candidate) {
-                                        row.binding.key = pressed_key_name;
+                                    if let Some(pressed_key_name) =
+                                        capture_pressed_key_name(ui.ctx())
+                                    {
+                                        if !is_pointer_binding_name(&pressed_key_name)
+                                            || key_response.hovered()
+                                        {
+                                            let candidate = KeyBinding {
+                                                key: pressed_key_name.clone(),
+                                                ..row.binding.clone()
+                                            };
+                                            if !is_reserved_binding(&candidate) {
+                                                row.binding.key = pressed_key_name;
+                                            }
+                                        }
                                     }
                                 }
-                            }
-                        }
-                        if is_reserved_binding(&row.binding) {
-                            ui.colored_label(
-                                ui.visuals().warn_fg_color,
-                                self.text(UiTextKey::ReservedKeyWarning),
-                            );
-                        }
-                    });
 
-                    ui.add_space(6.0);
-                    ui.vertical(|ui| {
-                        ui.strong(self.text(UiTextKey::CtrlLabel));
-                        ui.checkbox(&mut row.binding.ctrl, "");
-                    });
-                    ui.vertical(|ui| {
-                        ui.strong(self.text(UiTextKey::AltLabel));
-                        ui.checkbox(&mut row.binding.alt, "");
-                    });
-                    ui.vertical(|ui| {
-                        ui.strong(self.text(UiTextKey::ShiftLabel));
-                        ui.checkbox(&mut row.binding.shift, "");
-                    });
-                    ui.add_space(6.0);
-                    ui.vertical(|ui| {
-                        ui.add_space(18.0);
-                        if ui.button(self.text(UiTextKey::Remove)).clicked() {
-                            remove_index = Some(index);
-                        }
-                    });
+                                ui.add_enabled_ui(!reserved_row, |ui| {
+                                    ui.checkbox(&mut row.binding.ctrl, "");
+                                });
+                                ui.add_enabled_ui(!reserved_row, |ui| {
+                                    ui.checkbox(&mut row.binding.alt, "");
+                                });
+                                ui.add_enabled_ui(!reserved_row, |ui| {
+                                    ui.checkbox(&mut row.binding.shift, "");
+                                });
+                                if reserved_row {
+                                    ui.add_enabled(
+                                        false,
+                                        egui::Button::new(self.text(UiTextKey::Remove)),
+                                    );
+                                } else if ui.button(self.text(UiTextKey::Remove)).clicked() {
+                                    remove_index = Some(index);
+                                }
+                                ui.end_row();
+
+                                if reserved_row {
+                                    ui.label("");
+                                    ui.colored_label(
+                                        ui.visuals().warn_fg_color,
+                                        self.text(UiTextKey::ReservedKeyWarning),
+                                    );
+                                    ui.label("");
+                                    ui.label("");
+                                    ui.label("");
+                                    ui.label("");
+                                    ui.end_row();
+                                }
+                            }
+                        });
                 });
-                ui.separator();
-            }
             if let Some(index) = remove_index {
                 draft_state.key_mapping_rows.remove(index);
             }
 
             let (map, warning) = keymap_from_rows(&draft_state.key_mapping_rows, &duplicate_rows);
-            draft.input.key_mapping = map;
+            let defaults = default_key_mapping();
+            if draft.input.replace_default_keymap {
+                draft.input.key_mapping = map;
+            } else if map == defaults {
+                draft.input.key_mapping.clear();
+                draft.input.replace_default_keymap = false;
+            } else if can_encode_with_default_overlay(&map, &defaults) {
+                draft.input.key_mapping = overlay_keymap_from_effective(&map, &defaults);
+                draft.input.replace_default_keymap = false;
+            } else {
+                draft.input.key_mapping = map;
+                draft.input.replace_default_keymap = true;
+            }
             draft_state.key_mapping_error = warning;
             ui.label(format!(
                 "{}: {}",
                 self.text(UiTextKey::CustomBindingsCount),
-                draft.input.key_mapping.len()
+                draft_state.key_mapping_rows.len()
             ));
             if let Some(warning) = draft_state.key_mapping_error.as_ref() {
                 let _ = warning;
@@ -1009,6 +1008,31 @@ fn keymap_from_rows(
     (parsed, warning)
 }
 
+fn can_encode_with_default_overlay(
+    effective: &HashMap<KeyBinding, ViewerAction>,
+    defaults: &HashMap<KeyBinding, ViewerAction>,
+) -> bool {
+    defaults
+        .keys()
+        .all(|binding| effective.contains_key(binding))
+}
+
+fn overlay_keymap_from_effective(
+    effective: &HashMap<KeyBinding, ViewerAction>,
+    defaults: &HashMap<KeyBinding, ViewerAction>,
+) -> HashMap<KeyBinding, ViewerAction> {
+    let mut overlay = HashMap::new();
+    for (binding, action) in effective {
+        match defaults.get(binding) {
+            Some(default_action) if default_action == action => {}
+            _ => {
+                overlay.insert(binding.clone(), *action);
+            }
+        }
+    }
+    overlay
+}
+
 fn duplicate_binding_row_indices(rows: &[KeyMappingRowDraft]) -> HashSet<usize> {
     let mut first_by_binding: HashMap<KeyBinding, usize> = HashMap::new();
     let mut duplicates = HashSet::new();
@@ -1026,24 +1050,6 @@ fn duplicate_binding_row_indices(rows: &[KeyMappingRowDraft]) -> HashSet<usize> 
     duplicates
 }
 
-fn localized_key_binding(viewer: &ViewerApp, binding: &KeyBinding) -> String {
-    let mut parts = Vec::new();
-    if binding.ctrl {
-        parts.push(viewer.text(UiTextKey::CtrlLabel).to_string());
-    }
-    if binding.shift {
-        parts.push(viewer.text(UiTextKey::ShiftLabel).to_string());
-    }
-    if binding.alt {
-        parts.push(viewer.text(UiTextKey::AltLabel).to_string());
-    }
-    let key_display = pointer_binding_text_key(&binding.key)
-        .map(|text_key| viewer.text(text_key).to_string())
-        .unwrap_or_else(|| binding.key.clone());
-    parts.push(key_display);
-    parts.join("+")
-}
-
 fn is_reserved_binding(binding: &KeyBinding) -> bool {
     // F1 = Help (hard-coded)
     if binding.key.eq_ignore_ascii_case("F1") && !binding.ctrl && !binding.alt && !binding.shift {
@@ -1051,6 +1057,10 @@ fn is_reserved_binding(binding: &KeyBinding) -> bool {
     }
     // F5 = Reload (hard-coded)
     if binding.key.eq_ignore_ascii_case("F5") && !binding.ctrl && !binding.alt && !binding.shift {
+        return true;
+    }
+    // Alt+F4 = OS close (hard-coded)
+    if binding.key.eq_ignore_ascii_case("F4") && binding.alt && !binding.ctrl && !binding.shift {
         return true;
     }
     false
@@ -1105,10 +1115,14 @@ fn capture_pressed_key_name(ctx: &egui::Context) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{capture_pressed_key_name, duplicate_binding_row_indices, keymap_from_rows};
+    use super::{
+        can_encode_with_default_overlay, capture_pressed_key_name, duplicate_binding_row_indices,
+        is_reserved_binding, keymap_from_rows, overlay_keymap_from_effective,
+    };
     use crate::options::{KeyBinding, ViewerAction};
     use crate::ui::viewer::KeyMappingRowDraft;
     use eframe::egui;
+    use std::collections::HashMap;
 
     #[test]
     fn builds_keymap_from_rows_with_modifiers() {
@@ -1182,6 +1196,89 @@ mod tests {
     fn capture_pressed_key_name_returns_none_without_events() {
         let ctx = egui::Context::default();
         assert!(capture_pressed_key_name(&ctx).is_none());
+    }
+
+    #[test]
+    fn reserved_binding_rejects_alt_f4() {
+        let binding = KeyBinding {
+            key: "F4".to_string(),
+            shift: false,
+            ctrl: false,
+            alt: true,
+        };
+        assert!(is_reserved_binding(&binding));
+    }
+
+    #[test]
+    fn keymap_from_rows_ignores_reserved_bindings() {
+        let rows = vec![
+            KeyMappingRowDraft {
+                binding: KeyBinding::new("F1"),
+                action: ViewerAction::NextImage,
+            },
+            KeyMappingRowDraft {
+                binding: KeyBinding {
+                    key: "F4".to_string(),
+                    shift: false,
+                    ctrl: false,
+                    alt: true,
+                },
+                action: ViewerAction::PrevImage,
+            },
+            KeyMappingRowDraft {
+                binding: KeyBinding::new("Space"),
+                action: ViewerAction::NextImage,
+            },
+        ];
+        let duplicates = duplicate_binding_row_indices(&rows);
+        let (parsed, _warning) = keymap_from_rows(&rows, &duplicates);
+
+        assert!(!parsed.contains_key(&KeyBinding::new("F1")));
+        assert!(!parsed.contains_key(&KeyBinding {
+            key: "F4".to_string(),
+            shift: false,
+            ctrl: false,
+            alt: true,
+        }));
+        assert_eq!(
+            parsed.get(&KeyBinding::new("Space")),
+            Some(&ViewerAction::NextImage)
+        );
+    }
+
+    #[test]
+    fn overlay_encoding_detects_removed_default_binding() {
+        let mut defaults = HashMap::new();
+        defaults.insert(KeyBinding::new("Space"), ViewerAction::NextImage);
+        defaults.insert(KeyBinding::new("ArrowRight"), ViewerAction::NextImage);
+
+        let mut effective = HashMap::new();
+        effective.insert(KeyBinding::new("Space"), ViewerAction::NextImage);
+
+        assert!(!can_encode_with_default_overlay(&effective, &defaults));
+    }
+
+    #[test]
+    fn overlay_encoding_extracts_only_differences() {
+        let mut defaults = HashMap::new();
+        defaults.insert(KeyBinding::new("Space"), ViewerAction::NextImage);
+
+        let mut effective = HashMap::new();
+        effective.insert(KeyBinding::new("Space"), ViewerAction::PrevImage);
+        effective.insert(KeyBinding::new("ArrowRight"), ViewerAction::NextImage);
+
+        assert!(can_encode_with_default_overlay(&effective, &defaults));
+        let overlay = overlay_keymap_from_effective(&effective, &defaults);
+
+        assert_eq!(overlay.len(), 2);
+        assert_eq!(
+            overlay.get(&KeyBinding::new("Space")),
+            Some(&ViewerAction::PrevImage)
+        );
+        assert_eq!(
+            overlay.get(&KeyBinding::new("ArrowRight")),
+            Some(&ViewerAction::NextImage)
+        );
     }
 }
 

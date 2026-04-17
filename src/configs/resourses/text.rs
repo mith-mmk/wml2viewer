@@ -44,7 +44,6 @@ pub(crate) enum UiTextKey {
     Close,
     SaveAs,
     Next,
-    Previous,
     ToggleSettings,
     ToggleFiler,
     ToggleManga,
@@ -174,14 +173,6 @@ pub(crate) enum UiTextKey {
     ToggleAnimationAction,
     ToggleGrayscaleAction,
     ToggleSubfilerAction,
-    DefaultBindingsTable,
-    MousePrimaryName,
-    MouseSecondaryName,
-    MouseMiddleName,
-    MouseExtra1Name,
-    MouseExtra2Name,
-    MouseWheelUpName,
-    MouseWheelDownName,
     ReservedKeyWarning,
 }
 
@@ -244,7 +235,6 @@ fn en(key: UiTextKey) -> &'static str {
         UiTextKey::Close => "Close",
         UiTextKey::SaveAs => "Save As",
         UiTextKey::Next => "Next",
-        UiTextKey::Previous => "Previous",
         UiTextKey::ToggleSettings => "Toggle Settings",
         UiTextKey::ToggleFiler => "Toggle Filer",
         UiTextKey::ToggleManga => "Toggle Manga",
@@ -343,12 +333,12 @@ fn en(key: UiTextKey) -> &'static str {
             "Keyboard and mouse remap are available now. Tablet remap is planned."
         }
         UiTextKey::AddBinding => "Add binding",
-        UiTextKey::LoadCurrentCustomBindings => "Load current custom bindings",
+        UiTextKey::LoadCurrentCustomBindings => "Load active bindings",
         UiTextKey::UseDefaultOnly => "Use default only",
         UiTextKey::FunctionLabel => "Function",
         UiTextKey::KeyCaptureLabel => "Key",
         UiTextKey::PressKeyToAssign => "Click the key box, then press key or mouse input",
-        UiTextKey::CustomBindingsCount => "Custom bindings",
+        UiTextKey::CustomBindingsCount => "Bindings count",
         UiTextKey::DuplicateBindingWarning => {
             "Duplicate bindings were merged. Last row wins for the same key and modifiers."
         }
@@ -392,14 +382,6 @@ fn en(key: UiTextKey) -> &'static str {
         UiTextKey::ToggleAnimationAction => "Toggle Animation",
         UiTextKey::ToggleGrayscaleAction => "Toggle Grayscale",
         UiTextKey::ToggleSubfilerAction => "Toggle Subfiler",
-        UiTextKey::DefaultBindingsTable => "Default Bindings",
-        UiTextKey::MousePrimaryName => "Left Click",
-        UiTextKey::MouseSecondaryName => "Right Click",
-        UiTextKey::MouseMiddleName => "Middle Click",
-        UiTextKey::MouseExtra1Name => "Mouse Button 4",
-        UiTextKey::MouseExtra2Name => "Mouse Button 5",
-        UiTextKey::MouseWheelUpName => "Wheel Up",
-        UiTextKey::MouseWheelDownName => "Wheel Down",
         UiTextKey::ReservedKeyWarning => "Reserved (cannot be changed)",
     }
 }
@@ -446,7 +428,6 @@ fn ja(key: UiTextKey) -> &'static str {
         UiTextKey::Close => "閉じる",
         UiTextKey::SaveAs => "保存形式",
         UiTextKey::Next => "次へ",
-        UiTextKey::Previous => "前へ",
         UiTextKey::ToggleSettings => "設定を切替",
         UiTextKey::ToggleFiler => "ファイラーを切替",
         UiTextKey::ToggleManga => "マンガを切替",
@@ -547,14 +528,14 @@ fn ja(key: UiTextKey) -> &'static str {
             "現在はキーボード/マウス割り当てに対応。タブレットは今後対応予定です。"
         }
         UiTextKey::AddBinding => "割り当てを追加",
-        UiTextKey::LoadCurrentCustomBindings => "現在のカスタム割り当てを読み込む",
+        UiTextKey::LoadCurrentCustomBindings => "現在有効な割り当てを読み込む",
         UiTextKey::UseDefaultOnly => "デフォルトのみを使う",
         UiTextKey::FunctionLabel => "ファンクション",
         UiTextKey::KeyCaptureLabel => "キー",
         UiTextKey::PressKeyToAssign => {
             "キー欄をクリックして、割り当てたいキー/マウス入力を行ってください"
         }
-        UiTextKey::CustomBindingsCount => "カスタム割り当て数",
+        UiTextKey::CustomBindingsCount => "割り当て数",
         UiTextKey::DuplicateBindingWarning => {
             "重複する割り当ては統合されました。同一キー+修飾キーは最後の行が優先されます。"
         }
@@ -598,14 +579,6 @@ fn ja(key: UiTextKey) -> &'static str {
         UiTextKey::ToggleAnimationAction => "アニメーション切替",
         UiTextKey::ToggleGrayscaleAction => "グレースケール切替",
         UiTextKey::ToggleSubfilerAction => "サブファイラーを切替",
-        UiTextKey::DefaultBindingsTable => "デフォルト割り当て一覧",
-        UiTextKey::MousePrimaryName => "左クリック",
-        UiTextKey::MouseSecondaryName => "右クリック",
-        UiTextKey::MouseMiddleName => "中クリック",
-        UiTextKey::MouseExtra1Name => "マウスボタン4",
-        UiTextKey::MouseExtra2Name => "マウスボタン5",
-        UiTextKey::MouseWheelUpName => "ホイール上",
-        UiTextKey::MouseWheelDownName => "ホイール下",
         UiTextKey::ReservedKeyWarning => "予約済み（変更できません）",
     }
 }

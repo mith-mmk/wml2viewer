@@ -88,6 +88,7 @@
   - `key_mapping`
   - `replace_default_keymap`（`true` のとき built-in default を使わず、`key_mapping` のみで解決）
   - 既定値は `src/options.rs` の `default_key_mapping()`
+  - 設定画面を開いた時点で、`Input` タブの編集行は「現在有効な割り当て（デフォルト+カスタム反映後）」を表示する
   - 設定画面 `Input` タブは初心者向けの行編集（`Function / Key / CTRL / ALT / SHIFT`）を提供する
   - `Function` はリスト選択系UI（現在はドロップダウン）で切り替える
   - `Key`、`CTRL`、`ALT`、`SHIFT` は各入力の真上にラベルを配置する
