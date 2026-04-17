@@ -19,7 +19,7 @@ use crate::ui::viewer::{
     join_search_paths, key_mapping_rows_from_map, parse_search_paths,
 };
 use eframe::egui;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 impl ViewerApp {
     pub(crate) fn settings_ui(&mut self, ctx: &egui::Context) {
@@ -60,11 +60,7 @@ impl ViewerApp {
 
                 ui.separator();
                 ui.horizontal(|ui| {
-                    let can_apply = draft_state.key_mapping_error.is_none();
-                    if ui
-                        .add_enabled(can_apply, egui::Button::new(self.text(UiTextKey::Apply)))
-                        .clicked()
-                    {
+                    if ui.button(self.text(UiTextKey::Apply)).clicked() {
                         apply_requested = true;
                     }
                     if ui.button(self.text(UiTextKey::Cancel)).clicked() {
@@ -110,7 +106,7 @@ impl ViewerApp {
 
     fn settings_tab_strip(&mut self, ui: &mut egui::Ui) {
         let viewer_text = self.text(UiTextKey::Viewer);
-        let input_text = "Input";
+        let input_text = self.text(UiTextKey::Input);
         let render_text = self.text(UiTextKey::Render);
         let window_text = self.text(UiTextKey::Window);
         let navigation_text = self.text(UiTextKey::Navigation);
@@ -326,22 +322,25 @@ impl ViewerApp {
         ui.group(|ui| {
             ui.checkbox(
                 &mut draft.input.replace_default_keymap,
-                "Replace default key bindings",
+                self.text(UiTextKey::ReplaceDefaultKeyBindings),
             );
-            ui.label("Beginner mode: select action and key from rows.");
-            ui.label("Advanced input (mouse/tablet remap) is planned; this tab currently applies keyboard bindings.");
+            ui.label(self.text(UiTextKey::InputBeginnerModeHelp));
+            ui.label(self.text(UiTextKey::InputKeyboardOnlyNotice));
 
             ui.horizontal(|ui| {
-                if ui.button("Add binding").clicked() {
+                if ui.button(self.text(UiTextKey::AddBinding)).clicked() {
                     draft_state.key_mapping_rows.push(KeyMappingRowDraft {
                         binding: KeyBinding::new("Space"),
                         action: ViewerAction::NextImage,
                     });
                 }
-                if ui.button("Load current custom bindings").clicked() {
+                if ui
+                    .button(self.text(UiTextKey::LoadCurrentCustomBindings))
+                    .clicked()
+                {
                     draft_state.key_mapping_rows = key_mapping_rows_from_map(&self.input_options.key_mapping);
                 }
-                if ui.button("Use default only").clicked() {
+                if ui.button(self.text(UiTextKey::UseDefaultOnly)).clicked() {
                     draft.input.key_mapping.clear();
                     draft.input.replace_default_keymap = false;
                     draft_state.key_mapping_rows.clear();
@@ -350,29 +349,65 @@ impl ViewerApp {
             });
 
             ui.separator();
-            ui.horizontal(|ui| {
-                ui.strong("Function");
-                ui.add_space(8.0);
-                ui.strong("Key");
-                ui.add_space(8.0);
-                ui.strong("Ctrl");
-                ui.strong("Shift");
-                ui.strong("Alt");
-            });
+            egui::Grid::new("input_mapping_grid_header")
+                .num_columns(6)
+                .spacing([10.0, 6.0])
+                .show(ui, |ui| {
+                    ui.set_min_width(180.0);
+                    ui.strong(self.text(UiTextKey::FunctionLabel));
+                    ui.set_min_width(200.0);
+                    ui.strong(self.text(UiTextKey::KeyCaptureLabel));
+                    ui.strong(self.text(UiTextKey::CtrlLabel));
+                    ui.strong(self.text(UiTextKey::ShiftLabel));
+                    ui.strong(self.text(UiTextKey::AltLabel));
+                    ui.label("");
+                    ui.end_row();
+                });
 
             let mut remove_index = None;
-            for (index, row) in draft_state.key_mapping_rows.iter_mut().enumerate() {
-                ui.horizontal(|ui| {
+            let duplicate_rows = duplicate_binding_row_indices(&draft_state.key_mapping_rows);
+            egui::Grid::new("input_mapping_grid_rows")
+                .num_columns(6)
+                .spacing([10.0, 6.0])
+                .show(ui, |ui| {
+                    for (index, row) in draft_state.key_mapping_rows.iter_mut().enumerate() {
+                        ui.set_min_width(180.0);
                     egui::ComboBox::from_id_salt(("input_action", index))
-                        .selected_text(row.action.name())
+                        .width(170.0)
+                        .selected_text(viewer_action_label(self, row.action))
                         .show_ui(ui, |ui| {
                             for action in ViewerAction::all() {
-                                ui.selectable_value(&mut row.action, *action, action.name());
+                                ui.selectable_value(
+                                    &mut row.action,
+                                    *action,
+                                    viewer_action_label(self, *action),
+                                );
                             }
                         });
 
-                    egui::ComboBox::from_id_salt(("input_key", index))
-                        .selected_text(row.binding.key.as_str())
+                    ui.set_min_width(200.0);
+                    let key_response = ui.add(
+                        egui::TextEdit::singleline(&mut row.binding.key)
+                            .desired_width(180.0)
+                            .hint_text(self.text(UiTextKey::PressKeyToAssign)),
+                    );
+                    if duplicate_rows.contains(&index) {
+                        let rect = key_response.rect.expand(1.0);
+                        ui.painter().rect_stroke(
+                            rect,
+                            2.0,
+                            egui::Stroke::new(1.0, ui.visuals().warn_fg_color),
+                            egui::StrokeKind::Outside,
+                        );
+                    }
+                    if key_response.has_focus() {
+                        if let Some(pressed_key_name) = capture_pressed_key_name(ui.ctx()) {
+                            row.binding.key = pressed_key_name;
+                        }
+                    }
+                    egui::ComboBox::from_id_salt(("input_key_select", index))
+                        .width(26.0)
+                        .selected_text("▼")
                         .show_ui(ui, |ui| {
                             for key in supported_key_names() {
                                 ui.selectable_value(&mut row.binding.key, (*key).to_string(), *key);
@@ -381,21 +416,30 @@ impl ViewerApp {
                     ui.checkbox(&mut row.binding.ctrl, "");
                     ui.checkbox(&mut row.binding.shift, "");
                     ui.checkbox(&mut row.binding.alt, "");
-                    if ui.button("Remove").clicked() {
+                    if ui.button(self.text(UiTextKey::Remove)).clicked() {
                         remove_index = Some(index);
                     }
+                        ui.end_row();
+                    }
                 });
-            }
             if let Some(index) = remove_index {
                 draft_state.key_mapping_rows.remove(index);
             }
 
-            let (map, warning) = keymap_from_rows(&draft_state.key_mapping_rows);
+            let (map, warning) = keymap_from_rows(&draft_state.key_mapping_rows, &duplicate_rows);
             draft.input.key_mapping = map;
             draft_state.key_mapping_error = warning;
-            ui.label(format!("Custom bindings: {}", draft.input.key_mapping.len()));
+            ui.label(format!(
+                "{}: {}",
+                self.text(UiTextKey::CustomBindingsCount),
+                draft.input.key_mapping.len()
+            ));
             if let Some(warning) = draft_state.key_mapping_error.as_ref() {
-                ui.colored_label(ui.visuals().warn_fg_color, warning);
+                let _ = warning;
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    self.text(UiTextKey::DuplicateBindingWarning),
+                );
             }
         });
     }
@@ -892,31 +936,85 @@ impl ViewerApp {
     }
 }
 
-fn keymap_from_rows(rows: &[KeyMappingRowDraft]) -> (HashMap<KeyBinding, ViewerAction>, Option<String>) {
+fn keymap_from_rows(
+    rows: &[KeyMappingRowDraft],
+    duplicate_rows: &HashSet<usize>,
+) -> (HashMap<KeyBinding, ViewerAction>, Option<String>) {
     let mut parsed = HashMap::new();
-    let mut duplicate_count = 0usize;
     for row in rows {
         if row.binding.key.trim().is_empty() {
             continue;
         }
-        let replaced = parsed.insert(row.binding.clone(), row.action).is_some();
-        if replaced {
-            duplicate_count += 1;
-        }
+        parsed.insert(row.binding.clone(), row.action);
     }
-    let warning = (duplicate_count > 0).then(|| {
+    let warning = (!duplicate_rows.is_empty()).then(|| {
         format!(
-            "{duplicate_count} duplicate binding(s) were merged. Last row wins for the same key/modifier combo."
+            "{} duplicate binding(s) detected",
+            duplicate_rows.len()
         )
     });
     (parsed, warning)
 }
 
+fn duplicate_binding_row_indices(rows: &[KeyMappingRowDraft]) -> HashSet<usize> {
+    let mut first_by_binding: HashMap<KeyBinding, usize> = HashMap::new();
+    let mut duplicates = HashSet::new();
+    for (index, row) in rows.iter().enumerate() {
+        if row.binding.key.trim().is_empty() {
+            continue;
+        }
+        if let Some(first) = first_by_binding.get(&row.binding) {
+            duplicates.insert(*first);
+            duplicates.insert(index);
+        } else {
+            first_by_binding.insert(row.binding.clone(), index);
+        }
+    }
+    duplicates
+}
+
+fn viewer_action_label(viewer: &ViewerApp, action: ViewerAction) -> &'static str {
+    match action {
+        ViewerAction::ZoomIn => viewer.text(UiTextKey::ZoomInAction),
+        ViewerAction::ZoomOut => viewer.text(UiTextKey::ZoomOutAction),
+        ViewerAction::ZoomReset => viewer.text(UiTextKey::ZoomResetAction),
+        ViewerAction::ZoomToggle => viewer.text(UiTextKey::ZoomToggleAction),
+        ViewerAction::ToggleFullscreen => viewer.text(UiTextKey::Fullscreen),
+        ViewerAction::Reload => viewer.text(UiTextKey::ReloadAction),
+        ViewerAction::NextImage => viewer.text(UiTextKey::NextImageAction),
+        ViewerAction::PrevImage => viewer.text(UiTextKey::PrevImageAction),
+        ViewerAction::FirstImage => viewer.text(UiTextKey::FirstImageAction),
+        ViewerAction::LastImage => viewer.text(UiTextKey::LastImageAction),
+        ViewerAction::ToggleAnimation => viewer.text(UiTextKey::ToggleAnimationAction),
+        ViewerAction::ToggleGrayscale => viewer.text(UiTextKey::ToggleGrayscaleAction),
+        ViewerAction::ToggleMangaMode => viewer.text(UiTextKey::ToggleMangaModeAction),
+        ViewerAction::ToggleSettings => viewer.text(UiTextKey::ToggleSettingsAction),
+        ViewerAction::ToggleFiler => viewer.text(UiTextKey::ToggleFilerAction),
+        ViewerAction::ToggleSubfiler => viewer.text(UiTextKey::ToggleSubfilerAction),
+        ViewerAction::SaveAs => viewer.text(UiTextKey::SaveAsAction),
+    }
+}
+
+fn capture_pressed_key_name(ctx: &egui::Context) -> Option<String> {
+    ctx.input(|i| {
+        i.events.iter().rev().find_map(|event| match event {
+            egui::Event::Key {
+                key,
+                pressed: true,
+                repeat: false,
+                ..
+            } => Some(key.name().to_string()),
+            _ => None,
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::keymap_from_rows;
+    use super::{capture_pressed_key_name, duplicate_binding_row_indices, keymap_from_rows};
     use crate::ui::viewer::KeyMappingRowDraft;
     use crate::options::{KeyBinding, ViewerAction};
+    use eframe::egui;
 
     #[test]
     fn builds_keymap_from_rows_with_modifiers() {
@@ -939,7 +1037,8 @@ mod tests {
                 action: ViewerAction::ToggleFiler,
             },
         ];
-        let (parsed, warning) = keymap_from_rows(&rows);
+        let duplicates = duplicate_binding_row_indices(&rows);
+        let (parsed, warning) = keymap_from_rows(&rows, &duplicates);
         assert!(warning.is_none());
 
         assert_eq!(
@@ -973,13 +1072,22 @@ mod tests {
                 action: ViewerAction::NextImage,
             },
         ];
-        let (parsed, warning) = keymap_from_rows(&rows);
+        let duplicates = duplicate_binding_row_indices(&rows);
+        let (parsed, warning) = keymap_from_rows(&rows, &duplicates);
 
         assert_eq!(
             parsed.get(&KeyBinding::new("Space")),
             Some(&ViewerAction::NextImage)
         );
         assert!(warning.is_some());
+        assert!(duplicates.contains(&0));
+        assert!(duplicates.contains(&1));
+    }
+
+    #[test]
+    fn capture_pressed_key_name_returns_none_without_events() {
+        let ctx = egui::Context::default();
+        assert!(capture_pressed_key_name(&ctx).is_none());
     }
 }
 
