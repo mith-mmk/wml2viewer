@@ -145,7 +145,7 @@ impl InputOptions {
     }
 }
 
-fn default_key_mapping() -> HashMap<KeyBinding, ViewerAction> {
+pub fn default_key_mapping() -> HashMap<KeyBinding, ViewerAction> {
     let mut map = HashMap::new();
     map.insert(KeyBinding::new("Plus"), ViewerAction::ZoomIn);
     map.insert(KeyBinding::new("Minus"), ViewerAction::ZoomOut);

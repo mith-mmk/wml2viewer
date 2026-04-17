@@ -174,6 +174,15 @@ pub(crate) enum UiTextKey {
     ToggleAnimationAction,
     ToggleGrayscaleAction,
     ToggleSubfilerAction,
+    DefaultBindingsTable,
+    MousePrimaryName,
+    MouseSecondaryName,
+    MouseMiddleName,
+    MouseExtra1Name,
+    MouseExtra2Name,
+    MouseWheelUpName,
+    MouseWheelDownName,
+    ReservedKeyWarning,
 }
 
 pub(crate) fn tr(locale: &str, key: UiTextKey) -> &'static str {
@@ -342,9 +351,9 @@ fn en(key: UiTextKey) -> &'static str {
             "Duplicate bindings were merged. Last row wins for the same key and modifiers."
         }
         UiTextKey::Remove => "Remove",
-        UiTextKey::CtrlLabel => "CTRL",
+        UiTextKey::CtrlLabel => if cfg!(target_os = "macos") { "COMMAND" } else { "CTRL" },
         UiTextKey::ShiftLabel => "SHIFT",
-        UiTextKey::AltLabel => "ALT",
+        UiTextKey::AltLabel => if cfg!(target_os = "macos") { "OPTION" } else { "ALT" },
         UiTextKey::MenuFileSection => "File",
         UiTextKey::MenuImageSection => "Image",
         UiTextKey::MenuViewSection => "View",
@@ -369,6 +378,15 @@ fn en(key: UiTextKey) -> &'static str {
         UiTextKey::ToggleAnimationAction => "Toggle Animation",
         UiTextKey::ToggleGrayscaleAction => "Toggle Grayscale",
         UiTextKey::ToggleSubfilerAction => "Toggle Subfiler",
+        UiTextKey::DefaultBindingsTable => "Default Bindings",
+        UiTextKey::MousePrimaryName => "Left Click",
+        UiTextKey::MouseSecondaryName => "Right Click",
+        UiTextKey::MouseMiddleName => "Middle Click",
+        UiTextKey::MouseExtra1Name => "Mouse Button 4",
+        UiTextKey::MouseExtra2Name => "Mouse Button 5",
+        UiTextKey::MouseWheelUpName => "Wheel Up",
+        UiTextKey::MouseWheelDownName => "Wheel Down",
+        UiTextKey::ReservedKeyWarning => "Reserved (cannot be changed)",
     }
 }
 
@@ -527,9 +545,9 @@ fn ja(key: UiTextKey) -> &'static str {
             "重複する割り当ては統合されました。同一キー+修飾キーは最後の行が優先されます。"
         }
         UiTextKey::Remove => "削除",
-        UiTextKey::CtrlLabel => "CTRL",
+        UiTextKey::CtrlLabel => if cfg!(target_os = "macos") { "COMMAND" } else { "CTRL" },
         UiTextKey::ShiftLabel => "SHIFT",
-        UiTextKey::AltLabel => "ALT",
+        UiTextKey::AltLabel => if cfg!(target_os = "macos") { "OPTION" } else { "ALT" },
         UiTextKey::MenuFileSection => "ファイル",
         UiTextKey::MenuImageSection => "画像",
         UiTextKey::MenuViewSection => "表示",
@@ -554,5 +572,14 @@ fn ja(key: UiTextKey) -> &'static str {
         UiTextKey::ToggleAnimationAction => "アニメーション切替",
         UiTextKey::ToggleGrayscaleAction => "グレースケール切替",
         UiTextKey::ToggleSubfilerAction => "サブファイラーを切替",
+        UiTextKey::DefaultBindingsTable => "デフォルト割り当て一覧",
+        UiTextKey::MousePrimaryName => "左クリック",
+        UiTextKey::MouseSecondaryName => "右クリック",
+        UiTextKey::MouseMiddleName => "中クリック",
+        UiTextKey::MouseExtra1Name => "マウスボタン4",
+        UiTextKey::MouseExtra2Name => "マウスボタン5",
+        UiTextKey::MouseWheelUpName => "ホイール上",
+        UiTextKey::MouseWheelDownName => "ホイール下",
+        UiTextKey::ReservedKeyWarning => "予約済み（変更できません）",
     }
 }

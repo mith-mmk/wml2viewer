@@ -8,10 +8,12 @@ use crate::drawers::affine::InterpolationAlgorithm;
 use crate::filesystem::set_archive_zip_workaround;
 use crate::options::{
     AppConfig, EndOfFolderOption, KeyBinding, NavigationOptions, PaneSide, ViewerAction,
+    default_key_mapping,
 };
 use crate::ui::i18n::UiTextKey;
 use crate::ui::input::dispatch::{
-    MOUSE_WHEEL_DOWN_BINDING, MOUSE_WHEEL_UP_BINDING, pointer_button_binding_name,
+    MOUSE_WHEEL_DOWN_BINDING, MOUSE_WHEEL_UP_BINDING, is_pointer_binding_name,
+    pointer_binding_text_key, pointer_button_binding_name,
 };
 use crate::ui::menu::fileviewer::thumbnail::set_thumbnail_workaround;
 use crate::ui::render::interpolation_label;
@@ -20,7 +22,7 @@ use crate::ui::viewer::options::{
 };
 use crate::ui::viewer::{
     KeyMappingRowDraft, SettingsDraftState, SettingsTab, ViewerApp, build_settings_draft,
-    join_search_paths, key_mapping_rows_from_map, parse_search_paths,
+    format_key_binding, join_search_paths, key_mapping_rows_from_map, parse_search_paths,
 };
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
@@ -354,6 +356,36 @@ impl ViewerApp {
             });
 
             ui.separator();
+
+            // Default bindings table
+            egui::CollapsingHeader::new(self.text(UiTextKey::DefaultBindingsTable))
+                .default_open(true)
+                .show(ui, |ui| {
+                    let defaults = default_key_mapping();
+                    let mut sorted: Vec<_> = defaults.iter().collect();
+                    sorted.sort_by_key(|(_, action)| action.name());
+                    egui::ScrollArea::vertical()
+                        .id_salt("default_bindings_scroll")
+                        .max_height(200.0)
+                        .show(ui, |ui| {
+                            egui::Grid::new("default_bindings_grid")
+                                .num_columns(2)
+                                .striped(true)
+                                .spacing([40.0, 4.0])
+                                .show(ui, |ui| {
+                                    ui.strong(self.text(UiTextKey::FunctionLabel));
+                                    ui.strong(self.text(UiTextKey::KeyCaptureLabel));
+                                    ui.end_row();
+                                    for (binding, action) in &sorted {
+                                        ui.label(viewer_action_label(self, **action));
+                                        ui.label(localized_key_binding(self, binding));
+                                        ui.end_row();
+                                    }
+                                });
+                        });
+                });
+
+            ui.separator();
             let mut remove_index = None;
             let duplicate_rows = duplicate_binding_row_indices(&draft_state.key_mapping_rows);
             for (index, row) in draft_state.key_mapping_rows.iter_mut().enumerate() {
@@ -393,8 +425,24 @@ impl ViewerApp {
                         }
                         if key_response.has_focus() && !key_response.gained_focus() {
                             if let Some(pressed_key_name) = capture_pressed_key_name(ui.ctx()) {
-                                row.binding.key = pressed_key_name;
+                                if !is_pointer_binding_name(&pressed_key_name)
+                                    || key_response.hovered()
+                                {
+                                    let candidate = KeyBinding {
+                                        key: pressed_key_name.clone(),
+                                        ..row.binding.clone()
+                                    };
+                                    if !is_reserved_binding(&candidate) {
+                                        row.binding.key = pressed_key_name;
+                                    }
+                                }
                             }
+                        }
+                        if is_reserved_binding(&row.binding) {
+                            ui.colored_label(
+                                ui.visuals().warn_fg_color,
+                                self.text(UiTextKey::ReservedKeyWarning),
+                            );
                         }
                     });
 
@@ -944,6 +992,9 @@ fn keymap_from_rows(
         if row.binding.key.trim().is_empty() {
             continue;
         }
+        if is_reserved_binding(&row.binding) {
+            continue;
+        }
         parsed.insert(row.binding.clone(), row.action);
     }
     let warning = (!duplicate_rows.is_empty())
@@ -966,6 +1017,44 @@ fn duplicate_binding_row_indices(rows: &[KeyMappingRowDraft]) -> HashSet<usize> 
         }
     }
     duplicates
+}
+
+fn localized_key_binding(viewer: &ViewerApp, binding: &KeyBinding) -> String {
+    let mut parts = Vec::new();
+    if binding.ctrl {
+        parts.push(viewer.text(UiTextKey::CtrlLabel).to_string());
+    }
+    if binding.shift {
+        parts.push(viewer.text(UiTextKey::ShiftLabel).to_string());
+    }
+    if binding.alt {
+        parts.push(viewer.text(UiTextKey::AltLabel).to_string());
+    }
+    let key_display = pointer_binding_text_key(&binding.key)
+        .map(|text_key| viewer.text(text_key).to_string())
+        .unwrap_or_else(|| binding.key.clone());
+    parts.push(key_display);
+    parts.join("+")
+}
+
+fn is_reserved_binding(binding: &KeyBinding) -> bool {
+    // F1 = Help (hard-coded)
+    if binding.key.eq_ignore_ascii_case("F1")
+        && !binding.ctrl
+        && !binding.alt
+        && !binding.shift
+    {
+        return true;
+    }
+    // F5 = Reload (hard-coded)
+    if binding.key.eq_ignore_ascii_case("F5")
+        && !binding.ctrl
+        && !binding.alt
+        && !binding.shift
+    {
+        return true;
+    }
+    false
 }
 
 fn viewer_action_label(viewer: &ViewerApp, action: ViewerAction) -> &'static str {

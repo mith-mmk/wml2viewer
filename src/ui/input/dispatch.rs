@@ -1,4 +1,5 @@
 use crate::options::{KeyBinding, ViewerAction};
+use crate::ui::i18n::UiTextKey;
 use eframe::egui;
 use std::collections::HashMap;
 
@@ -85,6 +86,32 @@ pub(crate) fn pointer_button_binding_name(button: egui::PointerButton) -> &'stat
         egui::PointerButton::Middle => MOUSE_MIDDLE_BINDING,
         egui::PointerButton::Extra1 => MOUSE_EXTRA1_BINDING,
         egui::PointerButton::Extra2 => MOUSE_EXTRA2_BINDING,
+    }
+}
+
+pub(crate) fn is_pointer_binding_name(name: &str) -> bool {
+    matches!(
+        name,
+        MOUSE_PRIMARY_BINDING
+            | MOUSE_SECONDARY_BINDING
+            | MOUSE_MIDDLE_BINDING
+            | MOUSE_EXTRA1_BINDING
+            | MOUSE_EXTRA2_BINDING
+            | MOUSE_WHEEL_UP_BINDING
+            | MOUSE_WHEEL_DOWN_BINDING
+    )
+}
+
+pub(crate) fn pointer_binding_text_key(name: &str) -> Option<UiTextKey> {
+    match name {
+        MOUSE_PRIMARY_BINDING => Some(UiTextKey::MousePrimaryName),
+        MOUSE_SECONDARY_BINDING => Some(UiTextKey::MouseSecondaryName),
+        MOUSE_MIDDLE_BINDING => Some(UiTextKey::MouseMiddleName),
+        MOUSE_EXTRA1_BINDING => Some(UiTextKey::MouseExtra1Name),
+        MOUSE_EXTRA2_BINDING => Some(UiTextKey::MouseExtra2Name),
+        MOUSE_WHEEL_UP_BINDING => Some(UiTextKey::MouseWheelUpName),
+        MOUSE_WHEEL_DOWN_BINDING => Some(UiTextKey::MouseWheelDownName),
+        _ => None,
     }
 }
 

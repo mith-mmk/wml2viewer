@@ -1480,18 +1480,17 @@ mod tests {
         let mut cache = FilesystemCache::default();
         let mut nav = FileNavigator::from_current_path(before.clone(), &mut cache);
 
+        // Forward from before: listed file appears as opaque entry in flat navigation.
+        // load_path resolves through the listed file to its first child.
         let NavigationOutcome::Resolved(target) =
             nav.next_with_policy(EndOfFolderOption::Next, &mut cache)
         else {
-            panic!("expected first listed child from next");
+            panic!("expected listed file from next");
         };
-        assert!(is_virtual_listed_child(&target.navigation_path));
-        assert_eq!(
-            listed_virtual_root(&target.navigation_path),
-            Some(listed.clone())
-        );
+        assert_eq!(target.navigation_path, listed);
         assert_eq!(target.load_path, listed_1);
 
+        // After entering the listed file, navigation traverses its virtual children.
         nav.set_current_input(target.navigation_path.clone(), &mut cache);
 
         let NavigationOutcome::Resolved(target) =
@@ -1504,20 +1503,21 @@ mod tests {
 
         nav.set_current_input(target.navigation_path.clone(), &mut cache);
 
+        // At the end of virtual children, no adjacent directory → NoPath.
         assert!(matches!(
             nav.next_with_policy(EndOfFolderOption::Next, &mut cache),
             NavigationOutcome::NoPath
         ));
 
+        // Backward from after: listed file appears as opaque entry.
         let mut nav = FileNavigator::from_current_path(after.clone(), &mut cache);
         let NavigationOutcome::Resolved(target) =
             nav.prev_with_policy(EndOfFolderOption::Next, &mut cache)
         else {
-            panic!("expected listed file child from prev");
+            panic!("expected listed file from prev");
         };
-        assert!(is_virtual_listed_child(&target.navigation_path));
-        assert_eq!(listed_virtual_root(&target.navigation_path), Some(listed));
-        assert_eq!(target.load_path, listed_2);
+        assert_eq!(target.navigation_path, listed);
+        assert_eq!(target.load_path, listed_1);
 
         let _ = fs::remove_dir_all(dir);
         let _ = fs::remove_dir_all(listed_assets_root);

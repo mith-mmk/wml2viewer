@@ -435,7 +435,7 @@ fn ellipsize_end(text: &str, max_chars: usize) -> String {
     format!("{head}...")
 }
 
-fn format_key_binding(binding: &KeyBinding) -> String {
+pub(crate) fn format_key_binding(binding: &KeyBinding) -> String {
     let mut parts = Vec::new();
     if binding.ctrl {
         parts.push("Ctrl");
