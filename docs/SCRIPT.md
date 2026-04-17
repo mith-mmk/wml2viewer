@@ -1,29 +1,36 @@
 ## @ command
-@animation [loop 0] //  animation start
-/path/to
-@wait 100 // ms
-/path/to
-@wait 100
-/path/to
-@animation end // animation block
-
-option
-loop n (n >= 0, loop 0 is infinite)
-
-x = uint
-y = uint
-
-@wait int // ms wait
-@background color #RRBBGG // set color,
-@background image
-@noclear // next is clear(override)
-@scale // scale option
-@resize x,y
-@zoom 1.0 // set zoom
-@start x, y// next image draw begin (x,y)
-@flip // 左右反転
-@flap // 上下反転
-
-@(
-// wmlscript 
-)
+- [ ] wmltxtに@スクリプトを追加 bench/log用に導入したファンクションを呼べるようにする
+     - [ ] @スクリプト内の設定変更は一時的なもの
+     - [ ] `break`イベント(デフォルト[ESC])でスクリプトの実行を中断できるようにする
+   　- [ ] autopilot の呼び出し @autopilot("scenario_name") でautopilotのシナリオを呼び出せるようにする
+   　- [ ] ベンチマークの呼び出し @benchmark("benchmark_name") でベンチマークを呼び出せるようにする
+   　- [ ] ログの呼び出し @log("start"/"stop", "log_name") でログの開始と停止を制御できるようにする
+   　- [ ] functionの呼び出し
+   　- [ ] @function("function_name", args...) で呼び出せるようにする
+   　- [ ] @animationの追加 @animation("start"/"stop") でアニメーションの開始と停止を制御できるようにする
+   　- [ ] @animation("wait", 1000) で指定した時間だけ待機するようにする
+    　- 例1
+      　- @animation("start")
+      　- ./000/image1.png
+      　- @animation("wait", 1000)
+      　- ./000/image2.png
+      　- @animation("wait", 100)
+      　- ./000/image3.png
+      　- @animation("stop")
+      　- waitが指定されていないときのデフォルトのwait時間は100msにする
+      　- @animationだけのスクリプトを保存するとアニメーションGIF/APNG/WebPで保存できるようにする
+          　- 最適化は必要に応じて行う（差分だけ保存するなど）
+          　- @funtionや@messageなどが入っているとこの機能は無効化される
+      　- @animation内では下部のmessageは抑制される
+    　- 例2
+      　- @function("dir_scan", "loop") #　folder scanをループに設定する（【重要】一時的な変更）
+      　- @function("wait_time", 1000) # 待機時間の変更(デフォルト90msだったか)
+      　- ./000/image1.png
+      　- @function("continued", "next_image") # 画像の表示が終わったらwait_time待機し次の画像を表示するようにする
+      - 例3
+        - @message("Hello, World!") # 画面にメッセージを表示する
+   　- [ ] @スクリプトの呼び出しは、wmltxtのどこにでも書けるようにする（例: 画像の前、後、間など）
+   　- [ ] @スクリプトの呼び出しは、画像の表示やアニメーションの制御など、さまざまな用途に使えるようにする
+   　- [ ] @スクリプトの呼び出しは、引数を取ることができるようにする（例: @function("function_name", arg1, arg2)）
+   　- [ ] @スクリプトの呼び出しは、エラー処理を行うようにする（例: 存在しない関数を呼び出した場合のエラーメッセージの表示）
+   　- [ ] @functionの呼び出しは、セキュリティ上の理由から、呼び出せる関数を制限するようにする（例: 特定のモジュール関数のみ呼び出せるようにする, trushなどは無効化）
