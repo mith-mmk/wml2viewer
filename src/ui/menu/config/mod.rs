@@ -363,7 +363,14 @@ impl ViewerApp {
                 .show(ui, |ui| {
                     let defaults = default_key_mapping();
                     let mut sorted: Vec<_> = defaults.iter().collect();
-                    sorted.sort_by_key(|(_, action)| action.name());
+                    sorted.sort_by(
+                        |(left_binding, left_action), (right_binding, right_action)| {
+                            left_action.name().cmp(right_action.name()).then_with(|| {
+                                format_key_binding(left_binding)
+                                    .cmp(&format_key_binding(right_binding))
+                            })
+                        },
+                    );
                     egui::ScrollArea::vertical()
                         .id_salt("default_bindings_scroll")
                         .max_height(200.0)
@@ -1039,19 +1046,11 @@ fn localized_key_binding(viewer: &ViewerApp, binding: &KeyBinding) -> String {
 
 fn is_reserved_binding(binding: &KeyBinding) -> bool {
     // F1 = Help (hard-coded)
-    if binding.key.eq_ignore_ascii_case("F1")
-        && !binding.ctrl
-        && !binding.alt
-        && !binding.shift
-    {
+    if binding.key.eq_ignore_ascii_case("F1") && !binding.ctrl && !binding.alt && !binding.shift {
         return true;
     }
     // F5 = Reload (hard-coded)
-    if binding.key.eq_ignore_ascii_case("F5")
-        && !binding.ctrl
-        && !binding.alt
-        && !binding.shift
-    {
+    if binding.key.eq_ignore_ascii_case("F5") && !binding.ctrl && !binding.alt && !binding.shift {
         return true;
     }
     false

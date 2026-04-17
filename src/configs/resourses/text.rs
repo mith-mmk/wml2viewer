@@ -191,6 +191,8 @@ pub(crate) fn tr(locale: &str, key: UiTextKey) -> &'static str {
         if let Some(value) = resource_text_override(&candidate, &key_name) {
             return value;
         }
+    }
+    for candidate in resource_locale_fallbacks(locale) {
         match candidate.as_str() {
             "ja_JP" | "ja" => return ja(key),
             "en_US" | "en_GB" | "en" => return en(key),
@@ -351,9 +353,21 @@ fn en(key: UiTextKey) -> &'static str {
             "Duplicate bindings were merged. Last row wins for the same key and modifiers."
         }
         UiTextKey::Remove => "Remove",
-        UiTextKey::CtrlLabel => if cfg!(target_os = "macos") { "COMMAND" } else { "CTRL" },
+        UiTextKey::CtrlLabel => {
+            if cfg!(target_os = "macos") {
+                "COMMAND"
+            } else {
+                "CTRL"
+            }
+        }
         UiTextKey::ShiftLabel => "SHIFT",
-        UiTextKey::AltLabel => if cfg!(target_os = "macos") { "OPTION" } else { "ALT" },
+        UiTextKey::AltLabel => {
+            if cfg!(target_os = "macos") {
+                "OPTION"
+            } else {
+                "ALT"
+            }
+        }
         UiTextKey::MenuFileSection => "File",
         UiTextKey::MenuImageSection => "Image",
         UiTextKey::MenuViewSection => "View",
@@ -545,9 +559,21 @@ fn ja(key: UiTextKey) -> &'static str {
             "重複する割り当ては統合されました。同一キー+修飾キーは最後の行が優先されます。"
         }
         UiTextKey::Remove => "削除",
-        UiTextKey::CtrlLabel => if cfg!(target_os = "macos") { "COMMAND" } else { "CTRL" },
+        UiTextKey::CtrlLabel => {
+            if cfg!(target_os = "macos") {
+                "COMMAND"
+            } else {
+                "CTRL"
+            }
+        }
         UiTextKey::ShiftLabel => "SHIFT",
-        UiTextKey::AltLabel => if cfg!(target_os = "macos") { "OPTION" } else { "ALT" },
+        UiTextKey::AltLabel => {
+            if cfg!(target_os = "macos") {
+                "OPTION"
+            } else {
+                "ALT"
+            }
+        }
         UiTextKey::MenuFileSection => "ファイル",
         UiTextKey::MenuImageSection => "画像",
         UiTextKey::MenuViewSection => "表示",

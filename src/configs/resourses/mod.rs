@@ -1,7 +1,7 @@
 mod text;
 
 use crate::dependent::{
-    emoji_font_candidates, last_resort_font_candidates, locale_font_candidates,
+    default_config_dir, emoji_font_candidates, last_resort_font_candidates, locale_font_candidates,
     normalize_locale_tag, resource_locale_fallbacks, system_locale,
 };
 use eframe::egui::{self, FontFamily, FontId, TextStyle};
@@ -97,26 +97,40 @@ pub fn resource_text_override(locale: &str, key: &str) -> Option<&'static str> {
     let mut cache = cache.lock().ok()?;
 
     if !cache.contains_key(locale) {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("resources")
-            .join("i18n")
-            .join(format!("{locale}.json"));
-        let values = fs::read_to_string(path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<HashMap<String, String>>(&text).ok())
-            .map(|values| {
-                values
-                    .into_iter()
-                    .map(|(name, value)| (name, Box::leak(value.into_boxed_str()) as &'static str))
-                    .collect::<HashMap<_, _>>()
-            })
-            .unwrap_or_default();
+        let mut values = HashMap::new();
+        for path in resource_text_candidate_paths(locale, default_config_dir()) {
+            let Some(parsed) = fs::read_to_string(path)
+                .ok()
+                .and_then(|text| serde_json::from_str::<HashMap<String, String>>(&text).ok())
+            else {
+                continue;
+            };
+            for (name, value) in parsed {
+                values.insert(name, Box::leak(value.into_boxed_str()) as &'static str);
+            }
+        }
         cache.insert(locale.to_string(), values);
     }
 
     cache
         .get(locale)
         .and_then(|values| values.get(key).copied())
+}
+
+fn resource_text_candidate_paths(locale: &str, config_dir: Option<PathBuf>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    // Built-in defaults in repository resources.
+    paths.push(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("i18n")
+            .join(format!("{locale}.json")),
+    );
+    // User overrides next to config.toml: <config-dir>/i18/<lang>.json
+    if let Some(dir) = config_dir {
+        paths.push(dir.join("i18").join(format!("{locale}.json")));
+    }
+    paths
 }
 
 fn candidate_font_paths(locale: &str, configured_paths: &[PathBuf]) -> Vec<PathBuf> {
@@ -212,5 +226,39 @@ fn auto_font_size(monitor_size: egui::Vec2, pixels_per_point: f32) -> f32 {
         15.0
     } else {
         13.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resource_text_candidate_paths;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn candidate_paths_include_builtin_and_config_i18() {
+        let config_dir = PathBuf::from("C:/tmp/wml2-config");
+        let paths = resource_text_candidate_paths("ja", Some(config_dir.clone()));
+        assert_eq!(paths.len(), 2);
+        assert_eq!(
+            paths[0],
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join("i18n")
+                .join("ja.json")
+        );
+        assert_eq!(paths[1], config_dir.join("i18").join("ja.json"));
+    }
+
+    #[test]
+    fn candidate_paths_fallback_to_builtin_when_config_dir_missing() {
+        let paths = resource_text_candidate_paths("en", None);
+        assert_eq!(paths.len(), 1);
+        assert_eq!(
+            paths[0],
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join("i18n")
+                .join("en.json")
+        );
     }
 }
