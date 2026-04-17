@@ -1,11 +1,14 @@
 pub mod app;
 pub mod bench;
+pub mod benchlog;
 pub mod configs;
 pub mod dependent;
 pub mod drawers;
 pub mod filesystem;
 pub mod options;
+pub mod path_classification;
 pub mod ui;
+pub mod wml2_formats;
 
 pub fn get_version() -> String {
     format!("{}-lib{}", env!("CARGO_PKG_VERSION"), wml2::get_version())

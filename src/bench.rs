@@ -1,9 +1,9 @@
 use crate::drawers::image::{load_canvas_from_bytes_with_hint, load_canvas_from_file};
+use crate::filesystem;
 use crate::filesystem::{
     is_browser_container, list_browser_entries, load_virtual_image_bytes, resolve_start_path,
 };
 use crate::options::{NavigationSortOption, ZipWorkaroundOptions};
-use crate::filesystem;
 use std::path::Path;
 use std::time::{Duration, Instant};
 

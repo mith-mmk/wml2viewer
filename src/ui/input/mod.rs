@@ -6,6 +6,7 @@ use crate::ui::viewer::ViewerApp;
 use eframe::egui;
 use std::time::Instant;
 
+#[derive(Debug)]
 enum PointerIntent {
     ToggleFit,
     NextImageAfterDelay,
@@ -43,6 +44,13 @@ impl ViewerApp {
             if self.show_settings && !matches!(action, ViewerAction::ToggleSettings) {
                 continue;
             }
+            self.log_bench_state(
+                "viewer.input_action",
+                serde_json::json!({
+                    "action": format!("{action:?}"),
+                    "source": "keyboard",
+                }),
+            );
             match action {
                 ViewerAction::ZoomIn => {
                     let _ = self.set_zoom(self.zoom * 1.25);
@@ -62,7 +70,11 @@ impl ViewerApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
                 }
                 ViewerAction::Reload => {
-                    let _ = self.reload_current();
+                    if self.show_filer || self.show_subfiler {
+                        self.refresh_current_filer_directory();
+                    } else {
+                        let _ = self.reload_current();
+                    }
                 }
                 ViewerAction::NextImage => {
                     let _ = self.next_image();
@@ -85,9 +97,7 @@ impl ViewerApp {
                 ViewerAction::ToggleGrayscale => {
                     self.options.grayscale = !self.options.grayscale;
                     self.upload_current_frame();
-                    if self.companion_rendered.is_some() {
-                        self.pending_fit_recalc = true;
-                    }
+                    self.pending_fit_recalc = true;
                 }
                 ViewerAction::ToggleMangaMode => {
                     self.options.manga_mode = !self.options.manga_mode;
@@ -101,11 +111,11 @@ impl ViewerApp {
                     }
                 }
                 ViewerAction::ToggleFiler => {
-                    self.show_filer = !self.show_filer;
+                    self.set_show_filer(!self.show_filer);
                     self.pending_fit_recalc = true;
                 }
                 ViewerAction::ToggleSubfiler => {
-                    self.show_subfiler = !self.show_subfiler;
+                    self.set_show_subfiler(!self.show_subfiler);
                 }
                 ViewerAction::SaveAs => {
                     self.open_save_dialog();
@@ -121,6 +131,12 @@ impl ViewerApp {
         }
 
         if let Some(intent) = self.pointer_intent_from_response(response) {
+            self.log_bench_state(
+                "viewer.pointer_action",
+                serde_json::json!({
+                    "intent": format!("{intent:?}"),
+                }),
+            );
             self.perform_pointer_intent(response, intent);
             return true;
         }
@@ -152,11 +168,7 @@ impl ViewerApp {
         None
     }
 
-    fn perform_pointer_intent(
-        &mut self,
-        _response: &egui::Response,
-        intent: PointerIntent,
-    ) {
+    fn perform_pointer_intent(&mut self, _response: &egui::Response, intent: PointerIntent) {
         match intent {
             PointerIntent::ToggleFit => {
                 self.cancel_pending_single_click_navigation();

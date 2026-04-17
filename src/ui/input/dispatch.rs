@@ -34,6 +34,7 @@ fn key_name_to_egui(key: &str) -> Option<egui::Key> {
         "Minus" => Some(egui::Key::Minus),
         "Num0" => Some(egui::Key::Num0),
         "Enter" => Some(egui::Key::Enter),
+        "F5" => Some(egui::Key::F5),
         "R" => Some(egui::Key::R),
         "Space" => Some(egui::Key::Space),
         "ArrowRight" => Some(egui::Key::ArrowRight),
@@ -46,5 +47,16 @@ fn key_name_to_egui(key: &str) -> Option<egui::Key> {
         "F" => Some(egui::Key::F),
         "P" => Some(egui::Key::P),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::key_name_to_egui;
+    use eframe::egui;
+
+    #[test]
+    fn key_name_to_egui_supports_f5() {
+        assert_eq!(key_name_to_egui("F5"), Some(egui::Key::F5));
     }
 }

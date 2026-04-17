@@ -8,6 +8,7 @@ use std::time::UNIX_EPOCH;
 
 use crate::dependent::default_temp_dir;
 use crate::options::ZipWorkaroundOptions;
+use crate::path_classification::is_probably_network_path;
 use encoding_rs::SHIFT_JIS;
 use zip::ZipArchive;
 
@@ -86,10 +87,7 @@ pub(crate) fn set_zip_workaround_options(options: ZipWorkaroundOptions) {
 }
 
 pub(crate) fn zip_prefers_low_io(path: &Path) -> bool {
-    matches!(
-        resolve_zip_archive_access(path),
-        Some(ZipArchiveAccess::Sequential(_))
-    )
+    zip_needs_low_io_mode(path)
 }
 
 fn open_zip_archive(path: &Path) -> std::io::Result<ZipArchive<ZipCacheReader>> {
@@ -187,8 +185,7 @@ fn current_zip_workaround_options() -> ZipWorkaroundOptions {
 fn resolve_zip_archive_access(path: &Path) -> Option<ZipArchiveAccess> {
     let metadata = std::fs::metadata(path).ok()?;
     let options = current_zip_workaround_options();
-    let threshold_bytes = options.threshold_mb.saturating_mul(1024 * 1024);
-    let needs_workaround = is_probably_network_path(path) || metadata.len() >= threshold_bytes;
+    let needs_workaround = zip_needs_low_io_mode_with_metadata(path, &metadata, &options);
     if !needs_workaround {
         return Some(ZipArchiveAccess::Direct(path.to_path_buf()));
     }
@@ -200,6 +197,24 @@ fn resolve_zip_archive_access(path: &Path) -> Option<ZipArchiveAccess> {
     }
 
     Some(ZipArchiveAccess::Sequential(path.to_path_buf()))
+}
+
+fn zip_needs_low_io_mode(path: &Path) -> bool {
+    let metadata = match std::fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(_) => return false,
+    };
+    let options = current_zip_workaround_options();
+    zip_needs_low_io_mode_with_metadata(path, &metadata, &options)
+}
+
+fn zip_needs_low_io_mode_with_metadata(
+    path: &Path,
+    metadata: &std::fs::Metadata,
+    options: &ZipWorkaroundOptions,
+) -> bool {
+    let threshold_bytes = options.threshold_mb.saturating_mul(1024 * 1024);
+    is_probably_network_path(path) || metadata.len() >= threshold_bytes
 }
 
 fn ensure_local_archive_cache(path: &Path, metadata: &std::fs::Metadata) -> Option<PathBuf> {
@@ -264,11 +279,6 @@ fn local_archive_cache() -> &'static Mutex<HashMap<PathBuf, PathBuf>> {
 fn zip_workaround_config() -> &'static Mutex<ZipWorkaroundOptions> {
     static CONFIG: OnceLock<Mutex<ZipWorkaroundOptions>> = OnceLock::new();
     CONFIG.get_or_init(|| Mutex::new(ZipWorkaroundOptions::default()))
-}
-
-fn is_probably_network_path(path: &Path) -> bool {
-    let text = path.to_string_lossy();
-    text.starts_with(r"\\") || text.starts_with(r"//")
 }
 
 struct ZipCacheReader {
@@ -394,7 +404,8 @@ fn decode_zip_name(file: &zip::read::ZipFile<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::ZipCacheReader;
+    use super::{ZipCacheReader, set_zip_workaround_options, zip_prefers_low_io};
+    use crate::options::ZipWorkaroundOptions;
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -430,6 +441,25 @@ mod tests {
         reader.read_exact(&mut buf[..8]).unwrap();
         assert_eq!(&buf[..8], &[32, 33, 34, 35, 36, 37, 38, 39]);
 
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn zip_prefers_low_io_even_when_local_cache_is_enabled() {
+        let path = temp_path("zip-low-io");
+        let mut file = File::create(&path).unwrap();
+        file.write_all(b"dummy").unwrap();
+        drop(file);
+
+        let original = ZipWorkaroundOptions::default();
+        set_zip_workaround_options(ZipWorkaroundOptions {
+            threshold_mb: 0,
+            local_cache: true,
+        });
+
+        assert!(zip_prefers_low_io(&path));
+
+        set_zip_workaround_options(original);
         let _ = std::fs::remove_file(path);
     }
 }

@@ -113,23 +113,30 @@ impl ViewerApp {
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Viewer, viewer_text);
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Render, render_text);
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Window, window_text);
-            ui.selectable_value(&mut self.settings_tab, SettingsTab::Navigation, navigation_text);
+            ui.selectable_value(
+                &mut self.settings_tab,
+                SettingsTab::Navigation,
+                navigation_text,
+            );
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Plugins, plugins_text);
-            ui.selectable_value(&mut self.settings_tab, SettingsTab::Resources, resources_text);
+            ui.selectable_value(
+                &mut self.settings_tab,
+                SettingsTab::Resources,
+                resources_text,
+            );
             ui.selectable_value(&mut self.settings_tab, SettingsTab::System, system_text);
         });
     }
 
-    fn settings_viewer_tab(
-        &mut self,
-        ui: &mut egui::Ui,
-        draft_state: &mut SettingsDraftState,
-    ) {
+    fn settings_viewer_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
         ui.group(|ui| {
             ui.checkbox(&mut draft.viewer.animation, self.text(UiTextKey::Animation));
             ui.checkbox(&mut draft.viewer.grayscale, self.text(UiTextKey::Grayscale));
-            ui.checkbox(&mut draft.viewer.manga_mode, self.text(UiTextKey::MangaMode));
+            ui.checkbox(
+                &mut draft.viewer.manga_mode,
+                self.text(UiTextKey::MangaMode),
+            );
             ui.checkbox(
                 &mut draft.viewer.manga_right_to_left,
                 self.text(UiTextKey::MangaRightToLeft),
@@ -193,11 +200,7 @@ impl ViewerApp {
         });
     }
 
-    fn settings_plugins_tab(
-        &mut self,
-        ui: &mut egui::Ui,
-        draft_state: &mut SettingsDraftState,
-    ) {
+    fn settings_plugins_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
         ui.group(|ui| {
             ui.horizontal(|ui| {
@@ -210,7 +213,10 @@ impl ViewerApp {
             });
             ui.separator();
             ui.heading("susie64");
-            ui.checkbox(&mut draft.plugins.susie64.enable, self.text(UiTextKey::Enable));
+            ui.checkbox(
+                &mut draft.plugins.susie64.enable,
+                self.text(UiTextKey::Enable),
+            );
             ui.horizontal(|ui| {
                 ui.label("priority");
                 ui.add(
@@ -246,7 +252,10 @@ impl ViewerApp {
 
             ui.separator();
             ui.heading("system");
-            ui.checkbox(&mut draft.plugins.system.enable, self.text(UiTextKey::Enable));
+            ui.checkbox(
+                &mut draft.plugins.system.enable,
+                self.text(UiTextKey::Enable),
+            );
             ui.horizontal(|ui| {
                 ui.label("priority");
                 ui.add(
@@ -264,7 +273,10 @@ impl ViewerApp {
 
             ui.separator();
             ui.heading("ffmpeg");
-            ui.checkbox(&mut draft.plugins.ffmpeg.enable, self.text(UiTextKey::Enable));
+            ui.checkbox(
+                &mut draft.plugins.ffmpeg.enable,
+                self.text(UiTextKey::Enable),
+            );
             ui.horizontal(|ui| {
                 ui.label("priority");
                 ui.add(
@@ -300,11 +312,7 @@ impl ViewerApp {
         });
     }
 
-    fn settings_resources_tab(
-        &mut self,
-        ui: &mut egui::Ui,
-        draft_state: &mut SettingsDraftState,
-    ) {
+    fn settings_resources_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
         ui.group(|ui| {
             ui.horizontal(|ui| {
@@ -341,7 +349,11 @@ impl ViewerApp {
                         ui.selectable_value(&mut draft.resources.font_size, FontSizePreset::S, "S");
                         ui.selectable_value(&mut draft.resources.font_size, FontSizePreset::M, "M");
                         ui.selectable_value(&mut draft.resources.font_size, FontSizePreset::L, "L");
-                        ui.selectable_value(&mut draft.resources.font_size, FontSizePreset::LL, "LL");
+                        ui.selectable_value(
+                            &mut draft.resources.font_size,
+                            FontSizePreset::LL,
+                            "LL",
+                        );
                     });
             });
             ui.label(self.text(UiTextKey::SearchPath));
@@ -374,23 +386,38 @@ impl ViewerApp {
         });
     }
 
-    fn settings_render_tab(
-        &mut self,
-        ui: &mut egui::Ui,
-        draft_state: &mut SettingsDraftState,
-    ) {
+    fn settings_render_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
         normalize_draft_render_options(&mut draft.render);
         ui.group(|ui| {
             ui.horizontal(|ui| {
                 ui.label(self.text(UiTextKey::ZoomMode));
                 egui::ComboBox::from_id_salt("zoom_option")
-                    .selected_text(zoom_option_label(&self.applied_locale, &draft.render.zoom_option))
+                    .selected_text(zoom_option_label(
+                        &self.applied_locale,
+                        &draft.render.zoom_option,
+                    ))
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut draft.render.zoom_option, ZoomOption::None, self.text(UiTextKey::None));
-                        ui.selectable_value(&mut draft.render.zoom_option, ZoomOption::FitWidth, self.text(UiTextKey::FitWidth));
-                        ui.selectable_value(&mut draft.render.zoom_option, ZoomOption::FitHeight, self.text(UiTextKey::FitHeight));
-                        ui.selectable_value(&mut draft.render.zoom_option, ZoomOption::FitScreen, self.text(UiTextKey::FitScreen));
+                        ui.selectable_value(
+                            &mut draft.render.zoom_option,
+                            ZoomOption::None,
+                            self.text(UiTextKey::None),
+                        );
+                        ui.selectable_value(
+                            &mut draft.render.zoom_option,
+                            ZoomOption::FitWidth,
+                            self.text(UiTextKey::FitWidth),
+                        );
+                        ui.selectable_value(
+                            &mut draft.render.zoom_option,
+                            ZoomOption::FitHeight,
+                            self.text(UiTextKey::FitHeight),
+                        );
+                        ui.selectable_value(
+                            &mut draft.render.zoom_option,
+                            ZoomOption::FitScreen,
+                            self.text(UiTextKey::FitScreen),
+                        );
                         ui.selectable_value(
                             &mut draft.render.zoom_option,
                             ZoomOption::FitScreenIncludeSmaller,
@@ -460,15 +487,17 @@ impl ViewerApp {
         });
     }
 
-    fn settings_window_tab(
-        &mut self,
-        ui: &mut egui::Ui,
-        draft_state: &mut SettingsDraftState,
-    ) {
+    fn settings_window_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
         ui.group(|ui| {
-            ui.checkbox(&mut draft.window.fullscreen, self.text(UiTextKey::Fullscreen));
-            ui.checkbox(&mut draft.window.remember_size, self.text(UiTextKey::RememberSize));
+            ui.checkbox(
+                &mut draft.window.fullscreen,
+                self.text(UiTextKey::Fullscreen),
+            );
+            ui.checkbox(
+                &mut draft.window.remember_size,
+                self.text(UiTextKey::RememberSize),
+            );
             ui.checkbox(
                 &mut draft.window.remember_position,
                 self.text(UiTextKey::RememberPosition),
@@ -542,11 +571,7 @@ impl ViewerApp {
         });
     }
 
-    fn settings_navigation_tab(
-        &mut self,
-        ui: &mut egui::Ui,
-        draft_state: &mut SettingsDraftState,
-    ) {
+    fn settings_navigation_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
         ui.group(|ui| {
             ui.horizontal(|ui| {
@@ -598,10 +623,26 @@ impl ViewerApp {
 
     fn settings_system_tab(&mut self, ui: &mut egui::Ui) {
         ui.group(|ui| {
-            ui.label(format!("{}: {}", self.text(UiTextKey::ProgramName), crate::get_prograname()));
-            ui.label(format!("{}: {}", self.text(UiTextKey::Version), crate::get_version()));
-            ui.label(format!("{}: {}", self.text(UiTextKey::Author), crate::get_auther()));
-            ui.label(format!("{}: {}", self.text(UiTextKey::Copyright), crate::get_copyright()));
+            ui.label(format!(
+                "{}: {}",
+                self.text(UiTextKey::ProgramName),
+                crate::get_prograname()
+            ));
+            ui.label(format!(
+                "{}: {}",
+                self.text(UiTextKey::Version),
+                crate::get_version()
+            ));
+            ui.label(format!(
+                "{}: {}",
+                self.text(UiTextKey::Author),
+                crate::get_auther()
+            ));
+            ui.label(format!(
+                "{}: {}",
+                self.text(UiTextKey::Copyright),
+                crate::get_copyright()
+            ));
             ui.separator();
             ui.horizontal_wrapped(|ui| {
                 if ui.button(self.text(UiTextKey::RegisterSystem)).clicked() {

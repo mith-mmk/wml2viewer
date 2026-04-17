@@ -168,7 +168,9 @@ fn sample_bicubic(
     src_y: f32,
     alpha: f32,
 ) -> [u8; 4] {
-    sample_kernel(input, width, height, src_x, src_y, 2, |distance| cubic_kernel(distance, alpha))
+    sample_kernel(input, width, height, src_x, src_y, 2, |distance| {
+        cubic_kernel(distance, alpha)
+    })
 }
 
 fn sample_lanczos(
@@ -179,9 +181,15 @@ fn sample_lanczos(
     src_y: f32,
     lobes: usize,
 ) -> [u8; 4] {
-    sample_kernel(input, width, height, src_x, src_y, lobes as isize, |distance| {
-        lanczos_kernel(distance, lobes as f32)
-    })
+    sample_kernel(
+        input,
+        width,
+        height,
+        src_x,
+        src_y,
+        lobes as isize,
+        |distance| lanczos_kernel(distance, lobes as f32),
+    )
 }
 
 fn sample_kernel<F>(
@@ -368,12 +376,7 @@ mod tests {
 
     #[test]
     fn downscale_uses_pixel_mixing_average() {
-        let source = Canvas::from_rgba(
-            2,
-            1,
-            vec![0, 0, 0, 255, 255, 255, 255, 255],
-        )
-        .unwrap();
+        let source = Canvas::from_rgba(2, 1, vec![0, 0, 0, 255, 255, 255, 255, 255]).unwrap();
         let mut output = Canvas::new(1, 1);
 
         Affine::resize(

@@ -4,27 +4,26 @@ mod zip_file;
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
-use std::fs;
 use std::ffi::OsStr;
+use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
+use crate::benchlog::log_global_bench_event;
 use crate::dependent::plugins::path_supported_by_plugins;
 use crate::options::{EndOfFolderOption, NavigationSortOption};
+use crate::wml2_formats::supports_decoder_extension;
 use listed_file::load_listed_file_entries;
 pub(crate) use sort::{compare_natural_str, compare_os_str};
-pub(crate) use zip_file::{load_zip_entries_unsorted, sort_zip_entries};
 use zip_file::{
     load_zip_entries, load_zip_entry_bytes, set_zip_workaround_options, zip_entry_record,
     zip_prefers_low_io,
 };
+pub(crate) use zip_file::{load_zip_entries_unsorted, sort_zip_entries};
 
-const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "webp","jpe", "jpg", "jpeg", "bmp", "gif", "png", "tif", "tiff", "mag", "mki", "pi", "pic",
-];
 const LISTED_FILE_EXTENSION: &str = "wmltxt";
 const LISTED_VIRTUAL_MARKER: &str = "__wmlv__";
 const ZIP_FILE_EXTENSION: &str = "zip";
@@ -60,6 +59,8 @@ impl Default for FilesystemCache {
 #[derive(Clone, Default)]
 struct DirectoryListing {
     files: Vec<PathBuf>,
+    file_entries: Vec<PathBuf>,
+    files_expanded: bool,
     dirs: Vec<PathBuf>,
     first_file: Option<PathBuf>,
     last_file: Option<PathBuf>,
@@ -71,7 +72,7 @@ enum PendingDirection {
     Prev,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum FilesystemCommand {
     Init {
         request_id: u64,
@@ -238,6 +239,9 @@ impl FileNavigator {
         if self.next(cache).is_some() {
             return self.current_target();
         }
+        if self.refresh_current_container_listing(cache) && self.next(cache).is_some() {
+            return self.current_target();
+        }
 
         match policy {
             EndOfFolderOption::Stop => NavigationOutcome::NoPath,
@@ -265,6 +269,9 @@ impl FileNavigator {
         cache: &mut FilesystemCache,
     ) -> NavigationOutcome {
         if self.prev(cache).is_some() {
+            return self.current_target();
+        }
+        if self.refresh_current_container_listing(cache) && self.prev(cache).is_some() {
             return self.current_target();
         }
 
@@ -318,6 +325,16 @@ impl FileNavigator {
         self.current = 0;
         Some(self.current_target())
     }
+
+    fn refresh_current_container_listing(&mut self, cache: &mut FilesystemCache) -> bool {
+        let Some(container_dir) = flat_container_dir(self.current()) else {
+            return false;
+        };
+        cache.refresh_listing(&container_dir);
+        self.files = None;
+        let files = self.ensure_files(cache);
+        !files.is_empty()
+    }
 }
 
 enum NavigationOutcome {
@@ -350,6 +367,36 @@ pub fn resolve_start_path(path: &Path) -> Option<PathBuf> {
         let mut cache = FilesystemCache::default();
         let navigation_path = cache.first_supported_file(path)?;
         return resolve_start_path(&navigation_path);
+    }
+
+    is_supported_image(path).then(|| path.to_path_buf())
+}
+
+pub fn resolve_end_path(path: &Path) -> Option<PathBuf> {
+    if is_virtual_zip_child(path) {
+        return Some(path.to_path_buf());
+    }
+
+    if let Some(target) = resolve_virtual_listed_child(path) {
+        return resolve_end_path(&target);
+    }
+
+    if is_zip_file_path(path) {
+        let mut cache = FilesystemCache::default();
+        let navigation_path = cache.last_supported_file(path)?;
+        return resolve_end_path(&navigation_path);
+    }
+
+    if is_listed_file_path(path) {
+        let mut cache = FilesystemCache::default();
+        let navigation_path = cache.last_supported_file(path)?;
+        return resolve_end_path(&navigation_path);
+    }
+
+    if path.is_dir() {
+        let mut cache = FilesystemCache::default();
+        let navigation_path = cache.last_supported_file(path)?;
+        return resolve_end_path(&navigation_path);
     }
 
     is_supported_image(path).then(|| path.to_path_buf())
@@ -391,11 +438,11 @@ pub fn list_openable_entries(dir: &Path, sort: NavigationSortOption) -> Vec<Path
 
 pub fn list_browser_entries(dir: &Path, sort: NavigationSortOption) -> Vec<PathBuf> {
     if is_zip_file_path(dir) {
-        return build_zip_virtual_children(dir);
+        return scan_zip_virtual_directory(dir, sort).files;
     }
 
     if is_listed_file_path(dir) {
-        return build_listed_virtual_children(dir);
+        return scan_listed_virtual_directory(dir, sort).files;
     }
 
     let mut entries = Vec::new();
@@ -478,18 +525,50 @@ pub fn spawn_filesystem_worker(
         while let Ok(command) = command_rx.recv() {
             match command {
                 FilesystemCommand::Init { request_id, path } => {
+                    log_global_bench_event(
+                        "filesystem.init.begin",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "path": path.display().to_string(),
+                        }),
+                    );
                     let Some(start_path) = resolve_navigation_path(&path, &mut cache) else {
+                        log_global_bench_event(
+                            "filesystem.init.no_path",
+                            serde_json::json!({
+                                "request_id": request_id,
+                                "path": path.display().to_string(),
+                            }),
+                        );
                         let _ = result_tx.send(FilesystemResult::NoPath { request_id });
                         continue;
                     };
 
+                    log_global_bench_event(
+                        "filesystem.init.resolved",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "path": path.display().to_string(),
+                            "start_path": start_path.display().to_string(),
+                        }),
+                    );
                     navigator = Some(FileNavigator::from_current_path(start_path, &mut cache));
                     let initial_target = navigator
                         .as_ref()
                         .and_then(|nav| navigation_outcome_to_target(nav.current_target()));
+                    log_global_bench_event(
+                        "filesystem.init.ready",
+                        serde_json::json!({
+                            "request_id": request_id,
+                            "navigation_path": initial_target.as_ref().map(|target| target.navigation_path.display().to_string()),
+                            "load_path": initial_target.as_ref().map(|target| target.load_path.display().to_string()),
+                        }),
+                    );
                     let _ = result_tx.send(FilesystemResult::NavigatorReady {
                         request_id,
-                        navigation_path: initial_target.as_ref().map(|target| target.navigation_path.clone()),
+                        navigation_path: initial_target
+                            .as_ref()
+                            .map(|target| target.navigation_path.clone()),
                         load_path: initial_target.map(|target| target.load_path),
                     });
                 }
@@ -574,6 +653,10 @@ fn handle_navigation_request(
     policy: EndOfFolderOption,
     direction: PendingDirection,
 ) {
+    let started_at = Instant::now();
+    let current_path = navigator
+        .as_ref()
+        .map(|nav| nav.current().display().to_string());
     let outcome = match navigator {
         Some(nav) => match direction {
             PendingDirection::Next => nav.next_with_policy(policy, cache),
@@ -581,8 +664,23 @@ fn handle_navigation_request(
         },
         None => NavigationOutcome::NoPath,
     };
-
-    let _ = send_nav_result(tx, request_id, navigation_outcome_to_target(outcome));
+    let target = navigation_outcome_to_target(outcome);
+    log_global_bench_event(
+        "filesystem.navigation.resolved",
+        serde_json::json!({
+            "request_id": request_id,
+            "direction": match direction {
+                PendingDirection::Next => "next",
+                PendingDirection::Prev => "prev",
+            },
+            "policy": format!("{policy:?}"),
+            "current_path": current_path,
+            "navigation_path": target.as_ref().map(|target| target.navigation_path.display().to_string()),
+            "load_path": target.as_ref().map(|target| target.load_path.display().to_string()),
+            "elapsed_ms": started_at.elapsed().as_millis() as u64,
+        }),
+    );
+    let _ = send_nav_result(tx, request_id, target);
 }
 
 fn navigation_outcome_to_target(outcome: NavigationOutcome) -> Option<NavigationTarget> {
@@ -611,10 +709,7 @@ fn resolve_navigation_path(path: &Path, cache: &mut FilesystemCache) -> Option<P
     resolve_start_path(path).map(|_| path.to_path_buf())
 }
 
-fn rebase_virtual_listed_child_path(
-    path: &Path,
-    cache: &mut FilesystemCache,
-) -> Option<PathBuf> {
+fn rebase_virtual_listed_child_path(path: &Path, cache: &mut FilesystemCache) -> Option<PathBuf> {
     let listed_root = listed_virtual_root(path)?;
     let expected_identity = listed_virtual_identity_from_virtual_path(path);
     cache
@@ -628,20 +723,23 @@ fn rebase_virtual_listed_child_path(
         })
         .or_else(|| {
             let expected_name = listed_virtual_name_from_virtual_path(path)?;
-            cache.supported_entries(&listed_root).into_iter().find(|entry| {
-                listed_virtual_name_from_virtual_path(entry)
-                    .map(|name| name.eq_ignore_ascii_case(&expected_name))
-                    .unwrap_or(false)
-            })
+            cache
+                .supported_entries(&listed_root)
+                .into_iter()
+                .find(|entry| {
+                    listed_virtual_name_from_virtual_path(entry)
+                        .map(|name| name.eq_ignore_ascii_case(&expected_name))
+                        .unwrap_or(false)
+                })
         })
 }
 
 fn flat_container_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Vec<PathBuf>> {
     if path.is_dir() || is_zip_file_path(path) || is_listed_file_path(path) {
-        return Some(cache.supported_entries(path));
+        return Some(cache.navigation_entries(path));
     }
     let dir = flat_container_dir(path)?;
-    Some(cache.supported_entries(&dir))
+    Some(cache.navigation_entries(&dir))
 }
 
 fn edge_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Vec<PathBuf>> {
@@ -653,16 +751,37 @@ fn edge_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Vec<PathBuf>
         return Some(cache.supported_entries(&listed_root));
     }
 
+    if let Some(direct_entries) = direct_image_entries_for_edge(path, cache) {
+        if !direct_entries.is_empty() {
+            return Some(direct_entries);
+        }
+    }
+
     flat_container_entries(path, cache)
+}
+
+fn direct_image_entries_for_edge(path: &Path, cache: &mut FilesystemCache) -> Option<Vec<PathBuf>> {
+    let dir = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        flat_container_dir(path)?
+    };
+    if !dir.is_dir() {
+        return None;
+    }
+
+    let mut entries = cache.listing(&dir).file_entries.clone();
+    entries.retain(|entry| !is_zip_file_path(entry) && !is_listed_file_path(entry));
+    Some(entries)
 }
 
 fn flat_container_dir(path: &Path) -> Option<PathBuf> {
     if let Some(zip_root) = zip_virtual_root(path) {
-        return zip_root.parent().map(Path::to_path_buf);
+        return Some(zip_root);
     }
 
     if let Some(listed_root) = listed_virtual_root(path) {
-        return listed_root.parent().map(Path::to_path_buf);
+        return Some(listed_root);
     }
 
     path.parent().map(Path::to_path_buf)
@@ -762,13 +881,17 @@ fn last_path_in_subtree(cache: &mut FilesystemCache, dir: &Path) -> Option<PathB
 }
 
 impl FilesystemCache {
-    fn listing(&mut self, dir: &Path) -> &DirectoryListing {
+    fn refresh_listing(&mut self, dir: &Path) {
+        let listing = scan_directory_listing(dir, self.sort);
+        self.listings_by_dir.insert(dir.to_path_buf(), listing);
+    }
+
+    fn listing(&mut self, dir: &Path) -> &mut DirectoryListing {
         if is_listed_file_path(dir) {
-            let listing = scan_directory_listing(dir, self.sort);
-            self.listings_by_dir.insert(dir.to_path_buf(), listing);
+            self.refresh_listing(dir);
             return self
                 .listings_by_dir
-                .get(dir)
+                .get_mut(dir)
                 .expect("listed file listing inserted");
         }
         let sort = self.sort;
@@ -778,7 +901,29 @@ impl FilesystemCache {
     }
 
     fn supported_entries(&mut self, dir: &Path) -> Vec<PathBuf> {
-        self.listing(dir).files.clone()
+        let listing = self.listing(dir);
+        if !listing.files_expanded {
+            let mut files = Vec::new();
+            for path in listing.file_entries.clone() {
+                if is_listed_file_path(&path) {
+                    files.extend(build_listed_virtual_children(&path));
+                } else if is_zip_file_path(&path) {
+                    files.extend(build_zip_virtual_children(&path));
+                } else {
+                    files.push(path);
+                }
+            }
+            listing.files = files;
+            listing.files_expanded = true;
+        }
+        listing.files.clone()
+    }
+
+    fn navigation_entries(&mut self, dir: &Path) -> Vec<PathBuf> {
+        if is_zip_file_path(dir) || is_listed_file_path(dir) {
+            return self.supported_entries(dir);
+        }
+        self.listing(dir).file_entries.clone()
     }
 
     fn child_directories(&mut self, dir: &Path) -> Vec<PathBuf> {
@@ -795,21 +940,61 @@ impl FilesystemCache {
 }
 
 fn scan_directory_listing(dir: &Path, sort: NavigationSortOption) -> DirectoryListing {
+    let started_at = Instant::now();
     if is_zip_file_path(dir) {
-        return scan_zip_virtual_directory(dir);
+        let listing = scan_zip_virtual_directory(dir, sort);
+        log_global_bench_event(
+            "filesystem.scan_directory_listing",
+            serde_json::json!({
+                "directory": dir.display().to_string(),
+                "kind": "zip",
+                "file_count": listing.files.len(),
+                "dir_count": listing.dirs.len(),
+                "elapsed_ms": started_at.elapsed().as_millis() as u64,
+            }),
+        );
+        return listing;
     }
 
     if is_listed_file_path(dir) {
-        return scan_listed_virtual_directory(dir);
+        let listing = scan_listed_virtual_directory(dir, sort);
+        log_global_bench_event(
+            "filesystem.scan_directory_listing",
+            serde_json::json!({
+                "directory": dir.display().to_string(),
+                "kind": "listed",
+                "file_count": listing.files.len(),
+                "dir_count": listing.dirs.len(),
+                "elapsed_ms": started_at.elapsed().as_millis() as u64,
+            }),
+        );
+        return listing;
     }
 
-    scan_real_directory_listing(dir, sort)
+    let listing = scan_real_directory_listing(dir, sort);
+    log_global_bench_event(
+        "filesystem.scan_directory_listing",
+        serde_json::json!({
+            "directory": dir.display().to_string(),
+            "kind": "real",
+            "file_count": listing.files.len(),
+            "dir_count": listing.dirs.len(),
+            "elapsed_ms": started_at.elapsed().as_millis() as u64,
+        }),
+    );
+    listing
 }
 
-fn scan_listed_virtual_directory(listed_file: &Path) -> DirectoryListing {
-    let files = build_listed_virtual_children(listed_file);
+fn scan_listed_virtual_directory(
+    listed_file: &Path,
+    sort: NavigationSortOption,
+) -> DirectoryListing {
+    let mut files = build_listed_virtual_children(listed_file);
+    sort_paths(&mut files, sort);
 
     DirectoryListing {
+        file_entries: files.clone(),
+        files_expanded: true,
         first_file: files.first().cloned(),
         last_file: files.last().cloned(),
         files,
@@ -817,14 +1002,17 @@ fn scan_listed_virtual_directory(listed_file: &Path) -> DirectoryListing {
     }
 }
 
-fn scan_zip_virtual_directory(zip_file: &Path) -> DirectoryListing {
+fn scan_zip_virtual_directory(zip_file: &Path, sort: NavigationSortOption) -> DirectoryListing {
     let entries = load_zip_entries(zip_file).unwrap_or_default();
-    let files = entries
+    let mut files = entries
         .iter()
         .map(|entry| zip_virtual_child_path(zip_file, entry.index, &entry.name))
         .collect::<Vec<_>>();
+    sort_paths(&mut files, sort);
 
     DirectoryListing {
+        file_entries: files.clone(),
+        files_expanded: true,
         first_file: files.first().cloned(),
         last_file: files.last().cloned(),
         files,
@@ -854,24 +1042,54 @@ fn scan_real_directory_listing(dir: &Path, sort: NavigationSortOption) -> Direct
 
     sort_paths(&mut raw_files, sort);
     sort_paths(&mut raw_dirs, sort);
-
-    let mut files = Vec::new();
-    for path in raw_files {
-        if is_listed_file_path(&path) {
-            files.extend(build_listed_virtual_children(&path));
-        } else if is_zip_file_path(&path) {
-            files.extend(build_zip_virtual_children(&path));
-        } else {
-            files.push(path);
-        }
-    }
+    let first_file = raw_files
+        .iter()
+        .find_map(|path| first_supported_path_for_entry(path, sort));
+    let last_file = raw_files
+        .iter()
+        .rev()
+        .find_map(|path| last_supported_path_for_entry(path, sort));
 
     DirectoryListing {
-        first_file: files.first().cloned(),
-        last_file: files.last().cloned(),
-        files,
+        first_file,
+        last_file,
+        file_entries: raw_files,
+        files: Vec::new(),
+        files_expanded: false,
         dirs: raw_dirs,
     }
+}
+
+fn first_supported_path_for_entry(path: &Path, sort: NavigationSortOption) -> Option<PathBuf> {
+    if is_listed_file_path(path) {
+        return scan_listed_virtual_directory(path, sort)
+            .files
+            .into_iter()
+            .next();
+    }
+    if is_zip_file_path(path) {
+        return scan_zip_virtual_directory(path, sort)
+            .files
+            .into_iter()
+            .next();
+    }
+    resolve_start_path(path)
+}
+
+fn last_supported_path_for_entry(path: &Path, sort: NavigationSortOption) -> Option<PathBuf> {
+    if is_listed_file_path(path) {
+        return scan_listed_virtual_directory(path, sort)
+            .files
+            .into_iter()
+            .last();
+    }
+    if is_zip_file_path(path) {
+        return scan_zip_virtual_directory(path, sort)
+            .files
+            .into_iter()
+            .last();
+    }
+    resolve_start_path(path)
 }
 
 pub(crate) fn browser_entry_path_from_dir_entry(entry: &fs::DirEntry) -> Option<PathBuf> {
@@ -888,7 +1106,8 @@ pub(crate) fn browser_entry_path_from_dir_entry(entry: &fs::DirEntry) -> Option<
 }
 
 fn dir_entry_is_directory(entry: &fs::DirEntry) -> bool {
-    entry.file_type()
+    entry
+        .file_type()
         .map(|file_type| file_type.is_dir())
         .or_else(|_| entry.metadata().map(|metadata| metadata.is_dir()))
         .unwrap_or(false)
@@ -1058,12 +1277,7 @@ fn is_supported_image_name(name: &OsStr) -> bool {
     Path::new(name)
         .extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| {
-            let ext = ext.to_ascii_lowercase();
-            SUPPORTED_EXTENSIONS
-                .iter()
-                .any(|supported| *supported == ext)
-        })
+        .map(supports_decoder_extension)
         .unwrap_or(false)
 }
 
@@ -1092,34 +1306,12 @@ fn is_zip_file_name(name: &OsStr) -> bool {
 }
 
 fn file_name_sort_key(path: &Path) -> String {
-    if let Some((archive, index)) = resolve_virtual_zip_child(path) {
-        return load_zip_entries(&archive)
-            .and_then(|entries| entries.into_iter().find(|entry| entry.index == index))
-            .map(|entry| entry.name.to_lowercase())
-            .unwrap_or_default();
-    }
-
-    if let Some(target) = resolve_virtual_listed_child(path) {
-        return file_name_sort_key(&target);
-    }
-
     path.file_name()
-        .map(|name| name.to_string_lossy().to_lowercase())
+        .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default()
 }
 
 fn os_name_sort_key(path: &Path) -> String {
-    if let Some((archive, index)) = resolve_virtual_zip_child(path) {
-        return load_zip_entries(&archive)
-            .and_then(|entries| entries.into_iter().find(|entry| entry.index == index))
-            .map(|entry| entry.name)
-            .unwrap_or_default();
-    }
-
-    if let Some(target) = resolve_virtual_listed_child(path) {
-        return os_name_sort_key(&target);
-    }
-
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default()
@@ -1134,7 +1326,17 @@ fn sort_paths(paths: &mut [PathBuf], sort: NavigationSortOption) {
         }
         NavigationSortOption::Name => {
             paths.sort_by(|left, right| {
+                compare_natural_str(&file_name_sort_key(left), &file_name_sort_key(right), false)
+            });
+        }
+        NavigationSortOption::NameCaseSensitive => {
+            paths.sort_by(|left, right| {
                 compare_natural_str(&file_name_sort_key(left), &file_name_sort_key(right), true)
+            });
+        }
+        NavigationSortOption::NameCaseInsensitive => {
+            paths.sort_by(|left, right| {
+                compare_natural_str(&file_name_sort_key(left), &file_name_sort_key(right), false)
             });
         }
         NavigationSortOption::Date => {
@@ -1190,7 +1392,9 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("wml2viewer_nav_{unique}"));
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data");
+        fs::create_dir_all(&base).unwrap();
+        let dir = base.join(format!(".test_nav_{unique}"));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -1213,9 +1417,9 @@ mod tests {
     #[test]
     fn listed_file_is_expanded_as_virtual_children() {
         let dir = make_temp_dir();
-        let before = dir.join("before.webp");
-        let listed = dir.join("listedfile.wmltxt");
-        let after = dir.join("after.gif");
+        let before = dir.join("001_before.webp");
+        let listed = dir.join("002_listedfile.wmltxt");
+        let after = dir.join("003_after.gif");
         let listed_1 = dir.join("test_f16.png");
         let listed_2 = dir.join("test.png");
 
@@ -1250,14 +1454,17 @@ mod tests {
     #[test]
     fn listed_file_returns_to_directory_on_next_and_prev() {
         let dir = make_temp_dir();
-        let before = dir.join("00000-1796047615-Maid_san.jpg.webp");
-        let listed = dir.join("listedfile.wmltxt");
-        let after = dir.join("sample_animation.webp.gif");
-        let listed_1 = dir.join("test_f16.png");
-        let listed_2 = dir.join("test.png");
+        let listed_assets_root = make_temp_dir();
+        let before = dir.join("001_before.webp");
+        let listed = dir.join("002_listedfile.wmltxt");
+        let after = dir.join("003_after.gif");
+        let listed_assets = listed_assets_root.join("listed_assets");
+        let listed_1 = listed_assets.join("listed_1.png");
+        let listed_2 = listed_assets.join("listed_2.png");
 
         fs::write(&before, []).unwrap();
         fs::write(&after, []).unwrap();
+        fs::create_dir_all(&listed_assets).unwrap();
         fs::write(&listed_1, []).unwrap();
         fs::write(&listed_2, []).unwrap();
         fs::write(
@@ -1297,13 +1504,10 @@ mod tests {
 
         nav.set_current_input(target.navigation_path.clone(), &mut cache);
 
-        let NavigationOutcome::Resolved(target) =
-            nav.next_with_policy(EndOfFolderOption::Next, &mut cache)
-        else {
-            panic!("expected directory item after listed file");
-        };
-        assert_eq!(target.navigation_path, after);
-        assert_eq!(target.load_path, after);
+        assert!(matches!(
+            nav.next_with_policy(EndOfFolderOption::Next, &mut cache),
+            NavigationOutcome::NoPath
+        ));
 
         let mut nav = FileNavigator::from_current_path(after.clone(), &mut cache);
         let NavigationOutcome::Resolved(target) =
@@ -1316,19 +1520,25 @@ mod tests {
         assert_eq!(target.load_path, listed_2);
 
         let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(listed_assets_root);
     }
 
     #[test]
     fn listed_file_prev_exits_to_previous_entry_even_if_first_item_matches_outer_file() {
-        let dir = make_temp_dir();
-        let before = dir.join("00000-1796047615-Maid_san.jpg.webp");
+        let root = make_temp_dir();
+        let dir = root.join("case");
+        fs::create_dir_all(&dir).unwrap();
+        let listed_assets_root = make_temp_dir();
+        let before = dir.join("before.webp");
         let listed = dir.join("listedfile.wmltxt");
-        let after = dir.join("sample_animation.webp.gif");
-        let listed_2 = dir.join("test.png");
-        let listed_3 = dir.join("test_f16.png");
+        let after = dir.join("after.gif");
+        let listed_assets = listed_assets_root.join("listed_assets");
+        let listed_2 = listed_assets.join("listed_2.png");
+        let listed_3 = listed_assets.join("listed_3.png");
 
         fs::write(&before, []).unwrap();
         fs::write(&after, []).unwrap();
+        fs::create_dir_all(&listed_assets).unwrap();
         fs::write(&listed_2, []).unwrap();
         fs::write(&listed_3, []).unwrap();
         fs::write(
@@ -1343,20 +1553,14 @@ mod tests {
         .unwrap();
 
         let mut cache = FilesystemCache::default();
-        let mut nav = FileNavigator::from_current_path(after.clone(), &mut cache);
+        let listed_children = build_listed_virtual_children(&listed);
+        assert_eq!(listed_children.len(), 3);
+        let mut nav = FileNavigator::from_current_path(listed_children[2].clone(), &mut cache);
 
         let NavigationOutcome::Resolved(target) =
             nav.prev_with_policy(EndOfFolderOption::Next, &mut cache)
         else {
-            panic!("expected listed file from prev");
-        };
-        assert_eq!(target.load_path, listed_3);
-        nav.set_current_input(target.navigation_path.clone(), &mut cache);
-
-        let NavigationOutcome::Resolved(target) =
-            nav.prev_with_policy(EndOfFolderOption::Next, &mut cache)
-        else {
-            panic!("expected middle listed entry");
+            panic!("expected previous listed entry");
         };
         assert_eq!(target.load_path, listed_2);
         nav.set_current_input(target.navigation_path.clone(), &mut cache);
@@ -1369,15 +1573,13 @@ mod tests {
         assert_eq!(target.load_path, after);
         nav.set_current_input(target.navigation_path.clone(), &mut cache);
 
-        let NavigationOutcome::Resolved(target) =
-            nav.prev_with_policy(EndOfFolderOption::Next, &mut cache)
-        else {
-            panic!("expected exit to previous outer entry");
-        };
-        assert_eq!(target.navigation_path, before);
-        assert_eq!(target.load_path, before);
+        assert!(matches!(
+            nav.prev_with_policy(EndOfFolderOption::Next, &mut cache),
+            NavigationOutcome::NoPath
+        ));
 
-        let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(listed_assets_root);
     }
 
     #[test]
@@ -1441,8 +1643,69 @@ mod tests {
 
         assert_eq!(zip_virtual_root(&first), Some(archive.clone()));
         assert_eq!(zip_virtual_root(&last), Some(archive.clone()));
-        assert_eq!(resolve_virtual_zip_child(&first), Some((archive.clone(), 0)));
+        assert_eq!(
+            resolve_virtual_zip_child(&first),
+            Some((archive.clone(), 0))
+        );
         assert_eq!(resolve_virtual_zip_child(&last), Some((archive.clone(), 2)));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn home_and_end_in_parent_directory_do_not_dive_into_zip_children() {
+        let root = make_temp_dir();
+        let image_a = root.join("001.png");
+        let image_b = root.join("002.png");
+        let archive = root.join("inner.zip");
+        fs::write(&image_a, []).unwrap();
+        fs::write(&image_b, []).unwrap();
+        make_zip_with_entries(&archive, &["100.png", "101.png"]);
+
+        let mut cache = FilesystemCache::default();
+        let mut nav = FileNavigator::from_current_path(image_b.clone(), &mut cache);
+        let first = nav.first(&mut cache).expect("first parent image");
+        let last = nav.last(&mut cache).expect("last parent image");
+
+        assert_eq!(first, image_a);
+        assert_eq!(last, image_b);
+        assert!(resolve_virtual_zip_child(&first).is_none());
+        assert!(resolve_virtual_zip_child(&last).is_none());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn flat_navigation_entries_do_not_expand_sibling_zip_children() {
+        let root = make_temp_dir();
+        let image = root.join("001.png");
+        let archive = root.join("inner.zip");
+        fs::write(&image, []).unwrap();
+        make_zip_with_entries(&archive, &["100.png", "101.png"]);
+
+        let mut cache = FilesystemCache::default();
+        let entries = flat_container_entries(&image, &mut cache).unwrap_or_default();
+
+        assert!(entries.contains(&image));
+        assert!(entries.contains(&archive));
+        assert!(!entries.iter().any(|entry| is_virtual_zip_child(entry)));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn zip_virtual_listing_respects_requested_os_sort() {
+        let root = make_temp_dir();
+        let archive = root.join("images.zip");
+        make_zip_with_entries(&archive, &["b_10.png", "a_2.png"]);
+
+        let entries = list_openable_entries(&archive, NavigationSortOption::OsName);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            resolve_virtual_zip_child(&entries[0]),
+            Some((archive.clone(), 0))
+        );
+        assert_eq!(resolve_virtual_zip_child(&entries[1]), Some((archive, 1)));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -1479,8 +1742,68 @@ mod tests {
 
         assert_eq!(listed_virtual_root(&first), Some(listed.clone()));
         assert_eq!(listed_virtual_root(&last), Some(listed.clone()));
-        assert_eq!(resolve_start_path(&first), Some(page1));
-        assert_eq!(resolve_start_path(&last), Some(page3));
+        assert_eq!(resolve_start_path(&first), Some(page1.clone()));
+        assert_eq!(resolve_start_path(&last), Some(page3.clone()));
+        assert_eq!(resolve_end_path(&first), Some(page1));
+        assert_eq!(resolve_end_path(&last), Some(page3));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn virtual_zip_child_navigation_stays_inside_zip_entries() {
+        let root = make_temp_dir();
+        let archive = root.join("images.zip");
+        make_zip_with_entries(&archive, &["001.png", "002.png", "003.png"]);
+
+        let mut cache = FilesystemCache::default();
+        let zip_children = build_zip_virtual_children(&archive);
+        let mut nav = FileNavigator::from_current_path(zip_children[1].clone(), &mut cache);
+
+        let next = nav.next(&mut cache).expect("next zip entry");
+        let prev = nav.prev(&mut cache).expect("prev zip entry");
+
+        assert_eq!(zip_virtual_root(&next), Some(archive.clone()));
+        assert_eq!(zip_virtual_root(&prev), Some(archive.clone()));
+        assert_eq!(resolve_virtual_zip_child(&next), Some((archive.clone(), 2)));
+        assert_eq!(resolve_virtual_zip_child(&prev), Some((archive.clone(), 1)));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn virtual_listed_child_navigation_stays_inside_listed_entries() {
+        let root = make_temp_dir();
+        let listed = root.join("pages.wmltxt");
+        let page1 = root.join("001.png");
+        let page2 = root.join("002.png");
+        let page3 = root.join("003.png");
+
+        fs::write(&page1, []).unwrap();
+        fs::write(&page2, []).unwrap();
+        fs::write(&page3, []).unwrap();
+        fs::write(
+            &listed,
+            format!(
+                "#!WMLViewer2 ListedFile 1.0\n{}\n{}\n{}\n",
+                page1.display(),
+                page2.display(),
+                page3.display()
+            ),
+        )
+        .unwrap();
+
+        let mut cache = FilesystemCache::default();
+        let listed_children = build_listed_virtual_children(&listed);
+        let mut nav = FileNavigator::from_current_path(listed_children[1].clone(), &mut cache);
+
+        let next = nav.next(&mut cache).expect("next listed entry");
+        let prev = nav.prev(&mut cache).expect("prev listed entry");
+
+        assert_eq!(listed_virtual_root(&next), Some(listed.clone()));
+        assert_eq!(listed_virtual_root(&prev), Some(listed.clone()));
+        assert_eq!(resolve_start_path(&next), Some(page3));
+        assert_eq!(resolve_start_path(&prev), Some(page2));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -1523,7 +1846,11 @@ mod tests {
 
         let second = cache.supported_entries(&listed);
         assert_eq!(second.len(), 3);
-        assert!(second.iter().any(|entry| resolve_start_path(entry) == Some(page3.clone())));
+        assert!(
+            second
+                .iter()
+                .any(|entry| resolve_start_path(entry) == Some(page3.clone()))
+        );
 
         let _ = fs::remove_dir_all(root);
     }
@@ -1573,6 +1900,39 @@ mod tests {
         assert_ne!(rebased, old_page2);
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn next_refreshes_stale_directory_listing_before_recursive_branch_change() {
+        let parent = make_temp_dir();
+        let current_dir = parent.join("000_current");
+        let next_dir = parent.join("001_next");
+        let current = current_dir.join("001_current.png");
+        let stale_last = current_dir.join("002_last.png");
+        let appended = current_dir.join("003_appended.png");
+        let sibling_image = next_dir.join("000_sibling.png");
+
+        fs::create_dir_all(&current_dir).unwrap();
+        fs::create_dir_all(&next_dir).unwrap();
+        fs::write(&current, []).unwrap();
+        fs::write(&stale_last, []).unwrap();
+        fs::write(&sibling_image, []).unwrap();
+
+        let mut cache = FilesystemCache::default();
+        let mut nav = FileNavigator::from_current_path(stale_last.clone(), &mut cache);
+
+        fs::write(&appended, []).unwrap();
+
+        let NavigationOutcome::Resolved(target) =
+            nav.next_with_policy(EndOfFolderOption::Recursive, &mut cache)
+        else {
+            panic!("expected appended file from refreshed listing");
+        };
+
+        assert_eq!(target.navigation_path, appended);
+        assert_eq!(target.load_path, appended);
+
+        let _ = fs::remove_dir_all(parent);
     }
 
     #[test]

@@ -8,7 +8,9 @@ use crate::drawers::image::SaveFormat;
 use crate::filesystem::resolve_start_path;
 use crate::ui::i18n::UiTextKey;
 use crate::ui::menu::fileviewer::icons::{SvgIcon, paint_svg_icon};
-use crate::ui::menu::fileviewer::state::{FilerEntry, FilerSortField, FilerViewMode, NameSortMode};
+use crate::ui::menu::fileviewer::state::{
+    FilerEntry, FilerSortField, FilerUserRequest, FilerViewMode, NameSortMode,
+};
 use crate::ui::viewer::ViewerApp;
 use crate::ui::viewer::options::PaneSide;
 use chrono::{DateTime, Local};
@@ -46,7 +48,7 @@ impl ViewerApp {
                     self.show_left_menu = false;
                 }
                 if ui.button(self.text(UiTextKey::ToggleFiler)).clicked() {
-                    self.show_filer = !self.show_filer;
+                    self.set_show_filer(!self.show_filer);
                     self.pending_fit_recalc = true;
                     self.show_left_menu = false;
                 }
@@ -322,7 +324,7 @@ impl ViewerApp {
                                 )
                                 .clicked()
                             {
-                                self.request_filer_directory(root, None);
+                                self.browse_filer_directory(root);
                             }
                         }
                     });
@@ -330,15 +332,18 @@ impl ViewerApp {
                     ui.label(dir.display().to_string());
                     if let Some(parent) = dir.parent() {
                         if icon_toolbar_button(ui, SvgIcon::Up, false, up_text, icon_color) {
-                            self.request_filer_directory(parent.to_path_buf(), None);
+                            self.browse_filer_directory(parent.to_path_buf());
                         }
                     }
                 }
                 ui.separator();
                 if refresh_requested {
+                    self.sync_navigation_sort_with_filer_sort();
                     self.refresh_current_filer_directory();
                 }
                 let panel_width = ui.available_width();
+                let focus_target = self.pending_filer_focus_path.clone();
+                let mut focus_consumed = false;
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -347,7 +352,12 @@ impl ViewerApp {
                         match self.filer.view_mode {
                             FilerViewMode::List | FilerViewMode::Detail => {
                                 for entry in entries {
-                                    self.filer_entry_row(ui, entry);
+                                    self.filer_entry_row(
+                                        ui,
+                                        entry,
+                                        focus_target.as_ref(),
+                                        &mut focus_consumed,
+                                    );
                                 }
                             }
                             _ => {
@@ -357,14 +367,29 @@ impl ViewerApp {
                                     FilerViewMode::ThumbnailLarge => 160.0,
                                     _ => 96.0,
                                 } * self.filer.thumbnail_scale;
-                                self.filer_thumbnail_grid(ui, entries, item_width);
+                                self.filer_thumbnail_grid(
+                                    ui,
+                                    entries,
+                                    item_width,
+                                    focus_target.as_ref(),
+                                    &mut focus_consumed,
+                                );
                             }
                         }
                     });
+                if focus_consumed {
+                    self.pending_filer_focus_path = None;
+                }
             });
     }
 
-    fn filer_entry_row(&mut self, ui: &mut egui::Ui, entry: FilerEntry) {
+    fn filer_entry_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        entry: FilerEntry,
+        focus_target: Option<&std::path::PathBuf>,
+        focus_consumed: &mut bool,
+    ) {
         let selected = self.filer.selected.as_ref() == Some(&entry.path)
             || self.current_navigation_path == entry.path;
         let text = if self.filer.view_mode == FilerViewMode::Detail {
@@ -389,6 +414,10 @@ impl ViewerApp {
             entry.label.clone()
         };
         let response = ui.selectable_label(selected, text);
+        if !*focus_consumed && focus_target == Some(&entry.path) {
+            ui.scroll_to_rect(response.rect, Some(egui::Align::Center));
+            *focus_consumed = true;
+        }
         if let Some(size) = entry.metadata.size {
             let modified = entry
                 .metadata
@@ -409,6 +438,8 @@ impl ViewerApp {
         ui: &mut egui::Ui,
         entries: Vec<FilerEntry>,
         item_width: f32,
+        focus_target: Option<&std::path::PathBuf>,
+        focus_consumed: &mut bool,
     ) {
         let available = ui.available_width().max(item_width);
         let spacing = 8.0;
@@ -420,7 +451,7 @@ impl ViewerApp {
             .spacing(egui::vec2(spacing, spacing))
             .show(ui, |ui| {
                 for (index, entry) in entries.into_iter().enumerate() {
-                    self.filer_thumbnail_tile(ui, entry, item_width);
+                    self.filer_thumbnail_tile(ui, entry, item_width, focus_target, focus_consumed);
                     if (index + 1) % columns == 0 {
                         ui.end_row();
                     }
@@ -428,7 +459,14 @@ impl ViewerApp {
             });
     }
 
-    fn filer_thumbnail_tile(&mut self, ui: &mut egui::Ui, entry: FilerEntry, item_width: f32) {
+    fn filer_thumbnail_tile(
+        &mut self,
+        ui: &mut egui::Ui,
+        entry: FilerEntry,
+        item_width: f32,
+        focus_target: Option<&std::path::PathBuf>,
+        focus_consumed: &mut bool,
+    ) {
         let entry_label = entry.label.clone();
         let selected = self.filer.selected.as_ref() == Some(&entry.path)
             || self.current_navigation_path == entry.path;
@@ -500,6 +538,10 @@ impl ViewerApp {
                 if response.clicked() {
                     self.activate_filer_entry(entry.clone());
                 }
+                if !*focus_consumed && focus_target == Some(&entry.path) {
+                    ui.scroll_to_rect(response.rect, Some(egui::Align::Center));
+                    *focus_consumed = true;
+                }
                 let label_height = if item_width >= 180.0 { 48.0 } else { 40.0 };
                 let label = thumbnail_label(&entry_label, item_width);
                 ui.add_sized(
@@ -531,6 +573,8 @@ impl ViewerApp {
             .default_height(110.0)
             .show(ctx, |ui| {
                 let mut close_requested = false;
+                let focus_target = self.pending_subfiler_focus_path.clone();
+                let mut focus_consumed = false;
                 ui.horizontal(|ui| {
                     ui.label(self.text(UiTextKey::Subfiler));
                     ui.label(if self.options.manga_right_to_left {
@@ -561,42 +605,92 @@ impl ViewerApp {
                             }
                             frame.show(ui, |ui| {
                                 if let Some(texture) = self.thumbnail_cache.get(&entry.path) {
-                                    if ui
-                                        .add(egui::Button::image(
-                                            egui::Image::from_texture(texture)
-                                                .fit_to_exact_size(egui::vec2(72.0, 72.0)),
-                                        ))
-                                        .clicked()
-                                    {
+                                    let response = ui.add(egui::Button::image(
+                                        egui::Image::from_texture(texture)
+                                            .fit_to_exact_size(egui::vec2(72.0, 72.0)),
+                                    ));
+                                    if focus_target.as_ref() == Some(&entry.path) {
+                                        ui.scroll_to_rect(
+                                            response.rect,
+                                            Some(if self.options.manga_right_to_left {
+                                                egui::Align::Max
+                                            } else {
+                                                egui::Align::Min
+                                            }),
+                                        );
+                                        focus_consumed = true;
+                                    }
+                                    if response.clicked() {
                                         self.activate_filer_entry(entry.clone());
                                     }
-                                } else if ui.button("...").clicked() {
-                                    self.activate_filer_entry(entry.clone());
+                                } else {
+                                    let response = ui.button("...");
+                                    if focus_target.as_ref() == Some(&entry.path) {
+                                        ui.scroll_to_rect(
+                                            response.rect,
+                                            Some(if self.options.manga_right_to_left {
+                                                egui::Align::Max
+                                            } else {
+                                                egui::Align::Min
+                                            }),
+                                        );
+                                        focus_consumed = true;
+                                    }
+                                    if response.clicked() {
+                                        self.activate_filer_entry(entry.clone());
+                                    }
                                 }
                             });
                         }
                     });
                 });
                 if close_requested {
-                    self.show_subfiler = false;
+                    self.set_show_subfiler(false);
+                } else if focus_consumed {
+                    self.pending_subfiler_focus_path = None;
                 }
             });
     }
 
     fn activate_filer_entry(&mut self, entry: FilerEntry) {
         if entry.is_container {
-            self.request_filer_directory(entry.path, None);
+            self.log_bench_state(
+                "viewer.filer.entry_activated",
+                serde_json::json!({
+                    "kind": "container",
+                    "path": entry.path.display().to_string(),
+                }),
+            );
+            self.browse_filer_directory(entry.path);
             return;
         }
         let navigation_path = entry.path.clone();
-        let load_path = resolve_start_path(&navigation_path)
-            .unwrap_or_else(|| navigation_path.clone());
+        let load_path =
+            resolve_start_path(&navigation_path).unwrap_or_else(|| navigation_path.clone());
+        self.log_bench_state(
+            "viewer.filer.entry_activated",
+            serde_json::json!({
+                "kind": "file",
+                "navigation_path": navigation_path.display().to_string(),
+                "load_path": load_path.display().to_string(),
+            }),
+        );
+        self.filer.pending_user_request = Some(FilerUserRequest::SelectFile {
+            navigation_path: navigation_path.clone(),
+        });
+        self.filer.committed_browse_directory = None;
         self.filer.selected = Some(navigation_path.clone());
         self.empty_mode = false;
-        self.show_filer = false;
+        self.set_show_filer(false);
         self.pending_fit_recalc = true;
-        self.set_filesystem_current(navigation_path.clone());
+        if self.show_subfiler {
+            self.pending_subfiler_focus_path = Some(navigation_path.clone());
+        }
         let _ = self.request_load_target(navigation_path, load_path);
+    }
+
+    pub(crate) fn bench_activate_filer_entry(&mut self, entry: FilerEntry) {
+        self.activate_filer_entry(entry);
     }
 }
 
@@ -678,9 +772,7 @@ fn locale_datetime_pattern(locale: &str) -> &'static str {
         "en_US" => "%m/%d/%Y %I:%M %p",
         "en_GB" | "en_AU" => "%d/%m/%Y %H:%M",
         "de" | "de_DE" | "ru" | "ru_RU" => "%d.%m.%Y %H:%M",
-        "fr" | "fr_FR" | "it" | "it_IT" | "es" | "es_ES" | "pt" | "pt_BR" => {
-            "%d/%m/%Y %H:%M"
-        }
+        "fr" | "fr_FR" | "it" | "it_IT" | "es" | "es_ES" | "pt" | "pt_BR" => "%d/%m/%Y %H:%M",
         _ if normalized.starts_with("en_") => "%m/%d/%Y %I:%M %p",
         _ if normalized.starts_with("ja")
             || normalized.starts_with("zh")

@@ -41,11 +41,26 @@ pub(crate) enum NameSortMode {
     CaseInsensitive,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum FilerUserRequest {
+    BrowseDirectory {
+        directory: PathBuf,
+    },
+    SelectFile {
+        navigation_path: PathBuf,
+    },
+    Refresh {
+        directory: PathBuf,
+        selected: Option<PathBuf>,
+    },
+}
+
 #[derive(Debug)]
 pub(crate) struct FilerState {
     pub(crate) entries: Vec<FilerEntry>,
     pub(crate) directory: Option<PathBuf>,
     pub(crate) selected: Option<PathBuf>,
+    pub(crate) committed_browse_directory: Option<PathBuf>,
     pub(crate) roots: Vec<PathBuf>,
     pub(crate) pending_request_id: Option<u64>,
     pub(crate) view_mode: FilerViewMode,
@@ -58,6 +73,7 @@ pub(crate) struct FilerState {
     pub(crate) name_sort_mode: NameSortMode,
     pub(crate) url_input: String,
     pub(crate) thumbnail_scale: f32,
+    pub(crate) pending_user_request: Option<FilerUserRequest>,
 }
 
 impl Default for FilerState {
@@ -66,6 +82,7 @@ impl Default for FilerState {
             entries: Vec::new(),
             directory: None,
             selected: None,
+            committed_browse_directory: None,
             roots: ui_available_roots(),
             pending_request_id: None,
             view_mode: FilerViewMode::List,
@@ -78,6 +95,7 @@ impl Default for FilerState {
             name_sort_mode: NameSortMode::Os,
             url_input: String::new(),
             thumbnail_scale: 1.0,
+            pending_user_request: None,
         }
     }
 }
