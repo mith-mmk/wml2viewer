@@ -2,6 +2,46 @@ use crate::options::{KeyBinding, ViewerAction};
 use eframe::egui;
 use std::collections::HashMap;
 
+const SUPPORTED_KEY_MAPPINGS: &[(&str, egui::Key)] = &[
+    ("Plus", egui::Key::Plus),
+    ("Minus", egui::Key::Minus),
+    ("Num0", egui::Key::Num0),
+    ("Enter", egui::Key::Enter),
+    ("F5", egui::Key::F5),
+    ("R", egui::Key::R),
+    ("Space", egui::Key::Space),
+    ("ArrowRight", egui::Key::ArrowRight),
+    ("ArrowLeft", egui::Key::ArrowLeft),
+    ("Home", egui::Key::Home),
+    ("End", egui::Key::End),
+    ("G", egui::Key::G),
+    ("C", egui::Key::C),
+    ("V", egui::Key::V),
+    ("F", egui::Key::F),
+    ("P", egui::Key::P),
+];
+
+pub(crate) fn supported_key_names() -> &'static [&'static str] {
+    &[
+        "Plus",
+        "Minus",
+        "Num0",
+        "Enter",
+        "F5",
+        "R",
+        "Space",
+        "ArrowRight",
+        "ArrowLeft",
+        "Home",
+        "End",
+        "G",
+        "C",
+        "V",
+        "F",
+        "P",
+    ]
+}
+
 pub(crate) fn collect_triggered_actions(
     ctx: &egui::Context,
     keymap: &HashMap<KeyBinding, ViewerAction>,
@@ -29,25 +69,9 @@ fn binding_pressed(ctx: &egui::Context, binding: &KeyBinding) -> bool {
 }
 
 fn key_name_to_egui(key: &str) -> Option<egui::Key> {
-    match key {
-        "Plus" => Some(egui::Key::Plus),
-        "Minus" => Some(egui::Key::Minus),
-        "Num0" => Some(egui::Key::Num0),
-        "Enter" => Some(egui::Key::Enter),
-        "F5" => Some(egui::Key::F5),
-        "R" => Some(egui::Key::R),
-        "Space" => Some(egui::Key::Space),
-        "ArrowRight" => Some(egui::Key::ArrowRight),
-        "ArrowLeft" => Some(egui::Key::ArrowLeft),
-        "Home" => Some(egui::Key::Home),
-        "End" => Some(egui::Key::End),
-        "G" => Some(egui::Key::G),
-        "C" => Some(egui::Key::C),
-        "V" => Some(egui::Key::V),
-        "F" => Some(egui::Key::F),
-        "P" => Some(egui::Key::P),
-        _ => None,
-    }
+    SUPPORTED_KEY_MAPPINGS
+        .iter()
+        .find_map(|(name, mapped)| (*name == key).then_some(*mapped))
 }
 
 #[cfg(test)]

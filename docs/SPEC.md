@@ -86,7 +86,10 @@
 
 - `input`
   - `key_mapping`
+  - `replace_default_keymap`（`true` のとき built-in default を使わず、`key_mapping` のみで解決）
   - 既定値は `src/options.rs` の `default_key_mapping()`
+  - 設定画面 `Input` タブは初心者向けの行編集（`Function / Key / Ctrl / Shift / Alt`）を提供する
+  - 現行 Input タブはキーボードイベントの割り当てを対象とする（マウス/タッチは将来拡張）
 
 ## 実装メモ
 

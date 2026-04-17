@@ -1,4 +1,4 @@
-# wml2viewer 0.0.12 preview2
+# wml2viewer 0.0.15 preview4
 
 - `egui` と `wml2` を使った軽量ネイティブ画像ビューアです。
 
@@ -64,7 +64,5 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - `system` は Windows では WIC decode までサポート。macOS system codec は今後の拡張対象です。
 - plugin を有効化すると、`avif` や `jp2` などの拡張子も filer / viewer の対象になります。
 
-## 0.0.12 の既知のIssue
-- 時間のかかる ZIP展開の問題
-- より洗練されたUIとアイコン
-- `LHA` 対応とキーバインド UI は `0.0.13` へスライドしました。
+# update log
+- 2026-04-17: 0.0.14 preview3 公開

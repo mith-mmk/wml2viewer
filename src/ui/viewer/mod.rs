@@ -10,8 +10,8 @@ use crate::filesystem::{
     resolve_start_path, set_archive_zip_workaround, spawn_filesystem_worker,
 };
 use crate::options::{
-    AppConfig, EndOfFolderOption, KeyBinding, NavigationSortOption, PluginConfig, ResourceOptions,
-    RuntimeOptions, ViewerAction,
+    AppConfig, EndOfFolderOption, InputOptions, KeyBinding, NavigationSortOption, PluginConfig,
+    ResourceOptions, RuntimeOptions, ViewerAction,
 };
 use crate::ui::i18n::{UiTextKey, tr};
 use crate::ui::menu::fileviewer::state::{
@@ -44,6 +44,7 @@ pub mod options;
 mod state;
 use options::ZoomOption;
 pub(crate) use state::SettingsDraftState;
+pub(crate) use state::KeyMappingRowDraft;
 use state::{SaveDialogState, ViewerOverlayState};
 
 const NAVIGATION_REPEAT_INTERVAL: Duration = Duration::from_millis(180);
@@ -87,6 +88,7 @@ pub(crate) struct ViewerApp {
     pub(crate) resource_locale_input: String,
     pub(crate) resource_font_paths_input: String,
     pub(crate) keymap: HashMap<KeyBinding, ViewerAction>,
+    pub(crate) input_options: InputOptions,
     pub(crate) end_of_folder: EndOfFolderOption,
     pub(crate) navigation_sort: NavigationSortOption,
     pub(crate) worker_tx: Sender<RenderCommand>,
@@ -164,6 +166,7 @@ pub(crate) struct ViewerApp {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SettingsTab {
     Viewer,
+    Input,
     Plugins,
     Resources,
     Render,
@@ -475,7 +478,31 @@ pub(crate) fn build_settings_draft(config: &AppConfig) -> SettingsDraftState {
         resource_font_paths_input: join_search_paths(&config.resources.font_paths),
         susie64_search_paths_input: join_search_paths(&config.plugins.susie64.search_path),
         ffmpeg_search_paths_input: join_search_paths(&config.plugins.ffmpeg.search_path),
+        key_mapping_rows: key_mapping_rows_from_map(&config.input.key_mapping),
+        key_mapping_error: None,
     }
+}
+
+pub(crate) fn key_mapping_rows_from_map(
+    keymap: &HashMap<KeyBinding, ViewerAction>,
+) -> Vec<KeyMappingRowDraft> {
+    let mut rows = keymap
+        .iter()
+        .map(|(binding, action)| KeyMappingRowDraft {
+            binding: binding.clone(),
+            action: *action,
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|lhs, rhs| {
+        lhs.action
+            .name()
+            .cmp(rhs.action.name())
+            .then(lhs.binding.key.cmp(&rhs.binding.key))
+            .then(lhs.binding.ctrl.cmp(&rhs.binding.ctrl))
+            .then(lhs.binding.shift.cmp(&rhs.binding.shift))
+            .then(lhs.binding.alt.cmp(&rhs.binding.alt))
+    });
+    rows
 }
 
 impl ViewerApp {
@@ -540,6 +567,9 @@ impl ViewerApp {
         };
         let (bench_scenario_name, bench_actions) = bench_automation_plan(bench_scenario.as_deref());
 
+        let input_options = config.input.clone();
+        let keymap = input_options.merged_with_defaults();
+
         let mut this = Self {
             current_navigation_path: navigation_path.clone(),
             current_path: path.clone(),
@@ -573,7 +603,8 @@ impl ViewerApp {
             loaded_font_names: loaded_fonts,
             resource_locale_input,
             resource_font_paths_input,
-            keymap: config.input.merged_with_defaults(),
+            keymap,
+            input_options,
             end_of_folder: config.navigation.end_of_folder,
             navigation_sort: config.navigation.sort,
             worker_tx,

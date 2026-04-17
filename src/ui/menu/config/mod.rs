@@ -6,7 +6,8 @@ use crate::dependent::{
 };
 use crate::drawers::affine::InterpolationAlgorithm;
 use crate::filesystem::set_archive_zip_workaround;
-use crate::options::{AppConfig, EndOfFolderOption, NavigationOptions, PaneSide};
+use crate::options::{AppConfig, EndOfFolderOption, KeyBinding, NavigationOptions, PaneSide, ViewerAction};
+use crate::ui::input::dispatch::supported_key_names;
 use crate::ui::i18n::UiTextKey;
 use crate::ui::menu::fileviewer::thumbnail::set_thumbnail_workaround;
 use crate::ui::render::interpolation_label;
@@ -14,10 +15,11 @@ use crate::ui::viewer::options::{
     BackgroundStyle, MangaSeparatorStyle, RenderScaleMode, WindowUiTheme, ZoomOption,
 };
 use crate::ui::viewer::{
-    SettingsDraftState, SettingsTab, ViewerApp, build_settings_draft, join_search_paths,
-    parse_search_paths,
+    KeyMappingRowDraft, SettingsDraftState, SettingsTab, ViewerApp, build_settings_draft,
+    join_search_paths, key_mapping_rows_from_map, parse_search_paths,
 };
 use eframe::egui;
+use std::collections::HashMap;
 
 impl ViewerApp {
     pub(crate) fn settings_ui(&mut self, ctx: &egui::Context) {
@@ -47,6 +49,7 @@ impl ViewerApp {
 
                 match self.settings_tab {
                     SettingsTab::Viewer => self.settings_viewer_tab(ui, &mut draft_state),
+                    SettingsTab::Input => self.settings_input_tab(ui, &mut draft_state),
                     SettingsTab::Plugins => self.settings_plugins_tab(ui, &mut draft_state),
                     SettingsTab::Resources => self.settings_resources_tab(ui, &mut draft_state),
                     SettingsTab::Render => self.settings_render_tab(ui, &mut draft_state),
@@ -57,7 +60,11 @@ impl ViewerApp {
 
                 ui.separator();
                 ui.horizontal(|ui| {
-                    if ui.button(self.text(UiTextKey::Apply)).clicked() {
+                    let can_apply = draft_state.key_mapping_error.is_none();
+                    if ui
+                        .add_enabled(can_apply, egui::Button::new(self.text(UiTextKey::Apply)))
+                        .clicked()
+                    {
                         apply_requested = true;
                     }
                     if ui.button(self.text(UiTextKey::Cancel)).clicked() {
@@ -103,6 +110,7 @@ impl ViewerApp {
 
     fn settings_tab_strip(&mut self, ui: &mut egui::Ui) {
         let viewer_text = self.text(UiTextKey::Viewer);
+        let input_text = "Input";
         let render_text = self.text(UiTextKey::Render);
         let window_text = self.text(UiTextKey::Window);
         let navigation_text = self.text(UiTextKey::Navigation);
@@ -111,6 +119,7 @@ impl ViewerApp {
         let system_text = self.text(UiTextKey::System);
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Viewer, viewer_text);
+            ui.selectable_value(&mut self.settings_tab, SettingsTab::Input, input_text);
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Render, render_text);
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Window, window_text);
             ui.selectable_value(
@@ -309,6 +318,85 @@ impl ViewerApp {
                 self.text(UiTextKey::Modules),
                 draft.plugins.ffmpeg.modules.len()
             ));
+        });
+    }
+
+    fn settings_input_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
+        let draft = &mut draft_state.config;
+        ui.group(|ui| {
+            ui.checkbox(
+                &mut draft.input.replace_default_keymap,
+                "Replace default key bindings",
+            );
+            ui.label("Beginner mode: select action and key from rows.");
+            ui.label("Advanced input (mouse/tablet remap) is planned; this tab currently applies keyboard bindings.");
+
+            ui.horizontal(|ui| {
+                if ui.button("Add binding").clicked() {
+                    draft_state.key_mapping_rows.push(KeyMappingRowDraft {
+                        binding: KeyBinding::new("Space"),
+                        action: ViewerAction::NextImage,
+                    });
+                }
+                if ui.button("Load current custom bindings").clicked() {
+                    draft_state.key_mapping_rows = key_mapping_rows_from_map(&self.input_options.key_mapping);
+                }
+                if ui.button("Use default only").clicked() {
+                    draft.input.key_mapping.clear();
+                    draft.input.replace_default_keymap = false;
+                    draft_state.key_mapping_rows.clear();
+                    draft_state.key_mapping_error = None;
+                }
+            });
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.strong("Function");
+                ui.add_space(8.0);
+                ui.strong("Key");
+                ui.add_space(8.0);
+                ui.strong("Ctrl");
+                ui.strong("Shift");
+                ui.strong("Alt");
+            });
+
+            let mut remove_index = None;
+            for (index, row) in draft_state.key_mapping_rows.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt(("input_action", index))
+                        .selected_text(row.action.name())
+                        .show_ui(ui, |ui| {
+                            for action in ViewerAction::all() {
+                                ui.selectable_value(&mut row.action, *action, action.name());
+                            }
+                        });
+
+                    egui::ComboBox::from_id_salt(("input_key", index))
+                        .selected_text(row.binding.key.as_str())
+                        .show_ui(ui, |ui| {
+                            for key in supported_key_names() {
+                                ui.selectable_value(&mut row.binding.key, (*key).to_string(), *key);
+                            }
+                        });
+                    ui.checkbox(&mut row.binding.ctrl, "");
+                    ui.checkbox(&mut row.binding.shift, "");
+                    ui.checkbox(&mut row.binding.alt, "");
+                    if ui.button("Remove").clicked() {
+                        remove_index = Some(index);
+                    }
+                });
+            }
+            if let Some(index) = remove_index {
+                draft_state.key_mapping_rows.remove(index);
+            }
+
+            let (map, warning) = keymap_from_rows(&draft_state.key_mapping_rows);
+            draft.input.key_mapping = map;
+            draft_state.key_mapping_error = warning;
+            ui.label(format!("Custom bindings: {}", draft.input.key_mapping.len()));
+            if let Some(warning) = draft_state.key_mapping_error.as_ref() {
+                ui.colored_label(ui.visuals().warn_fg_color, warning);
+            }
         });
     }
 
@@ -743,7 +831,8 @@ impl ViewerApp {
         self.plugins = config.plugins;
         self.storage = config.storage;
         self.runtime = config.runtime;
-        self.keymap = config.input.merged_with_defaults();
+        self.input_options = config.input;
+        self.keymap = self.input_options.merged_with_defaults();
         self.end_of_folder = config.navigation.end_of_folder;
         self.navigation_sort = config.navigation.sort;
         self.normalize_render_options();
@@ -793,13 +882,104 @@ impl ViewerApp {
             plugins: self.plugins.clone(),
             storage: self.storage.clone(),
             runtime: self.runtime.clone(),
-            input: Default::default(),
+            input: self.input_options.clone(),
             resources: self.resources.clone(),
             navigation: NavigationOptions {
                 end_of_folder: self.end_of_folder,
                 sort: self.navigation_sort,
             },
         }
+    }
+}
+
+fn keymap_from_rows(rows: &[KeyMappingRowDraft]) -> (HashMap<KeyBinding, ViewerAction>, Option<String>) {
+    let mut parsed = HashMap::new();
+    let mut duplicate_count = 0usize;
+    for row in rows {
+        if row.binding.key.trim().is_empty() {
+            continue;
+        }
+        let replaced = parsed.insert(row.binding.clone(), row.action).is_some();
+        if replaced {
+            duplicate_count += 1;
+        }
+    }
+    let warning = (duplicate_count > 0).then(|| {
+        format!(
+            "{duplicate_count} duplicate binding(s) were merged. Last row wins for the same key/modifier combo."
+        )
+    });
+    (parsed, warning)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::keymap_from_rows;
+    use crate::ui::viewer::KeyMappingRowDraft;
+    use crate::options::{KeyBinding, ViewerAction};
+
+    #[test]
+    fn builds_keymap_from_rows_with_modifiers() {
+        let rows = vec![
+            KeyMappingRowDraft {
+                binding: KeyBinding::new("Space"),
+                action: ViewerAction::NextImage,
+            },
+            KeyMappingRowDraft {
+                binding: KeyBinding::new("Space").with_shift(),
+                action: ViewerAction::PrevImage,
+            },
+            KeyMappingRowDraft {
+                binding: KeyBinding {
+                    key: "F".to_string(),
+                    shift: false,
+                    ctrl: true,
+                    alt: false,
+                },
+                action: ViewerAction::ToggleFiler,
+            },
+        ];
+        let (parsed, warning) = keymap_from_rows(&rows);
+        assert!(warning.is_none());
+
+        assert_eq!(
+            parsed.get(&KeyBinding::new("Space")),
+            Some(&ViewerAction::NextImage)
+        );
+        assert_eq!(
+            parsed.get(&KeyBinding::new("Space").with_shift()),
+            Some(&ViewerAction::PrevImage)
+        );
+        assert_eq!(
+            parsed.get(&KeyBinding {
+                key: "F".to_string(),
+                shift: false,
+                ctrl: true,
+                alt: false,
+            }),
+            Some(&ViewerAction::ToggleFiler)
+        );
+    }
+
+    #[test]
+    fn duplicate_rows_emit_warning_and_last_wins() {
+        let rows = vec![
+            KeyMappingRowDraft {
+                binding: KeyBinding::new("Space"),
+                action: ViewerAction::PrevImage,
+            },
+            KeyMappingRowDraft {
+                binding: KeyBinding::new("Space"),
+                action: ViewerAction::NextImage,
+            },
+        ];
+        let (parsed, warning) = keymap_from_rows(&rows);
+
+        assert_eq!(
+            parsed.get(&KeyBinding::new("Space")),
+            Some(&ViewerAction::NextImage)
+        );
+        assert!(warning.is_some());
     }
 }
 

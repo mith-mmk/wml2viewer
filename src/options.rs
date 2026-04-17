@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
 
 pub use crate::configs::resourses::{FontSizePreset, ResourceOptions};
 pub use crate::dependent::plugins::PluginConfig;
@@ -26,7 +27,7 @@ pub struct AppConfig {
     pub runtime: RuntimeOptions,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ViewerAction {
     ZoomIn,
     ZoomOut,
@@ -47,7 +48,60 @@ pub enum ViewerAction {
     SaveAs,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+impl ViewerAction {
+    pub const fn all() -> &'static [ViewerAction] {
+        &[
+            ViewerAction::ZoomIn,
+            ViewerAction::ZoomOut,
+            ViewerAction::ZoomReset,
+            ViewerAction::ZoomToggle,
+            ViewerAction::ToggleFullscreen,
+            ViewerAction::Reload,
+            ViewerAction::NextImage,
+            ViewerAction::PrevImage,
+            ViewerAction::FirstImage,
+            ViewerAction::LastImage,
+            ViewerAction::ToggleAnimation,
+            ViewerAction::ToggleGrayscale,
+            ViewerAction::ToggleMangaMode,
+            ViewerAction::ToggleSettings,
+            ViewerAction::ToggleFiler,
+            ViewerAction::ToggleSubfiler,
+            ViewerAction::SaveAs,
+        ]
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            ViewerAction::ZoomIn => "ZoomIn",
+            ViewerAction::ZoomOut => "ZoomOut",
+            ViewerAction::ZoomReset => "ZoomReset",
+            ViewerAction::ZoomToggle => "ZoomToggle",
+            ViewerAction::ToggleFullscreen => "ToggleFullscreen",
+            ViewerAction::Reload => "Reload",
+            ViewerAction::NextImage => "NextImage",
+            ViewerAction::PrevImage => "PrevImage",
+            ViewerAction::FirstImage => "FirstImage",
+            ViewerAction::LastImage => "LastImage",
+            ViewerAction::ToggleAnimation => "ToggleAnimation",
+            ViewerAction::ToggleGrayscale => "ToggleGrayscale",
+            ViewerAction::ToggleMangaMode => "ToggleMangaMode",
+            ViewerAction::ToggleSettings => "ToggleSettings",
+            ViewerAction::ToggleFiler => "ToggleFiler",
+            ViewerAction::ToggleSubfiler => "ToggleSubfiler",
+            ViewerAction::SaveAs => "SaveAs",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::all()
+            .iter()
+            .copied()
+            .find(|action| action.name().eq_ignore_ascii_case(name.trim()))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct KeyBinding {
     pub key: String,
     pub shift: bool,
@@ -74,11 +128,16 @@ impl KeyBinding {
 #[derive(Clone, Default)]
 pub struct InputOptions {
     pub key_mapping: HashMap<KeyBinding, ViewerAction>,
+    pub replace_default_keymap: bool,
 }
 
 impl InputOptions {
     pub fn merged_with_defaults(&self) -> HashMap<KeyBinding, ViewerAction> {
-        let mut map = default_key_mapping();
+        let mut map = if self.replace_default_keymap {
+            HashMap::new()
+        } else {
+            default_key_mapping()
+        };
         for (binding, action) in &self.key_mapping {
             map.insert(binding.clone(), action.clone());
         }
@@ -125,13 +184,41 @@ fn default_key_mapping() -> HashMap<KeyBinding, ViewerAction> {
 
 #[cfg(test)]
 mod tests {
-    use super::{KeyBinding, ViewerAction, default_key_mapping};
+    use super::{InputOptions, KeyBinding, ViewerAction, default_key_mapping};
+    use std::collections::HashMap;
 
     #[test]
     fn default_key_mapping_includes_f5_reload() {
         let map = default_key_mapping();
 
         assert_eq!(map.get(&KeyBinding::new("F5")), Some(&ViewerAction::Reload));
+    }
+
+    #[test]
+    fn replace_default_keymap_uses_only_custom_bindings() {
+        let mut key_mapping = HashMap::new();
+        key_mapping.insert(KeyBinding::new("Space"), ViewerAction::PrevImage);
+        let options = InputOptions {
+            key_mapping,
+            replace_default_keymap: true,
+        };
+
+        let merged = options.merged_with_defaults();
+        assert_eq!(merged.len(), 1);
+        assert_eq!(
+            merged.get(&KeyBinding::new("Space")),
+            Some(&ViewerAction::PrevImage)
+        );
+        assert!(!merged.contains_key(&KeyBinding::new("ArrowRight")));
+    }
+
+    #[test]
+    fn viewer_action_from_name_is_case_insensitive() {
+        assert_eq!(
+            ViewerAction::from_name("togglefiler"),
+            Some(ViewerAction::ToggleFiler)
+        );
+        assert!(ViewerAction::from_name("unknown").is_none());
     }
 }
 

@@ -1,4 +1,4 @@
-# wml2viewer 0.0.12 preview
+# wml2viewer 0.0.15 preview4
 
 A lightweight native image viewer built with `egui` and `wml2`.
 
@@ -61,7 +61,5 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
   - macOS: planned
 - Enabling providers allows formats like `avif` and `jp2` to be handled
 
-### Known Issues (0.0.12)
-- waiting indicator is still too minimal; could be replaced with clearer messages like now loading
-- LHA support and keybinding UI are postponed to 0.0.13
-- Extension check issue (fallback to WML0.0.19)
+# update log
+- 2026-04-17: 0.0.14 preview3 released

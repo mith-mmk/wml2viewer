@@ -1,5 +1,5 @@
 use crate::drawers::image::SaveFormat;
-use crate::options::AppConfig;
+use crate::options::{AppConfig, KeyBinding, ViewerAction};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
@@ -65,4 +65,12 @@ pub(crate) struct SettingsDraftState {
     pub(crate) resource_font_paths_input: String,
     pub(crate) susie64_search_paths_input: String,
     pub(crate) ffmpeg_search_paths_input: String,
+    pub(crate) key_mapping_rows: Vec<KeyMappingRowDraft>,
+    pub(crate) key_mapping_error: Option<String>,
+}
+
+#[derive(Clone)]
+pub(crate) struct KeyMappingRowDraft {
+    pub(crate) binding: KeyBinding,
+    pub(crate) action: ViewerAction,
 }

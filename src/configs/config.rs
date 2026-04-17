@@ -9,9 +9,9 @@ use crate::dependent::default_config_dir;
 use crate::dependent::plugins::PluginConfig;
 use crate::drawers::affine::InterpolationAlgorithm;
 use crate::options::{
-    AppConfig, EndOfFolderOption, FontSizePreset, MangaSeparatorOptions, MangaSeparatorStyle,
-    NavigationSortOption, PaneSide, RenderScaleMode, ResourceOptions, RuntimeOptions,
-    StorageOptions, WindowUiTheme,
+    AppConfig, EndOfFolderOption, FontSizePreset, InputOptions, KeyBinding,
+    MangaSeparatorOptions, MangaSeparatorStyle, NavigationSortOption, PaneSide, RenderScaleMode,
+    ResourceOptions, RuntimeOptions, StorageOptions, ViewerAction, WindowUiTheme,
 };
 use crate::ui::viewer::options::{
     BackgroundStyle, RenderOptions, ViewerOptions, WindowOptions, WindowSize, WindowStartPosition,
@@ -30,6 +30,7 @@ struct ConfigFile {
     filesystem: FilesystemConfigFile,
     plugins: PluginConfig,
     storage: StorageConfigFile,
+    input: InputConfigFile,
     navigation: NavigationConfigFile,
     runtime: RuntimeConfigFile,
 }
@@ -270,6 +271,19 @@ struct StorageConfigFile {
     path: Option<PathBuf>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(default)]
+struct InputConfigFile {
+    replace_default_keymap: bool,
+    key_mapping: Vec<KeyMappingConfigFile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct KeyMappingConfigFile {
+    binding: KeyBinding,
+    action: ViewerAction,
+}
+
 impl Default for StorageConfigFile {
     fn default() -> Self {
         Self {
@@ -455,6 +469,7 @@ impl From<ConfigFile> for AppConfig {
         config.resources = value.resources.into();
         config.plugins = value.plugins;
         config.storage = value.storage.into();
+        config.input = value.input.into();
         config.navigation.end_of_folder = value.navigation.end_of_folder.into();
         config.navigation.sort = value.navigation.sort.into();
         config.runtime = value.runtime.into();
@@ -489,6 +504,7 @@ impl ConfigFile {
             },
             plugins: value.plugins,
             storage: value.storage.into(),
+            input: value.input.into(),
             navigation: NavigationConfigFile {
                 end_of_folder: value.navigation.end_of_folder.into(),
                 sort: value.navigation.sort.into(),
@@ -812,6 +828,39 @@ impl From<StorageOptions> for StorageConfigFile {
         Self {
             path_record: value.path_record,
             path: value.path,
+        }
+    }
+}
+
+impl From<InputConfigFile> for InputOptions {
+    fn from(value: InputConfigFile) -> Self {
+        let mut key_mapping = std::collections::HashMap::new();
+        for row in value.key_mapping {
+            key_mapping.insert(row.binding, row.action);
+        }
+        Self {
+            key_mapping,
+            replace_default_keymap: value.replace_default_keymap,
+        }
+    }
+}
+
+impl From<InputOptions> for InputConfigFile {
+    fn from(value: InputOptions) -> Self {
+        let mut key_mapping = value
+            .key_mapping
+            .into_iter()
+            .map(|(binding, action)| KeyMappingConfigFile { binding, action })
+            .collect::<Vec<_>>();
+        key_mapping.sort_by(|lhs, rhs| {
+            lhs.action
+                .name()
+                .cmp(rhs.action.name())
+                .then(lhs.binding.key.cmp(&rhs.binding.key))
+        });
+        Self {
+            replace_default_keymap: value.replace_default_keymap,
+            key_mapping,
         }
     }
 }
