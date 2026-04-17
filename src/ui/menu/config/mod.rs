@@ -977,7 +977,7 @@ fn viewer_action_label(viewer: &ViewerApp, action: ViewerAction) -> &'static str
         ViewerAction::ToggleFullscreen => viewer.text(UiTextKey::Fullscreen),
         ViewerAction::Reload => viewer.text(UiTextKey::ReloadAction),
         ViewerAction::NextImage => viewer.text(UiTextKey::NextImageAction),
-        ViewerAction::PrevImage => viewer.text(UiTextKey::Previous),
+        ViewerAction::PrevImage => viewer.text(UiTextKey::PreviousImageAction),
         ViewerAction::FirstImage => viewer.text(UiTextKey::FirstImageAction),
         ViewerAction::LastImage => viewer.text(UiTextKey::LastImageAction),
         ViewerAction::ToggleAnimation => viewer.text(UiTextKey::ToggleAnimationAction),
