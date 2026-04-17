@@ -88,8 +88,30 @@
   - `key_mapping`
   - `replace_default_keymap`（`true` のとき built-in default を使わず、`key_mapping` のみで解決）
   - 既定値は `src/options.rs` の `default_key_mapping()`
-  - 設定画面 `Input` タブは初心者向けの行編集（`Function / Key / Ctrl / Shift / Alt`）を提供する
-  - 現行 Input タブはキーボードイベントの割り当てを対象とする（マウス/タッチは将来拡張）
+  - 設定画面 `Input` タブは初心者向けの行編集（`Function / Key / CTRL / ALT / SHIFT`）を提供する
+  - `Function` はリスト選択系UI（現在はドロップダウン）で切り替える
+  - `Key`、`CTRL`、`ALT`、`SHIFT` は各入力の真上にラベルを配置する
+  - `Key` 欄はキー入力イベントを直接拾って入力できる（キーボード + マウスボタン + ホイール）
+  - マウス入力は `MousePrimary` / `MouseSecondary` / `MouseMiddle` / `MouseExtra1` / `MouseExtra2` / `MouseWheelUp` / `MouseWheelDown` を扱う
+  - 同一キー+修飾キーの重複は UI 上で警告表示し、適用時は後勝ちで解決する
+
+### ファンクション追加手順（実装者向け）
+
+新しい viewer ファンクションを追加するときは、以下を編集する。
+
+1. `src/options.rs`
+   - `ViewerAction` に新規 variant を追加
+   - 必要なら `default_key_mapping()` に初期バインドを追加
+2. `src/ui/input/mod.rs`
+   - `ViewerApp::apply_viewer_action()` に処理本体を追加
+3. `src/ui/menu/config/mod.rs`
+   - `viewer_action_label()` に表示ラベルの割り当てを追加
+4. `src/configs/resourses/text.rs`
+   - `UiTextKey` にラベルキーを追加し、`en()` / `ja()` を実装
+5. （必要に応じて）`src/ui/menu/fileviewer/mod.rs`
+   - 右クリックメニューに該当アクションを追加
+
+これで `Input` タブのファンクション一覧、実行処理、ローカライズ、右クリックメニューの整合が取れる。
 
 ## 実装メモ
 
@@ -137,7 +159,7 @@
 ## 代表的な動作
 
 - Viewer
-  - 単一画像、zip、`.wml.txt` を画像一覧として扱う
+  - 単一画像、zip、`.wmltxt` を画像一覧として扱う
   - manga mode で 2 枚表示に対応する
   - preload / companion / overlay を worker 分離する
 

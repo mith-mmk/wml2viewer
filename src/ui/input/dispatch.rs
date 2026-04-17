@@ -2,120 +2,13 @@ use crate::options::{KeyBinding, ViewerAction};
 use eframe::egui;
 use std::collections::HashMap;
 
-const SUPPORTED_KEY_NAMES: &[&str] = &[
-    "ArrowDown",
-    "ArrowLeft",
-    "ArrowRight",
-    "ArrowUp",
-    "Escape",
-    "Tab",
-    "Backspace",
-    "Enter",
-    "Space",
-    "Insert",
-    "Delete",
-    "Home",
-    "End",
-    "PageUp",
-    "PageDown",
-    "Copy",
-    "Cut",
-    "Paste",
-    "Colon",
-    "Comma",
-    "Backslash",
-    "Slash",
-    "Pipe",
-    "Questionmark",
-    "Exclamationmark",
-    "OpenBracket",
-    "CloseBracket",
-    "OpenCurlyBracket",
-    "CloseCurlyBracket",
-    "Backtick",
-    "Minus",
-    "Period",
-    "Plus",
-    "Equals",
-    "Semicolon",
-    "Quote",
-    "Num0",
-    "Num1",
-    "Num2",
-    "Num3",
-    "Num4",
-    "Num5",
-    "Num6",
-    "Num7",
-    "Num8",
-    "Num9",
-    "A",
-    "B",
-    "C",
-    "D",
-    "E",
-    "F",
-    "G",
-    "H",
-    "I",
-    "J",
-    "K",
-    "L",
-    "M",
-    "N",
-    "O",
-    "P",
-    "Q",
-    "R",
-    "S",
-    "T",
-    "U",
-    "V",
-    "W",
-    "X",
-    "Y",
-    "Z",
-    "F1",
-    "F2",
-    "F3",
-    "F4",
-    "F5",
-    "F6",
-    "F7",
-    "F8",
-    "F9",
-    "F10",
-    "F11",
-    "F12",
-    "F13",
-    "F14",
-    "F15",
-    "F16",
-    "F17",
-    "F18",
-    "F19",
-    "F20",
-    "F21",
-    "F22",
-    "F23",
-    "F24",
-    "F25",
-    "F26",
-    "F27",
-    "F28",
-    "F29",
-    "F30",
-    "F31",
-    "F32",
-    "F33",
-    "F34",
-    "F35",
-    "BrowserBack",
-];
-
-pub(crate) fn supported_key_names() -> &'static [&'static str] {
-    SUPPORTED_KEY_NAMES
-}
+pub(crate) const MOUSE_PRIMARY_BINDING: &str = "MousePrimary";
+pub(crate) const MOUSE_SECONDARY_BINDING: &str = "MouseSecondary";
+pub(crate) const MOUSE_MIDDLE_BINDING: &str = "MouseMiddle";
+pub(crate) const MOUSE_EXTRA1_BINDING: &str = "MouseExtra1";
+pub(crate) const MOUSE_EXTRA2_BINDING: &str = "MouseExtra2";
+pub(crate) const MOUSE_WHEEL_UP_BINDING: &str = "MouseWheelUp";
+pub(crate) const MOUSE_WHEEL_DOWN_BINDING: &str = "MouseWheelDown";
 
 pub(crate) fn collect_triggered_actions(
     ctx: &egui::Context,
@@ -129,12 +22,11 @@ pub(crate) fn collect_triggered_actions(
 
 fn binding_pressed(ctx: &egui::Context, binding: &KeyBinding) -> bool {
     ctx.input(|i| {
-        let modifiers = i.modifiers;
-        if modifiers.shift != binding.shift
-            || modifiers.ctrl != binding.ctrl
-            || modifiers.alt != binding.alt
-        {
+        if !modifiers_match(i.modifiers, binding) {
             return false;
+        }
+        if binding_mouse_event_pressed(i, binding) {
+            return true;
         }
         match key_name_to_egui(&binding.key) {
             Some(key) => i.key_pressed(key),
@@ -143,13 +35,66 @@ fn binding_pressed(ctx: &egui::Context, binding: &KeyBinding) -> bool {
     })
 }
 
+fn modifiers_match(modifiers: egui::Modifiers, binding: &KeyBinding) -> bool {
+    modifiers.shift == binding.shift
+        && modifiers.ctrl == binding.ctrl
+        && modifiers.alt == binding.alt
+}
+
+fn binding_mouse_event_pressed(i: &egui::InputState, binding: &KeyBinding) -> bool {
+    i.events.iter().any(|event| match event {
+        egui::Event::PointerButton {
+            button,
+            pressed: true,
+            modifiers,
+            ..
+        } => {
+            if !modifiers_match(*modifiers, binding) {
+                return false;
+            }
+            matches_pointer_binding(binding.key.trim(), *button)
+        }
+        egui::Event::MouseWheel {
+            delta, modifiers, ..
+        } => {
+            if !modifiers_match(*modifiers, binding) {
+                return false;
+            }
+            let key = binding.key.trim();
+            (key.eq_ignore_ascii_case(MOUSE_WHEEL_UP_BINDING) && delta.y < 0.0)
+                || (key.eq_ignore_ascii_case(MOUSE_WHEEL_DOWN_BINDING) && delta.y > 0.0)
+        }
+        _ => false,
+    })
+}
+
+fn matches_pointer_binding(name: &str, button: egui::PointerButton) -> bool {
+    match button {
+        egui::PointerButton::Primary => name.eq_ignore_ascii_case(MOUSE_PRIMARY_BINDING),
+        egui::PointerButton::Secondary => name.eq_ignore_ascii_case(MOUSE_SECONDARY_BINDING),
+        egui::PointerButton::Middle => name.eq_ignore_ascii_case(MOUSE_MIDDLE_BINDING),
+        egui::PointerButton::Extra1 => name.eq_ignore_ascii_case(MOUSE_EXTRA1_BINDING),
+        egui::PointerButton::Extra2 => name.eq_ignore_ascii_case(MOUSE_EXTRA2_BINDING),
+    }
+}
+
+pub(crate) fn pointer_button_binding_name(button: egui::PointerButton) -> &'static str {
+    match button {
+        egui::PointerButton::Primary => MOUSE_PRIMARY_BINDING,
+        egui::PointerButton::Secondary => MOUSE_SECONDARY_BINDING,
+        egui::PointerButton::Middle => MOUSE_MIDDLE_BINDING,
+        egui::PointerButton::Extra1 => MOUSE_EXTRA1_BINDING,
+        egui::PointerButton::Extra2 => MOUSE_EXTRA2_BINDING,
+    }
+}
+
 fn key_name_to_egui(key: &str) -> Option<egui::Key> {
     egui::Key::from_name(key.trim())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{key_name_to_egui, supported_key_names};
+    use super::{MOUSE_PRIMARY_BINDING, key_name_to_egui, pointer_button_binding_name};
     use eframe::egui;
 
     #[test]
@@ -160,9 +105,17 @@ mod tests {
     #[test]
     fn supports_more_than_101_keyboard_bindings() {
         assert!(
-            supported_key_names().len() >= 101,
+            egui::Key::ALL.len() >= 101,
             "supported key count = {}",
-            supported_key_names().len()
+            egui::Key::ALL.len()
+        );
+    }
+
+    #[test]
+    fn pointer_binding_name_primary() {
+        assert_eq!(
+            pointer_button_binding_name(egui::PointerButton::Primary),
+            MOUSE_PRIMARY_BINDING
         );
     }
 }

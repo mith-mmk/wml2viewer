@@ -43,8 +43,8 @@ use std::time::{Duration, Instant};
 pub mod options;
 mod state;
 use options::ZoomOption;
-pub(crate) use state::SettingsDraftState;
 pub(crate) use state::KeyMappingRowDraft;
+pub(crate) use state::SettingsDraftState;
 use state::{SaveDialogState, ViewerOverlayState};
 
 const NAVIGATION_REPEAT_INTERVAL: Duration = Duration::from_millis(180);

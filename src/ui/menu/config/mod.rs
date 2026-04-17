@@ -6,9 +6,13 @@ use crate::dependent::{
 };
 use crate::drawers::affine::InterpolationAlgorithm;
 use crate::filesystem::set_archive_zip_workaround;
-use crate::options::{AppConfig, EndOfFolderOption, KeyBinding, NavigationOptions, PaneSide, ViewerAction};
-use crate::ui::input::dispatch::supported_key_names;
+use crate::options::{
+    AppConfig, EndOfFolderOption, KeyBinding, NavigationOptions, PaneSide, ViewerAction,
+};
 use crate::ui::i18n::UiTextKey;
+use crate::ui::input::dispatch::{
+    MOUSE_WHEEL_DOWN_BINDING, MOUSE_WHEEL_UP_BINDING, pointer_button_binding_name,
+};
 use crate::ui::menu::fileviewer::thumbnail::set_thumbnail_workaround;
 use crate::ui::render::interpolation_label;
 use crate::ui::viewer::options::{
@@ -338,7 +342,8 @@ impl ViewerApp {
                     .button(self.text(UiTextKey::LoadCurrentCustomBindings))
                     .clicked()
                 {
-                    draft_state.key_mapping_rows = key_mapping_rows_from_map(&self.input_options.key_mapping);
+                    draft_state.key_mapping_rows =
+                        key_mapping_rows_from_map(&self.input_options.key_mapping);
                 }
                 if ui.button(self.text(UiTextKey::UseDefaultOnly)).clicked() {
                     draft.input.key_mapping.clear();
@@ -349,79 +354,73 @@ impl ViewerApp {
             });
 
             ui.separator();
-            egui::Grid::new("input_mapping_grid_header")
-                .num_columns(6)
-                .spacing([10.0, 6.0])
-                .show(ui, |ui| {
-                    ui.set_min_width(180.0);
-                    ui.strong(self.text(UiTextKey::FunctionLabel));
-                    ui.set_min_width(200.0);
-                    ui.strong(self.text(UiTextKey::KeyCaptureLabel));
-                    ui.strong(self.text(UiTextKey::CtrlLabel));
-                    ui.strong(self.text(UiTextKey::ShiftLabel));
-                    ui.strong(self.text(UiTextKey::AltLabel));
-                    ui.label("");
-                    ui.end_row();
-                });
-
             let mut remove_index = None;
             let duplicate_rows = duplicate_binding_row_indices(&draft_state.key_mapping_rows);
-            egui::Grid::new("input_mapping_grid_rows")
-                .num_columns(6)
-                .spacing([10.0, 6.0])
-                .show(ui, |ui| {
-                    for (index, row) in draft_state.key_mapping_rows.iter_mut().enumerate() {
-                        ui.set_min_width(180.0);
-                    egui::ComboBox::from_id_salt(("input_action", index))
-                        .width(170.0)
-                        .selected_text(viewer_action_label(self, row.action))
-                        .show_ui(ui, |ui| {
-                            for action in ViewerAction::all() {
-                                ui.selectable_value(
-                                    &mut row.action,
-                                    *action,
-                                    viewer_action_label(self, *action),
-                                );
-                            }
-                        });
+            for (index, row) in draft_state.key_mapping_rows.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.strong(self.text(UiTextKey::FunctionLabel));
+                        egui::ComboBox::from_id_salt(("input_action", index))
+                            .width(180.0)
+                            .selected_text(viewer_action_label(self, row.action))
+                            .show_ui(ui, |ui| {
+                                for action in ViewerAction::all() {
+                                    ui.selectable_value(
+                                        &mut row.action,
+                                        *action,
+                                        viewer_action_label(self, *action),
+                                    );
+                                }
+                            });
+                    });
 
-                    ui.set_min_width(200.0);
-                    let key_response = ui.add(
-                        egui::TextEdit::singleline(&mut row.binding.key)
-                            .desired_width(180.0)
-                            .hint_text(self.text(UiTextKey::PressKeyToAssign)),
-                    );
-                    if duplicate_rows.contains(&index) {
-                        let rect = key_response.rect.expand(1.0);
-                        ui.painter().rect_stroke(
-                            rect,
-                            2.0,
-                            egui::Stroke::new(1.0, ui.visuals().warn_fg_color),
-                            egui::StrokeKind::Outside,
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.strong(self.text(UiTextKey::KeyCaptureLabel));
+                        let key_response = ui.add(
+                            egui::TextEdit::singleline(&mut row.binding.key)
+                                .desired_width(180.0)
+                                .hint_text(self.text(UiTextKey::PressKeyToAssign)),
                         );
-                    }
-                    if key_response.has_focus() {
-                        if let Some(pressed_key_name) = capture_pressed_key_name(ui.ctx()) {
-                            row.binding.key = pressed_key_name;
+                        if duplicate_rows.contains(&index) {
+                            let rect = key_response.rect.expand(1.0);
+                            ui.painter().rect_stroke(
+                                rect,
+                                2.0,
+                                egui::Stroke::new(1.0, ui.visuals().warn_fg_color),
+                                egui::StrokeKind::Outside,
+                            );
                         }
-                    }
-                    egui::ComboBox::from_id_salt(("input_key_select", index))
-                        .width(26.0)
-                        .selected_text("▼")
-                        .show_ui(ui, |ui| {
-                            for key in supported_key_names() {
-                                ui.selectable_value(&mut row.binding.key, (*key).to_string(), *key);
+                        if key_response.has_focus() && !key_response.gained_focus() {
+                            if let Some(pressed_key_name) = capture_pressed_key_name(ui.ctx()) {
+                                row.binding.key = pressed_key_name;
                             }
-                        });
-                    ui.checkbox(&mut row.binding.ctrl, "");
-                    ui.checkbox(&mut row.binding.shift, "");
-                    ui.checkbox(&mut row.binding.alt, "");
-                    if ui.button(self.text(UiTextKey::Remove)).clicked() {
-                        remove_index = Some(index);
-                    }
-                        ui.end_row();
-                    }
+                        }
+                    });
+
+                    ui.add_space(6.0);
+                    ui.vertical(|ui| {
+                        ui.strong(self.text(UiTextKey::CtrlLabel));
+                        ui.checkbox(&mut row.binding.ctrl, "");
+                    });
+                    ui.vertical(|ui| {
+                        ui.strong(self.text(UiTextKey::AltLabel));
+                        ui.checkbox(&mut row.binding.alt, "");
+                    });
+                    ui.vertical(|ui| {
+                        ui.strong(self.text(UiTextKey::ShiftLabel));
+                        ui.checkbox(&mut row.binding.shift, "");
+                    });
+                    ui.add_space(6.0);
+                    ui.vertical(|ui| {
+                        ui.add_space(18.0);
+                        if ui.button(self.text(UiTextKey::Remove)).clicked() {
+                            remove_index = Some(index);
+                        }
+                    });
                 });
+                ui.separator();
+            }
             if let Some(index) = remove_index {
                 draft_state.key_mapping_rows.remove(index);
             }
@@ -947,12 +946,8 @@ fn keymap_from_rows(
         }
         parsed.insert(row.binding.clone(), row.action);
     }
-    let warning = (!duplicate_rows.is_empty()).then(|| {
-        format!(
-            "{} duplicate binding(s) detected",
-            duplicate_rows.len()
-        )
-    });
+    let warning = (!duplicate_rows.is_empty())
+        .then(|| format!("{} duplicate binding(s) detected", duplicate_rows.len()));
     (parsed, warning)
 }
 
@@ -982,16 +977,16 @@ fn viewer_action_label(viewer: &ViewerApp, action: ViewerAction) -> &'static str
         ViewerAction::ToggleFullscreen => viewer.text(UiTextKey::Fullscreen),
         ViewerAction::Reload => viewer.text(UiTextKey::ReloadAction),
         ViewerAction::NextImage => viewer.text(UiTextKey::NextImageAction),
-        ViewerAction::PrevImage => viewer.text(UiTextKey::PrevImageAction),
+        ViewerAction::PrevImage => viewer.text(UiTextKey::Previous),
         ViewerAction::FirstImage => viewer.text(UiTextKey::FirstImageAction),
         ViewerAction::LastImage => viewer.text(UiTextKey::LastImageAction),
         ViewerAction::ToggleAnimation => viewer.text(UiTextKey::ToggleAnimationAction),
         ViewerAction::ToggleGrayscale => viewer.text(UiTextKey::ToggleGrayscaleAction),
-        ViewerAction::ToggleMangaMode => viewer.text(UiTextKey::ToggleMangaModeAction),
-        ViewerAction::ToggleSettings => viewer.text(UiTextKey::ToggleSettingsAction),
-        ViewerAction::ToggleFiler => viewer.text(UiTextKey::ToggleFilerAction),
+        ViewerAction::ToggleMangaMode => viewer.text(UiTextKey::ToggleManga),
+        ViewerAction::ToggleSettings => viewer.text(UiTextKey::ToggleSettings),
+        ViewerAction::ToggleFiler => viewer.text(UiTextKey::ToggleFiler),
         ViewerAction::ToggleSubfiler => viewer.text(UiTextKey::ToggleSubfilerAction),
-        ViewerAction::SaveAs => viewer.text(UiTextKey::SaveAsAction),
+        ViewerAction::SaveAs => viewer.text(UiTextKey::SaveAs),
     }
 }
 
@@ -1004,6 +999,17 @@ fn capture_pressed_key_name(ctx: &egui::Context) -> Option<String> {
                 repeat: false,
                 ..
             } => Some(key.name().to_string()),
+            egui::Event::PointerButton {
+                button,
+                pressed: true,
+                ..
+            } => Some(pointer_button_binding_name(*button).to_string()),
+            egui::Event::MouseWheel { delta, .. } if delta.y < 0.0 => {
+                Some(MOUSE_WHEEL_UP_BINDING.to_string())
+            }
+            egui::Event::MouseWheel { delta, .. } if delta.y > 0.0 => {
+                Some(MOUSE_WHEEL_DOWN_BINDING.to_string())
+            }
             _ => None,
         })
     })
@@ -1012,8 +1018,8 @@ fn capture_pressed_key_name(ctx: &egui::Context) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{capture_pressed_key_name, duplicate_binding_row_indices, keymap_from_rows};
-    use crate::ui::viewer::KeyMappingRowDraft;
     use crate::options::{KeyBinding, ViewerAction};
+    use crate::ui::viewer::KeyMappingRowDraft;
     use eframe::egui;
 
     #[test]

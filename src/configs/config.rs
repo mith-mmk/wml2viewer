@@ -9,9 +9,9 @@ use crate::dependent::default_config_dir;
 use crate::dependent::plugins::PluginConfig;
 use crate::drawers::affine::InterpolationAlgorithm;
 use crate::options::{
-    AppConfig, EndOfFolderOption, FontSizePreset, InputOptions, KeyBinding,
-    MangaSeparatorOptions, MangaSeparatorStyle, NavigationSortOption, PaneSide, RenderScaleMode,
-    ResourceOptions, RuntimeOptions, StorageOptions, ViewerAction, WindowUiTheme,
+    AppConfig, EndOfFolderOption, FontSizePreset, InputOptions, KeyBinding, MangaSeparatorOptions,
+    MangaSeparatorStyle, NavigationSortOption, PaneSide, RenderScaleMode, ResourceOptions,
+    RuntimeOptions, StorageOptions, ViewerAction, WindowUiTheme,
 };
 use crate::ui::viewer::options::{
     BackgroundStyle, RenderOptions, ViewerOptions, WindowOptions, WindowSize, WindowStartPosition,

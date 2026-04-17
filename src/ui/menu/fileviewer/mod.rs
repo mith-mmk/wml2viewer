@@ -31,34 +31,22 @@ impl ViewerApp {
             .fixed_pos(self.left_menu_pos)
             .open(&mut open)
             .show(ctx, |ui| {
-                if ui.button(self.text(UiTextKey::Next)).clicked() {
-                    let _ = self.next_image();
+                ui.strong(self.text(UiTextKey::MenuFileSection));
+                if ui.button(self.text(UiTextKey::ReloadCurrent)).clicked() {
+                    let _ = self.reload_current();
                     self.show_left_menu = false;
                 }
-                if ui.button(self.text(UiTextKey::Previous)).clicked() {
-                    let _ = self.prev_image();
-                    self.show_left_menu = false;
-                }
-                if ui.button(self.text(UiTextKey::ToggleSettings)).clicked() {
-                    if self.show_settings {
-                        self.close_settings_dialog();
-                    } else {
-                        self.open_settings_dialog();
-                    }
-                    self.show_left_menu = false;
-                }
-                if ui.button(self.text(UiTextKey::ToggleFiler)).clicked() {
-                    self.set_show_filer(!self.show_filer);
-                    self.pending_fit_recalc = true;
-                    self.show_left_menu = false;
-                }
-                if ui.button(self.text(UiTextKey::ToggleManga)).clicked() {
-                    self.options.manga_mode = !self.options.manga_mode;
-                    self.pending_fit_recalc = true;
-                    self.show_left_menu = false;
-                }
+                ui.horizontal(|ui| {
+                    ui.add_enabled(false, egui::Button::new(self.text(UiTextKey::MoveItem)));
+                    ui.add_enabled(false, egui::Button::new(self.text(UiTextKey::CopyItem)));
+                    ui.add_enabled(false, egui::Button::new(self.text(UiTextKey::DeleteItem)));
+                    ui.add_enabled(false, egui::Button::new(self.text(UiTextKey::RenameItem)));
+                });
+                ui.label(egui::RichText::new(self.text(UiTextKey::NotImplemented)).small());
+
                 ui.separator();
-                ui.label(self.text(UiTextKey::SaveAs));
+                ui.strong(self.text(UiTextKey::MenuImageSection));
+                ui.separator();
                 for format in SaveFormat::all() {
                     if ui
                         .selectable_label(self.save_dialog.format == format, format.to_string())
@@ -69,8 +57,98 @@ impl ViewerApp {
                         self.show_left_menu = false;
                     }
                 }
+
+                ui.separator();
+                ui.strong(self.text(UiTextKey::MenuViewSection));
+                if ui.button(self.text(UiTextKey::ZoomInAction)).clicked() {
+                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomIn);
+                    self.show_left_menu = false;
+                }
+                if ui.button(self.text(UiTextKey::ZoomOutAction)).clicked() {
+                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomOut);
+                    self.show_left_menu = false;
+                }
+                if ui.button(self.text(UiTextKey::ZoomResetAction)).clicked() {
+                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomReset);
+                    self.show_left_menu = false;
+                }
+                if ui.button(self.text(UiTextKey::ZoomToggleAction)).clicked() {
+                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomToggle);
+                    self.show_left_menu = false;
+                }
+                if ui.button(self.text(UiTextKey::ToggleManga)).clicked() {
+                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleMangaMode);
+                    self.show_left_menu = false;
+                }
+
+                ui.separator();
+                ui.strong(self.text(UiTextKey::MenuInfoSection));
+                if ui.button(self.text(UiTextKey::ImageInformation)).clicked() {
+                    self.overlay.alert_message = Some(self.current_image_info_text());
+                    self.show_left_menu = false;
+                }
+
+                ui.separator();
+                ui.strong(self.text(UiTextKey::MenuSettingsSection));
+                if ui.button(self.text(UiTextKey::ToggleSettings)).clicked() {
+                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleSettings);
+                    self.show_left_menu = false;
+                }
+                if ui.button(self.text(UiTextKey::ToggleFiler)).clicked() {
+                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleFiler);
+                    self.show_left_menu = false;
+                }
+                if ui
+                    .button(self.text(UiTextKey::ToggleSubfilerAction))
+                    .clicked()
+                {
+                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleSubfiler);
+                    self.show_left_menu = false;
+                }
+
+                ui.separator();
+                ui.strong(self.text(UiTextKey::MenuAboutSection));
+                if ui.button(self.text(UiTextKey::MenuAboutSection)).clicked() {
+                    self.overlay.alert_message = Some(self.about_text());
+                    self.show_left_menu = false;
+                }
             });
         self.show_left_menu = open;
+    }
+
+    fn current_image_info_text(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(self.text(UiTextKey::ImageInformation).to_string());
+        lines.push(format!("Path: {}", self.current_path.display()));
+        lines.push(format!(
+            "Resolution: {} x {}",
+            self.source.canvas.width(),
+            self.source.canvas.height()
+        ));
+        lines.push(format!("Frames: {}", self.source.frame_count()));
+        if let Ok(meta) = std::fs::metadata(&self.current_path) {
+            lines.push(format!("Size: {}", format_human_size(meta.len())));
+            if let Ok(modified) = meta.modified() {
+                lines.push(format!(
+                    "Modified: {}",
+                    format_system_time(modified, &self.applied_locale)
+                ));
+            }
+        }
+        lines.join("\n")
+    }
+
+    fn about_text(&self) -> String {
+        format!(
+            "{}\n{}: {}\n{}: {}\n{}: {}",
+            crate::get_prograname(),
+            self.text(UiTextKey::Version),
+            crate::get_version(),
+            self.text(UiTextKey::Author),
+            crate::get_auther(),
+            self.text(UiTextKey::Copyright),
+            crate::get_copyright(),
+        )
     }
 
     pub(crate) fn filer_ui(&mut self, ctx: &egui::Context) {

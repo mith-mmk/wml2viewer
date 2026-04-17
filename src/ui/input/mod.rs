@@ -10,7 +10,7 @@ use std::time::Instant;
 enum PointerIntent {
     ToggleFit,
     NextImageAfterDelay,
-    ToggleSettings,
+    OpenContextMenu(egui::Pos2),
 }
 
 impl ViewerApp {
@@ -51,75 +51,79 @@ impl ViewerApp {
                     "source": "keyboard",
                 }),
             );
-            match action {
-                ViewerAction::ZoomIn => {
-                    let _ = self.set_zoom(self.zoom * 1.25);
+            self.apply_viewer_action(ctx, action);
+        }
+    }
+
+    pub(crate) fn apply_viewer_action(&mut self, ctx: &egui::Context, action: ViewerAction) {
+        match action {
+            ViewerAction::ZoomIn => {
+                let _ = self.set_zoom(self.zoom * 1.25);
+            }
+            ViewerAction::ZoomOut => {
+                let _ = self.set_zoom(self.zoom / 1.25);
+            }
+            ViewerAction::ZoomReset => {
+                let _ = self.set_zoom(1.0);
+            }
+            ViewerAction::ZoomToggle => {
+                let _ = self.toggle_zoom();
+            }
+            ViewerAction::ToggleFullscreen => {
+                let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                self.window_options.fullscreen = !fullscreen;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+            }
+            ViewerAction::Reload => {
+                if self.show_filer || self.show_subfiler {
+                    self.refresh_current_filer_directory();
+                } else {
+                    let _ = self.reload_current();
                 }
-                ViewerAction::ZoomOut => {
-                    let _ = self.set_zoom(self.zoom / 1.25);
+            }
+            ViewerAction::NextImage => {
+                let _ = self.next_image();
+            }
+            ViewerAction::PrevImage => {
+                let _ = self.prev_image();
+            }
+            ViewerAction::FirstImage => {
+                let _ = self.first_image();
+            }
+            ViewerAction::LastImage => {
+                let _ = self.last_image();
+            }
+            ViewerAction::ToggleAnimation => {
+                self.options.animation = !self.options.animation;
+                self.current_frame = 0;
+                self.last_frame_at = Instant::now();
+                self.upload_current_frame();
+            }
+            ViewerAction::ToggleGrayscale => {
+                self.options.grayscale = !self.options.grayscale;
+                self.upload_current_frame();
+                self.pending_fit_recalc = true;
+            }
+            ViewerAction::ToggleMangaMode => {
+                self.options.manga_mode = !self.options.manga_mode;
+                self.pending_fit_recalc = true;
+            }
+            ViewerAction::ToggleSettings => {
+                if self.show_settings {
+                    self.close_settings_dialog();
+                } else {
+                    self.open_settings_dialog();
                 }
-                ViewerAction::ZoomReset => {
-                    let _ = self.set_zoom(1.0);
-                }
-                ViewerAction::ZoomToggle => {
-                    let _ = self.toggle_zoom();
-                }
-                ViewerAction::ToggleFullscreen => {
-                    let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-                    self.window_options.fullscreen = !fullscreen;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
-                }
-                ViewerAction::Reload => {
-                    if self.show_filer || self.show_subfiler {
-                        self.refresh_current_filer_directory();
-                    } else {
-                        let _ = self.reload_current();
-                    }
-                }
-                ViewerAction::NextImage => {
-                    let _ = self.next_image();
-                }
-                ViewerAction::PrevImage => {
-                    let _ = self.prev_image();
-                }
-                ViewerAction::FirstImage => {
-                    let _ = self.first_image();
-                }
-                ViewerAction::LastImage => {
-                    let _ = self.last_image();
-                }
-                ViewerAction::ToggleAnimation => {
-                    self.options.animation = !self.options.animation;
-                    self.current_frame = 0;
-                    self.last_frame_at = Instant::now();
-                    self.upload_current_frame();
-                }
-                ViewerAction::ToggleGrayscale => {
-                    self.options.grayscale = !self.options.grayscale;
-                    self.upload_current_frame();
-                    self.pending_fit_recalc = true;
-                }
-                ViewerAction::ToggleMangaMode => {
-                    self.options.manga_mode = !self.options.manga_mode;
-                    self.pending_fit_recalc = true;
-                }
-                ViewerAction::ToggleSettings => {
-                    if self.show_settings {
-                        self.close_settings_dialog();
-                    } else {
-                        self.open_settings_dialog();
-                    }
-                }
-                ViewerAction::ToggleFiler => {
-                    self.set_show_filer(!self.show_filer);
-                    self.pending_fit_recalc = true;
-                }
-                ViewerAction::ToggleSubfiler => {
-                    self.set_show_subfiler(!self.show_subfiler);
-                }
-                ViewerAction::SaveAs => {
-                    self.open_save_dialog();
-                }
+            }
+            ViewerAction::ToggleFiler => {
+                self.set_show_filer(!self.show_filer);
+                self.pending_fit_recalc = true;
+            }
+            ViewerAction::ToggleSubfiler => {
+                self.set_show_subfiler(!self.show_subfiler);
+            }
+            ViewerAction::SaveAs => {
+                self.open_save_dialog();
             }
         }
     }
@@ -158,7 +162,11 @@ impl ViewerApp {
         }
 
         if response.secondary_clicked() {
-            return Some(PointerIntent::ToggleSettings);
+            let pos = response
+                .interact_pointer_pos()
+                .or_else(|| response.hover_pos())
+                .unwrap_or(egui::pos2(32.0, 32.0));
+            return Some(PointerIntent::OpenContextMenu(pos));
         }
 
         if response.clicked_by(egui::PointerButton::Primary) {
@@ -177,13 +185,10 @@ impl ViewerApp {
             PointerIntent::NextImageAfterDelay => {
                 self.schedule_single_click_navigation();
             }
-            PointerIntent::ToggleSettings => {
+            PointerIntent::OpenContextMenu(pos) => {
                 self.cancel_pending_single_click_navigation();
-                if self.show_settings {
-                    self.close_settings_dialog();
-                } else {
-                    self.open_settings_dialog();
-                }
+                self.left_menu_pos = pos;
+                self.show_left_menu = true;
             }
         }
     }
