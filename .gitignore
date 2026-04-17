@@ -3,3 +3,4 @@ dist/
 .tmp*
 .test*
 Cargo.lock
+test_data/*
