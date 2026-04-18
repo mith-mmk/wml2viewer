@@ -1,3 +1,4 @@
+pub mod function;
 mod listed_file;
 mod sort;
 mod zip_file;

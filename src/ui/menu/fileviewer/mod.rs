@@ -22,97 +22,128 @@ impl ViewerApp {
         if !self.show_left_menu {
             return;
         }
+        self.cancel_pending_single_click_navigation();
 
-        let mut open = true;
-        egui::Window::new(self.text(UiTextKey::Menu))
+        let mut open = self.show_left_menu;
+        let mut close_requested = false;
+        let window_response = egui::Window::new(self.text(UiTextKey::Menu))
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
             .fixed_pos(self.left_menu_pos)
             .open(&mut open)
             .show(ctx, |ui| {
-                ui.strong(self.text(UiTextKey::MenuFileSection));
-                if ui.button(self.text(UiTextKey::ReloadCurrent)).clicked() {
-                    let _ = self.reload_current();
-                    self.show_left_menu = false;
-                }
-                ui.horizontal(|ui| {
-                    ui.add_enabled(false, egui::Button::new(self.text(UiTextKey::MoveItem)));
-                    ui.add_enabled(false, egui::Button::new(self.text(UiTextKey::CopyItem)));
-                    ui.add_enabled(false, egui::Button::new(self.text(UiTextKey::DeleteItem)));
-                    ui.add_enabled(false, egui::Button::new(self.text(UiTextKey::RenameItem)));
-                });
-                ui.label(egui::RichText::new(self.text(UiTextKey::NotImplemented)).small());
-
-                ui.separator();
-                ui.strong(self.text(UiTextKey::MenuImageSection));
-                ui.separator();
-                for format in SaveFormat::all() {
-                    if ui
-                        .selectable_label(self.save_dialog.format == format, format.to_string())
-                        .clicked()
-                    {
-                        self.save_dialog.format = format;
-                        self.open_save_dialog();
-                        self.show_left_menu = false;
+                ui.menu_button(self.text(UiTextKey::MenuFileSection), |ui| {
+                    if ui.button(self.text(UiTextKey::ReloadCurrent)).clicked() {
+                        let _ = self.reload_current();
+                        close_requested = true;
+                        ui.close();
                     }
-                }
+                    if ui.button(self.text(UiTextKey::MoveItem)).clicked() {
+                        self.apply_viewer_action(ctx, crate::options::ViewerAction::MoveFile);
+                        close_requested = true;
+                        ui.close();
+                    }
+                    if ui.button(self.text(UiTextKey::CopyItem)).clicked() {
+                        self.apply_viewer_action(ctx, crate::options::ViewerAction::CopyFile);
+                        close_requested = true;
+                        ui.close();
+                    }
+                    if ui.button(self.text(UiTextKey::DeleteItem)).clicked() {
+                        self.apply_viewer_action(ctx, crate::options::ViewerAction::DeleteFile);
+                        close_requested = true;
+                        ui.close();
+                    }
+                    if ui.button(self.text(UiTextKey::RenameItem)).clicked() {
+                        self.apply_viewer_action(ctx, crate::options::ViewerAction::RenameFile);
+                        close_requested = true;
+                        ui.close();
+                    }
+                });
 
-                ui.separator();
-                ui.strong(self.text(UiTextKey::MenuViewSection));
-                if ui.button(self.text(UiTextKey::ZoomInAction)).clicked() {
-                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomIn);
-                    self.show_left_menu = false;
-                }
-                if ui.button(self.text(UiTextKey::ZoomOutAction)).clicked() {
-                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomOut);
-                    self.show_left_menu = false;
-                }
-                if ui.button(self.text(UiTextKey::ZoomResetAction)).clicked() {
-                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomReset);
-                    self.show_left_menu = false;
-                }
-                if ui.button(self.text(UiTextKey::ZoomToggleAction)).clicked() {
-                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomToggle);
-                    self.show_left_menu = false;
-                }
-                if ui.button(self.text(UiTextKey::ToggleManga)).clicked() {
-                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleMangaMode);
-                    self.show_left_menu = false;
-                }
+                ui.menu_button(self.text(UiTextKey::MenuImageSection), |ui| {
+                    for format in SaveFormat::all() {
+                        if ui
+                            .selectable_label(self.save_dialog.format == format, format.to_string())
+                            .clicked()
+                        {
+                            self.save_dialog.format = format;
+                            self.open_save_dialog();
+                            close_requested = true;
+                            ui.close();
+                        }
+                    }
+                });
 
-                ui.separator();
-                ui.strong(self.text(UiTextKey::MenuInfoSection));
-                if ui.button(self.text(UiTextKey::ImageInformation)).clicked() {
-                    self.overlay.alert_message = Some(self.current_image_info_text());
-                    self.show_left_menu = false;
-                }
+                ui.menu_button(self.text(UiTextKey::MenuViewSection), |ui| {
+                    if ui.button(self.text(UiTextKey::ZoomInAction)).clicked() {
+                        self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomIn);
+                        close_requested = true;
+                        ui.close();
+                    }
+                    if ui.button(self.text(UiTextKey::ZoomOutAction)).clicked() {
+                        self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomOut);
+                        close_requested = true;
+                        ui.close();
+                    }
+                    if ui.button(self.text(UiTextKey::ZoomResetAction)).clicked() {
+                        self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomReset);
+                        close_requested = true;
+                        ui.close();
+                    }
+                    if ui.button(self.text(UiTextKey::ZoomToggleAction)).clicked() {
+                        self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomToggle);
+                        close_requested = true;
+                        ui.close();
+                    }
+                    if ui.button(self.text(UiTextKey::ToggleManga)).clicked() {
+                        self.apply_viewer_action(
+                            ctx,
+                            crate::options::ViewerAction::ToggleMangaMode,
+                        );
+                        close_requested = true;
+                        ui.close();
+                    }
+                });
 
-                ui.separator();
-                ui.strong(self.text(UiTextKey::MenuSettingsSection));
-                if ui.button(self.text(UiTextKey::ToggleSettings)).clicked() {
-                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleSettings);
-                    self.show_left_menu = false;
-                }
-                if ui.button(self.text(UiTextKey::ToggleFiler)).clicked() {
-                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleFiler);
-                    self.show_left_menu = false;
-                }
-                if ui
-                    .button(self.text(UiTextKey::ToggleSubfilerAction))
-                    .clicked()
-                {
-                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleSubfiler);
-                    self.show_left_menu = false;
-                }
+                ui.menu_button(self.text(UiTextKey::MenuInfoSection), |ui| {
+                    if ui.button(self.text(UiTextKey::ImageInformation)).clicked() {
+                        self.overlay.alert_message = Some(self.current_image_info_text());
+                        close_requested = true;
+                        ui.close();
+                    }
+                });
 
-                ui.separator();
-                ui.strong(self.text(UiTextKey::MenuAboutSection));
+                ui.menu_button(self.text(UiTextKey::MenuSettingsSection), |ui| {
+                    if ui.button(self.text(UiTextKey::ToggleSettings)).clicked() {
+                        self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleSettings);
+                        close_requested = true;
+                        ui.close();
+                    }
+                });
+
                 if ui.button(self.text(UiTextKey::MenuAboutSection)).clicked() {
                     self.overlay.alert_message = Some(self.about_text());
-                    self.show_left_menu = false;
+                    close_requested = true;
                 }
             });
+        if let Some(window_response) = window_response {
+            let pointer_clicked_outside = ctx.input(|i| {
+                i.pointer.any_click()
+                    && !window_response.response.rect.contains(
+                        i.pointer
+                            .interact_pos()
+                            .unwrap_or(egui::Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY)),
+                    )
+            });
+            if pointer_clicked_outside {
+                close_requested = true;
+            }
+        }
+        if close_requested {
+            open = false;
+            self.suppress_next_pointer_intent = true;
+        }
         self.show_left_menu = open;
     }
 

@@ -1,5 +1,6 @@
 pub(crate) mod dispatch;
 
+use crate::filesystem::function::{FunctionParams, call_fanction_for_action};
 use crate::options::ViewerAction;
 use crate::ui::input::dispatch::collect_triggered_actions;
 use crate::ui::viewer::ViewerApp;
@@ -15,6 +16,23 @@ enum PointerIntent {
 
 impl ViewerApp {
     pub(crate) fn handle_keyboard(&mut self, ctx: &egui::Context) {
+        if self.show_left_menu {
+            self.cancel_pending_single_click_navigation();
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.show_left_menu = false;
+            }
+            return;
+        }
+
+        if self.overlay.alert_message.is_some() {
+            self.cancel_pending_single_click_navigation();
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.overlay.alert_message = None;
+                self.suppress_next_pointer_intent = true;
+            }
+            return;
+        }
+
         if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::S)) {
             self.open_save_dialog();
         }
@@ -24,14 +42,11 @@ impl ViewerApp {
             return;
         }
 
-        if self.show_settings || self.save_dialog.open || self.overlay.alert_message.is_some() {
+        if self.show_settings || self.save_dialog.open {
             if !ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 if ctx.wants_keyboard_input() {
                     return;
                 }
-            } else if self.overlay.alert_message.is_some() {
-                self.overlay.alert_message = None;
-                return;
             }
         }
 
@@ -125,10 +140,30 @@ impl ViewerApp {
             ViewerAction::SaveAs => {
                 self.open_save_dialog();
             }
+            ViewerAction::MoveFile
+            | ViewerAction::CopyFile
+            | ViewerAction::DeleteFile
+            | ViewerAction::RenameFile => match call_fanction_for_action(
+                &self.current_path,
+                action,
+                FunctionParams::default(),
+            ) {
+                Some(Ok(message)) => self.overlay.alert_message = Some(message),
+                Some(Err(err)) => self.overlay.alert_message = Some(err),
+                None => {
+                    self.overlay.alert_message = Some("Unsupported filesystem action".to_string());
+                }
+            },
         }
     }
 
     pub(crate) fn handle_pointer_input(&mut self, response: &egui::Response) -> bool {
+        if self.suppress_next_pointer_intent {
+            self.suppress_next_pointer_intent = false;
+            self.cancel_pending_single_click_navigation();
+            return true;
+        }
+
         if self.pointer_input_blocked() {
             self.cancel_pending_single_click_navigation();
             return false;

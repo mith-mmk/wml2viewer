@@ -130,6 +130,7 @@ pub(crate) struct ViewerApp {
     pub(crate) config_path: Option<PathBuf>,
     pub(crate) bench_logger: Option<BenchLogger>,
     pub(crate) show_left_menu: bool,
+    pub(crate) suppress_next_pointer_intent: bool,
     pub(crate) left_menu_pos: Pos2,
     pub(crate) save_dialog: SaveDialogState,
     pub(crate) show_filer: bool,
@@ -647,6 +648,7 @@ impl ViewerApp {
             config_path,
             bench_logger,
             show_left_menu: false,
+            suppress_next_pointer_intent: false,
             left_menu_pos: Pos2::ZERO,
             save_dialog: SaveDialogState {
                 file_name: default_save_file_name(&path),
@@ -1716,6 +1718,8 @@ impl ViewerApp {
             });
         if close_requested || !open {
             self.overlay.alert_message = None;
+            self.cancel_pending_single_click_navigation();
+            self.suppress_next_pointer_intent = true;
         }
     }
 

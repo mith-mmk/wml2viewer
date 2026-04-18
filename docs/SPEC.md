@@ -114,6 +114,25 @@
 
 これで `Input` タブのファンクション一覧、実行処理、ローカライズ、右クリックメニューの整合が取れる。
 
+### ファイル操作ファンクション追加手順（実装者向け）
+
+`Move/Copy/Delete/Rename` のような「ファイル操作系」は、`filesystem/function.rs` を起点に追加する。
+
+1. `src/filesystem/function.rs`
+   - `FilesystemFunction` に variant を追加
+   - `call_function()` に実処理（またはパラメータ検証）を追加
+   - `FilesystemFunction::from_viewer_action()` に対応付けを追加
+2. `src/options.rs`
+   - `ViewerAction` に対応 variant を追加（デフォルト割り当ては必要な場合のみ追加）
+3. `src/ui/input/mod.rs`
+   - `apply_viewer_action()` から `call_fanction_for_action()` 経由で呼び出す
+4. `src/ui/menu/config/mod.rs` / `src/configs/resourses/text.rs`
+   - キーバインド設定画面の表示名・多言語リソースを追加
+5. `src/ui/menu/fileviewer/mod.rs`
+   - 右クリックメニューの該当階層へ追加
+
+この流れにすると、ファイル操作系ファンクションは `call_fanction*` API 入口に集約され、拡張時の編集箇所が明確になる。
+
 ## 実装メモ
 
 - `runtime.current_file` は終了時のスナップショットとして保存され、起動時の初期 path に使われます。

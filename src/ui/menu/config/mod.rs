@@ -335,10 +335,13 @@ impl ViewerApp {
 
             ui.horizontal(|ui| {
                 if ui.button(self.text(UiTextKey::AddBinding)).clicked() {
-                    draft_state.key_mapping_rows.push(KeyMappingRowDraft {
-                        binding: KeyBinding::new("Space"),
-                        action: ViewerAction::NextImage,
-                    });
+                    draft_state.key_mapping_rows.insert(
+                        0,
+                        KeyMappingRowDraft {
+                            binding: KeyBinding::new(""),
+                            action: ViewerAction::NextImage,
+                        },
+                    );
                 }
                 if ui
                     .button(self.text(UiTextKey::LoadCurrentCustomBindings))
@@ -346,7 +349,10 @@ impl ViewerApp {
                 {
                     draft_state.key_mapping_rows = key_mapping_rows_from_map(&self.keymap);
                 }
-                if ui.button(self.text(UiTextKey::UseDefaultOnly)).clicked() {
+                if ui
+                    .button(self.text(UiTextKey::ResetToDefaultBindings))
+                    .clicked()
+                {
                     draft.input.key_mapping.clear();
                     draft.input.replace_default_keymap = false;
                     let defaults = default_key_mapping();
@@ -1085,6 +1091,10 @@ fn viewer_action_label(viewer: &ViewerApp, action: ViewerAction) -> &'static str
         ViewerAction::ToggleFiler => viewer.text(UiTextKey::ToggleFiler),
         ViewerAction::ToggleSubfiler => viewer.text(UiTextKey::ToggleSubfilerAction),
         ViewerAction::SaveAs => viewer.text(UiTextKey::SaveAs),
+        ViewerAction::MoveFile => viewer.text(UiTextKey::MoveFileAction),
+        ViewerAction::CopyFile => viewer.text(UiTextKey::CopyFileAction),
+        ViewerAction::DeleteFile => viewer.text(UiTextKey::DeleteFileAction),
+        ViewerAction::RenameFile => viewer.text(UiTextKey::RenameFileAction),
     }
 }
 

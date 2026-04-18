@@ -46,6 +46,10 @@ pub enum ViewerAction {
     ToggleFiler,
     ToggleSubfiler,
     SaveAs,
+    MoveFile,
+    CopyFile,
+    DeleteFile,
+    RenameFile,
 }
 
 impl ViewerAction {
@@ -68,6 +72,10 @@ impl ViewerAction {
             ViewerAction::ToggleFiler,
             ViewerAction::ToggleSubfiler,
             ViewerAction::SaveAs,
+            ViewerAction::MoveFile,
+            ViewerAction::CopyFile,
+            ViewerAction::DeleteFile,
+            ViewerAction::RenameFile,
         ]
     }
 
@@ -90,6 +98,10 @@ impl ViewerAction {
             ViewerAction::ToggleFiler => "ToggleFiler",
             ViewerAction::ToggleSubfiler => "ToggleSubfiler",
             ViewerAction::SaveAs => "SaveAs",
+            ViewerAction::MoveFile => "MoveFile",
+            ViewerAction::CopyFile => "CopyFile",
+            ViewerAction::DeleteFile => "DeleteFile",
+            ViewerAction::RenameFile => "RenameFile",
         }
     }
 

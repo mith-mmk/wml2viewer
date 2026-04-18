@@ -139,7 +139,7 @@ pub(crate) enum UiTextKey {
     InputKeyboardOnlyNotice,
     AddBinding,
     LoadCurrentCustomBindings,
-    UseDefaultOnly,
+    ResetToDefaultBindings,
     FunctionLabel,
     KeyCaptureLabel,
     PressKeyToAssign,
@@ -159,7 +159,6 @@ pub(crate) enum UiTextKey {
     CopyItem,
     DeleteItem,
     RenameItem,
-    NotImplemented,
     ImageInformation,
     ZoomInAction,
     ZoomOutAction,
@@ -173,6 +172,10 @@ pub(crate) enum UiTextKey {
     ToggleAnimationAction,
     ToggleGrayscaleAction,
     ToggleSubfilerAction,
+    MoveFileAction,
+    CopyFileAction,
+    DeleteFileAction,
+    RenameFileAction,
     ReservedKeyWarning,
 }
 
@@ -334,7 +337,7 @@ fn en(key: UiTextKey) -> &'static str {
         }
         UiTextKey::AddBinding => "Add binding",
         UiTextKey::LoadCurrentCustomBindings => "Load active bindings",
-        UiTextKey::UseDefaultOnly => "Use default only",
+        UiTextKey::ResetToDefaultBindings => "Reset to defaults",
         UiTextKey::FunctionLabel => "Function",
         UiTextKey::KeyCaptureLabel => "Key",
         UiTextKey::PressKeyToAssign => "Click the key box, then press key or mouse input",
@@ -368,7 +371,6 @@ fn en(key: UiTextKey) -> &'static str {
         UiTextKey::CopyItem => "Copy",
         UiTextKey::DeleteItem => "Delete",
         UiTextKey::RenameItem => "Rename",
-        UiTextKey::NotImplemented => "Not implemented yet",
         UiTextKey::ImageInformation => "Image Information",
         UiTextKey::ZoomInAction => "Zoom In",
         UiTextKey::ZoomOutAction => "Zoom Out",
@@ -382,6 +384,10 @@ fn en(key: UiTextKey) -> &'static str {
         UiTextKey::ToggleAnimationAction => "Toggle Animation",
         UiTextKey::ToggleGrayscaleAction => "Toggle Grayscale",
         UiTextKey::ToggleSubfilerAction => "Toggle Subfiler",
+        UiTextKey::MoveFileAction => "Move File",
+        UiTextKey::CopyFileAction => "Copy File",
+        UiTextKey::DeleteFileAction => "Delete File",
+        UiTextKey::RenameFileAction => "Rename File",
         UiTextKey::ReservedKeyWarning => "Reserved (cannot be changed)",
     }
 }
@@ -529,7 +535,7 @@ fn ja(key: UiTextKey) -> &'static str {
         }
         UiTextKey::AddBinding => "割り当てを追加",
         UiTextKey::LoadCurrentCustomBindings => "現在有効な割り当てを読み込む",
-        UiTextKey::UseDefaultOnly => "デフォルトのみを使う",
+        UiTextKey::ResetToDefaultBindings => "デフォルトに戻す",
         UiTextKey::FunctionLabel => "ファンクション",
         UiTextKey::KeyCaptureLabel => "キー",
         UiTextKey::PressKeyToAssign => {
@@ -565,7 +571,6 @@ fn ja(key: UiTextKey) -> &'static str {
         UiTextKey::CopyItem => "コピー",
         UiTextKey::DeleteItem => "削除",
         UiTextKey::RenameItem => "名前変更",
-        UiTextKey::NotImplemented => "未実装",
         UiTextKey::ImageInformation => "画像の情報",
         UiTextKey::ZoomInAction => "拡大",
         UiTextKey::ZoomOutAction => "縮小",
@@ -579,6 +584,10 @@ fn ja(key: UiTextKey) -> &'static str {
         UiTextKey::ToggleAnimationAction => "アニメーション切替",
         UiTextKey::ToggleGrayscaleAction => "グレースケール切替",
         UiTextKey::ToggleSubfilerAction => "サブファイラーを切替",
+        UiTextKey::MoveFileAction => "ファイルを移動",
+        UiTextKey::CopyFileAction => "ファイルをコピー",
+        UiTextKey::DeleteFileAction => "ファイルを削除",
+        UiTextKey::RenameFileAction => "ファイル名を変更",
         UiTextKey::ReservedKeyWarning => "予約済み（変更できません）",
     }
 }
