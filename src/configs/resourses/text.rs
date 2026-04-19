@@ -362,7 +362,7 @@ fn en(key: UiTextKey) -> &'static str {
             }
         }
         UiTextKey::MenuFileSection => "File",
-        UiTextKey::MenuImageSection => "Image",
+        UiTextKey::MenuImageSection => "Save Image",
         UiTextKey::MenuViewSection => "View",
         UiTextKey::MenuInfoSection => "Information",
         UiTextKey::MenuSettingsSection => "Settings",
@@ -562,7 +562,7 @@ fn ja(key: UiTextKey) -> &'static str {
             }
         }
         UiTextKey::MenuFileSection => "ファイル",
-        UiTextKey::MenuImageSection => "画像",
+        UiTextKey::MenuImageSection => "画像を保存",
         UiTextKey::MenuViewSection => "表示",
         UiTextKey::MenuInfoSection => "情報",
         UiTextKey::MenuSettingsSection => "設定",
