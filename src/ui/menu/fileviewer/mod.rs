@@ -15,6 +15,9 @@ use crate::ui::viewer::ViewerApp;
 use crate::ui::viewer::options::PaneSide;
 use chrono::{DateTime, Local};
 use eframe::egui;
+use exif::{In, Reader, Tag};
+use std::fs::File;
+use std::io::BufReader;
 use std::time::SystemTime;
 
 impl ViewerApp {
@@ -33,6 +36,7 @@ impl ViewerApp {
             .fixed_pos(self.left_menu_pos)
             .open(&mut open)
             .show(ctx, |ui| {
+                ui.set_min_width(260.0);
                 ui.menu_button(self.text(UiTextKey::MenuFileSection), |ui| {
                     if ui.button(self.text(UiTextKey::ReloadCurrent)).clicked() {
                         let _ = self.reload_current();
@@ -91,8 +95,21 @@ impl ViewerApp {
                         close_requested = true;
                         ui.close();
                     }
-                    if ui.button(self.text(UiTextKey::ZoomToggleAction)).clicked() {
-                        self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomToggle);
+                    ui.separator();
+                    ui.menu_button(self.text(UiTextKey::ZoomPresetAction), |ui| {
+                        for scale in [50_u32, 75, 100, 125, 150, 200] {
+                            if ui.button(format!("{scale}%")).clicked() {
+                                let _ = self.set_zoom(scale as f32 / 100.0);
+                                close_requested = true;
+                                ui.close();
+                            }
+                        }
+                    });
+                    if ui
+                        .button(self.text(UiTextKey::OriginalSizeAction))
+                        .clicked()
+                    {
+                        let _ = self.set_zoom(1.0);
                         close_requested = true;
                         ui.close();
                     }
@@ -150,7 +167,10 @@ impl ViewerApp {
     fn current_image_info_text(&self) -> String {
         let mut lines = Vec::new();
         lines.push(self.text(UiTextKey::ImageInformation).to_string());
+        lines.push(String::new());
+        lines.push("[Basic]".to_string());
         lines.push(format!("Path: {}", self.current_path.display()));
+        lines.push(format!("Format: {}", file_format_label(&self.current_path)));
         lines.push(format!(
             "Resolution: {} x {}",
             self.source.canvas.width(),
@@ -158,7 +178,15 @@ impl ViewerApp {
         ));
         lines.push(format!("Frames: {}", self.source.frame_count()));
         if let Ok(meta) = std::fs::metadata(&self.current_path) {
+            lines.push(String::new());
+            lines.push("[File]".to_string());
             lines.push(format!("Size: {}", format_human_size(meta.len())));
+            if let Ok(created) = meta.created() {
+                lines.push(format!(
+                    "Created: {}",
+                    format_system_time(created, &self.applied_locale)
+                ));
+            }
             if let Ok(modified) = meta.modified() {
                 lines.push(format!(
                     "Modified: {}",
@@ -166,6 +194,11 @@ impl ViewerApp {
                 ));
             }
         }
+        lines.push(String::new());
+        lines.push("[Color]".to_string());
+        lines.push("Color Profile: (not available)".to_string());
+
+        append_exif_sections(&mut lines, &self.current_path);
         lines.join("\n")
     }
 
@@ -932,6 +965,89 @@ fn format_grouped_u64(value: u64) -> String {
         out.push(ch);
     }
     out.chars().rev().collect()
+}
+
+fn file_format_label(path: &std::path::Path) -> String {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_uppercase())
+        .unwrap_or_else(|| "UNKNOWN".to_string())
+}
+
+fn append_exif_sections(lines: &mut Vec<String>, path: &std::path::Path) {
+    lines.push(String::new());
+    lines.push("[EXIF / Camera]".to_string());
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(_) => {
+            lines.push("(not available)".to_string());
+            lines.push(String::new());
+            lines.push("[EXIF / Shooting]".to_string());
+            lines.push("(not available)".to_string());
+            lines.push(String::new());
+            lines.push("[EXIF / GPS]".to_string());
+            lines.push("(not available)".to_string());
+            return;
+        }
+    };
+    let mut reader = BufReader::new(file);
+    let exif = match Reader::new().read_from_container(&mut reader) {
+        Ok(exif) => exif,
+        Err(_) => {
+            lines.push("(not available)".to_string());
+            lines.push(String::new());
+            lines.push("[EXIF / Shooting]".to_string());
+            lines.push("(not available)".to_string());
+            lines.push(String::new());
+            lines.push("[EXIF / GPS]".to_string());
+            lines.push("(not available)".to_string());
+            return;
+        }
+    };
+
+    let camera_tags = [Tag::Make, Tag::Model, Tag::LensModel, Tag::Software];
+    let shooting_tags = [
+        Tag::DateTimeOriginal,
+        Tag::ExposureTime,
+        Tag::FNumber,
+        Tag::ISOSpeed,
+        Tag::FocalLength,
+        Tag::ExposureBiasValue,
+        Tag::Flash,
+        Tag::WhiteBalance,
+    ];
+    let gps_tags = [
+        Tag::GPSLatitude,
+        Tag::GPSLongitude,
+        Tag::GPSAltitude,
+        Tag::GPSDateStamp,
+        Tag::GPSTimeStamp,
+    ];
+
+    append_exif_tag_group(lines, &exif, &camera_tags);
+    lines.push(String::new());
+    lines.push("[EXIF / Shooting]".to_string());
+    append_exif_tag_group(lines, &exif, &shooting_tags);
+    lines.push(String::new());
+    lines.push("[EXIF / GPS]".to_string());
+    append_exif_tag_group(lines, &exif, &gps_tags);
+}
+
+fn append_exif_tag_group(lines: &mut Vec<String>, exif: &exif::Exif, tags: &[Tag]) {
+    let mut found = 0usize;
+    for tag in tags {
+        if let Some(field) = exif.get_field(*tag, In::PRIMARY) {
+            lines.push(format!(
+                "{}: {}",
+                field.tag,
+                field.display_value().with_unit(exif)
+            ));
+            found += 1;
+        }
+    }
+    if found == 0 {
+        lines.push("(not available)".to_string());
+    }
 }
 
 #[cfg(test)]

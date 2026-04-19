@@ -222,65 +222,67 @@ impl ViewerApp {
                         .speed(10.0),
                 );
             });
-            ui.separator();
-            ui.heading("susie64");
-            ui.checkbox(
-                &mut draft.plugins.susie64.enable,
-                self.text(UiTextKey::Enable),
-            );
-            ui.horizontal(|ui| {
-                ui.label("priority");
-                ui.add(
-                    egui::DragValue::new(&mut draft.plugins.susie64.priority)
-                        .range(-1000..=1000)
-                        .speed(10.0),
+            if !cfg!(target_os = "linux") {
+                ui.separator();
+                ui.heading("susie64");
+                ui.checkbox(
+                    &mut draft.plugins.susie64.enable,
+                    self.text(UiTextKey::Enable),
                 );
-            });
-            ui.label(self.text(UiTextKey::SearchPath));
-            if ui
-                .text_edit_singleline(&mut draft_state.susie64_search_paths_input)
-                .changed()
-            {
-                draft.plugins.susie64.search_path =
-                    parse_search_paths(&draft_state.susie64_search_paths_input);
-            }
-            if ui.button(self.text(UiTextKey::Browse)).clicked() {
-                if let Some(path) = pick_save_directory() {
-                    draft.plugins.susie64.search_path = vec![path];
-                    draft_state.susie64_search_paths_input =
-                        join_search_paths(&draft.plugins.susie64.search_path);
+                ui.horizontal(|ui| {
+                    ui.label("priority");
+                    ui.add(
+                        egui::DragValue::new(&mut draft.plugins.susie64.priority)
+                            .range(-1000..=1000)
+                            .speed(10.0),
+                    );
+                });
+                ui.label(self.text(UiTextKey::SearchPath));
+                if ui
+                    .text_edit_singleline(&mut draft_state.susie64_search_paths_input)
+                    .changed()
+                {
+                    draft.plugins.susie64.search_path =
+                        parse_search_paths(&draft_state.susie64_search_paths_input);
                 }
-            }
-            if ui.button(self.text(UiTextKey::LoadModules)).clicked() {
-                draft.plugins.susie64.modules =
-                    discover_plugin_modules("susie64", &draft.plugins.susie64);
-            }
-            ui.label(format!(
-                "{}: {}",
-                self.text(UiTextKey::Modules),
-                draft.plugins.susie64.modules.len()
-            ));
+                if ui.button(self.text(UiTextKey::Browse)).clicked() {
+                    if let Some(path) = pick_save_directory() {
+                        draft.plugins.susie64.search_path = vec![path];
+                        draft_state.susie64_search_paths_input =
+                            join_search_paths(&draft.plugins.susie64.search_path);
+                    }
+                }
+                if ui.button(self.text(UiTextKey::LoadModules)).clicked() {
+                    draft.plugins.susie64.modules =
+                        discover_plugin_modules("susie64", &draft.plugins.susie64);
+                }
+                ui.label(format!(
+                    "{}: {}",
+                    self.text(UiTextKey::Modules),
+                    draft.plugins.susie64.modules.len()
+                ));
 
-            ui.separator();
-            ui.heading("system");
-            ui.checkbox(
-                &mut draft.plugins.system.enable,
-                self.text(UiTextKey::Enable),
-            );
-            ui.horizontal(|ui| {
-                ui.label("priority");
-                ui.add(
-                    egui::DragValue::new(&mut draft.plugins.system.priority)
-                        .range(-1000..=1000)
-                        .speed(10.0),
+                ui.separator();
+                ui.heading("system");
+                ui.checkbox(
+                    &mut draft.plugins.system.enable,
+                    self.text(UiTextKey::Enable),
                 );
-            });
-            ui.label(self.text(UiTextKey::SearchPathOsApi));
-            ui.label(format!(
-                "{}: {}",
-                self.text(UiTextKey::Modules),
-                draft.plugins.system.modules.len()
-            ));
+                ui.horizontal(|ui| {
+                    ui.label("priority");
+                    ui.add(
+                        egui::DragValue::new(&mut draft.plugins.system.priority)
+                            .range(-1000..=1000)
+                            .speed(10.0),
+                    );
+                });
+                ui.label(self.text(UiTextKey::SearchPathOsApi));
+                ui.label(format!(
+                    "{}: {}",
+                    self.text(UiTextKey::Modules),
+                    draft.plugins.system.modules.len()
+                ));
+            }
 
             ui.separator();
             ui.heading("ffmpeg");

@@ -19,6 +19,7 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 encoding_rs = "0.8"
 serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+kamadak-exif = "0.6"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
