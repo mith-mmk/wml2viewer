@@ -169,7 +169,10 @@ impl ViewerApp {
         lines.push(self.text(UiTextKey::ImageInformation).to_string());
         lines.push(String::new());
         lines.push("[Basic]".to_string());
-        lines.push(format!("Path: {}", self.current_path.display()));
+        lines.push(format!(
+            "Path: {}",
+            normalize_backslash_display(&self.current_path.to_string_lossy())
+        ));
         lines.push(format!("Format: {}", file_format_label(&self.current_path)));
         lines.push(format!(
             "Resolution: {} x {}",
@@ -1037,10 +1040,11 @@ fn append_exif_tag_group(lines: &mut Vec<String>, exif: &exif::Exif, tags: &[Tag
     let mut found = 0usize;
     for tag in tags {
         if let Some(field) = exif.get_field(*tag, In::PRIMARY) {
+            let value = normalize_backslash_display(&field.display_value().with_unit(exif).to_string());
             lines.push(format!(
                 "{}: {}",
                 field.tag,
-                field.display_value().with_unit(exif)
+                value
             ));
             found += 1;
         }
@@ -1050,9 +1054,21 @@ fn append_exif_tag_group(lines: &mut Vec<String>, exif: &exif::Exif, tags: &[Tag
     }
 }
 
+fn normalize_backslash_display(text: &str) -> String {
+    if !text.contains("\\\\") {
+        return text.to_string();
+    }
+
+    if let Some(rest) = text.strip_prefix("\\\\") {
+        return format!("\\\\{}", rest.replace("\\\\", "\\"));
+    }
+
+    text.replace("\\\\", "\\")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::locale_datetime_pattern;
+    use super::{locale_datetime_pattern, normalize_backslash_display};
 
     #[test]
     fn locale_datetime_pattern_supports_multiple_locales() {
@@ -1060,5 +1076,21 @@ mod tests {
         assert_eq!(locale_datetime_pattern("en_US"), "%m/%d/%Y %I:%M %p");
         assert_eq!(locale_datetime_pattern("de_DE"), "%d.%m.%Y %H:%M");
         assert_eq!(locale_datetime_pattern("fr_FR"), "%d/%m/%Y %H:%M");
+    }
+
+    #[test]
+    fn normalize_backslash_display_collapses_escaped_sequences() {
+        assert_eq!(
+            normalize_backslash_display(r"C:\\Users\\misir\\image.png"),
+            r"C:\Users\misir\image.png"
+        );
+    }
+
+    #[test]
+    fn normalize_backslash_display_keeps_unc_prefix() {
+        assert_eq!(
+            normalize_backslash_display(r"\\server\\share\\folder\\a.png"),
+            r"\\server\share\folder\a.png"
+        );
     }
 }
