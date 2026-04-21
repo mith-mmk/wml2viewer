@@ -794,11 +794,11 @@ fn next_policy_directory(path: &Path) -> Option<PathBuf> {
     }
 
     if let Some(zip_root) = zip_virtual_root(path) {
-        return zip_root.parent().map(Path::to_path_buf);
+        return Some(zip_root);
     }
 
     if let Some(listed_root) = listed_virtual_root(path) {
-        return listed_root.parent().map(Path::to_path_buf);
+        return Some(listed_root);
     }
 
     path.parent().map(Path::to_path_buf)
