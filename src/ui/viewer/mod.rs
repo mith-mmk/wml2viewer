@@ -1,7 +1,7 @@
 use crate::benchlog::BenchLogger;
 use crate::configs::config::save_app_config;
 use crate::configs::resourses::{AppliedResources, apply_resources};
-use crate::dependent::{default_download_dir, pick_save_directory};
+use crate::dependent::{default_download_dir, default_temp_dir, pick_save_directory};
 use crate::drawers::canvas::Canvas;
 use crate::drawers::image::{LoadedImage, SaveFormat, save_loaded_image};
 use crate::filesystem::{
@@ -55,6 +55,8 @@ const WAITING_CARD_DELAY: Duration = Duration::from_millis(180);
 const PRELOAD_CACHE_CAPACITY: usize = 2;
 const ZIP_TO_ZIP_RANDOM_WALK_ROUNDS: usize = 8;
 const RENDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const HELP_HTML_TEMPLATE: &str = include_str!("../../../resources/help.html");
+const HELP_KEY_BINDINGS_ROWS_TOKEN: &str = "{{KEY_BINDINGS_ROWS}}";
 
 pub(crate) struct ViewerApp {
     pub(crate) current_navigation_path: PathBuf,
@@ -455,6 +457,14 @@ pub(crate) fn format_key_binding(binding: &KeyBinding) -> String {
     parts.join("+")
 }
 
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 pub(crate) fn join_search_paths(paths: &[PathBuf]) -> String {
     paths
         .iter()
@@ -818,10 +828,6 @@ impl ViewerApp {
     }
 
     pub(crate) fn open_help(&self) {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("resources")
-            .join("help.html");
-        let _ = std::fs::create_dir_all(path.parent().unwrap_or_else(|| std::path::Path::new(".")));
         let mut bindings = self
             .keymap
             .iter()
@@ -831,39 +837,27 @@ impl ViewerApp {
 
         let rows = bindings
             .into_iter()
-            .map(|(binding, action)| format!("<tr><td>{binding}</td><td>{action}</td></tr>"))
+            .map(|(binding, action)| {
+                format!(
+                    "<tr><td>{}</td><td>{}</td></tr>",
+                    escape_html(&binding),
+                    escape_html(&action)
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n");
-        let html = format!(
-            r#"<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>wml2viewer Help</title>
-  <style>
-    body {{ font-family: sans-serif; margin: 32px; line-height: 1.5; }}
-    table {{ border-collapse: collapse; width: 100%; }}
-    th, td {{ border: 1px solid #ccc; padding: 8px 10px; text-align: left; }}
-    code {{ background: #f4f4f4; padding: 2px 4px; border-radius: 4px; }}
-  </style>
-</head>
-<body>
-  <h1>wml2viewer Help</h1>
-  <h2>Key Bindings</h2>
-  <table>
-    <thead><tr><th>Key</th><th>Action</th></tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
-  <h2>Startup Options</h2>
-  <ul>
-    <li><code>wml2viewer [path]</code></li>
-    <li><code>wml2viewer --config &lt;path&gt; [path]</code></li>
-    <li><code>wml2viewer --config=&lt;path&gt; [path]</code></li>
-    <li><code>wml2viewer --clean system</code> (planned)</li>
-  </ul>
-</body>
-</html>"#
-        );
+        let html = HELP_HTML_TEMPLATE.replace(HELP_KEY_BINDINGS_ROWS_TOKEN, &rows);
+        let temp_root = default_temp_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("wml2viewer");
+        let _ = std::fs::create_dir_all(&temp_root);
+        let path = temp_root.join(format!(
+            "help-{}.html",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
         let _ = std::fs::write(&path, html);
 
         #[cfg(target_os = "windows")]

@@ -12,33 +12,49 @@
 </head>
 <body>
   <h1>wml2viewer Help</h1>
+
+  <h2>Mouse / Context Menu</h2>
+  <ul>
+    <li>Right-click on the viewer to open the context menu.</li>
+    <li>Direct menu items include <code>Image Information</code>, <code>Settings</code>, and <code>About</code>.</li>
+    <li>File actions are available from the same menu: <code>Move</code>, <code>Copy</code>, <code>Delete</code>, <code>Rename</code>.</li>
+    <li><code>Save Image</code> offers format selection and opens the save dialog.</li>
+  </ul>
+
+  <h2>Dialogs</h2>
+  <ul>
+    <li>Image information opens as an information dialog (title: <code>Information</code>).</li>
+    <li>System operation results from Settings open with title <code>Settings</code>.</li>
+    <li>About text opens with title <code>About</code>.</li>
+    <li>Generic errors open in an alert dialog (title: <code>Alert</code>).</li>
+  </ul>
+
+  <h2>File Action Destinations</h2>
+  <ul>
+    <li>Move/Copy dialogs support both manual input and folder browsing (<code>Browse...</code>).</li>
+    <li>Settings &gt; Navigation provides destination presets for:
+      <code>Move Folder1/Folder2</code> and <code>Copy Folder1/Folder2</code>.
+    </li>
+    <li>Use <code>Use as Move</code> / <code>Use as Copy</code> to switch active destination slots.</li>
+    <li>After successful Move/Copy, the destination is saved to the active slot and persisted to config.</li>
+  </ul>
+
   <h2>Key Bindings</h2>
   <table>
     <thead><tr><th>Key</th><th>Action</th></tr></thead>
-    <tbody><tr><td>ArrowLeft</td><td>PrevImage</td></tr>
-<tr><td>ArrowRight</td><td>NextImage</td></tr>
-<tr><td>End</td><td>LastImage</td></tr>
-<tr><td>Enter</td><td>ToggleFullscreen</td></tr>
-<tr><td>F</td><td>ToggleFiler</td></tr>
-<tr><td>F5</td><td>Reload</td></tr>
-<tr><td>Home</td><td>FirstImage</td></tr>
-<tr><td>Minus</td><td>ZoomOut</td></tr>
-<tr><td>P</td><td>ToggleSettings</td></tr>
-<tr><td>Plus</td><td>ZoomIn</td></tr>
-<tr><td>Shift+C</td><td>ToggleMangaMode</td></tr>
-<tr><td>Shift+G</td><td>ToggleGrayscale</td></tr>
-<tr><td>Shift+Num0</td><td>ZoomReset</td></tr>
-<tr><td>Shift+R</td><td>Reload</td></tr>
-<tr><td>Shift+Space</td><td>PrevImage</td></tr>
-<tr><td>Shift+V</td><td>ToggleSubfiler</td></tr>
-<tr><td>Space</td><td>NextImage</td></tr></tbody>
+    <tbody>{{KEY_BINDINGS_ROWS}}</tbody>
   </table>
+
   <h2>Startup Options</h2>
   <ul>
     <li><code>wml2viewer [path]</code></li>
     <li><code>wml2viewer --config &lt;path&gt; [path]</code></li>
     <li><code>wml2viewer --config=&lt;path&gt; [path]</code></li>
-    <li><code>wml2viewer --clean system</code> (planned)</li>
+    <li><code>wml2viewer --clean system</code></li>
+    <li><code>wml2viewer --bench [path]</code></li>
+    <li><code>wml2viewer --log [path]</code></li>
+    <li><code>wml2viewer --bench-scenario &lt;name&gt; [path]</code></li>
+    <li><code>wml2viewer --bench-scenario=&lt;name&gt; [path]</code></li>
   </ul>
 </body>
 </html>
