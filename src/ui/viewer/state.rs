@@ -6,7 +6,7 @@ use std::time::Instant;
 
 pub(crate) struct ViewerOverlayState {
     pub(crate) loading_message: Option<String>,
-    pub(crate) alert_message: Option<String>,
+    pub(crate) dialog: Option<OverlayDialogState>,
     pub(crate) loading_started_at: Option<Instant>,
 }
 
@@ -14,7 +14,7 @@ impl Default for ViewerOverlayState {
     fn default() -> Self {
         Self {
             loading_message: None,
-            alert_message: None,
+            dialog: None,
             loading_started_at: None,
         }
     }
@@ -32,6 +32,12 @@ impl ViewerOverlayState {
         self.loading_message = None;
         self.loading_started_at = None;
     }
+}
+
+#[derive(Clone)]
+pub(crate) struct OverlayDialogState {
+    pub(crate) title: String,
+    pub(crate) message: String,
 }
 
 pub(crate) struct SaveDialogState {
@@ -58,6 +64,23 @@ impl Default for SaveDialogState {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FileActionDialogMode {
+    Move,
+    Copy,
+    Delete,
+    Rename,
+}
+
+#[derive(Default)]
+pub(crate) struct FileActionDialogState {
+    pub(crate) open: bool,
+    pub(crate) mode: Option<FileActionDialogMode>,
+    pub(crate) destination_path_input: String,
+    pub(crate) rename_stem_input: String,
+    pub(crate) rename_extension: String,
+}
+
 #[derive(Clone)]
 pub(crate) struct SettingsDraftState {
     pub(crate) config: AppConfig,
@@ -65,6 +88,10 @@ pub(crate) struct SettingsDraftState {
     pub(crate) resource_font_paths_input: String,
     pub(crate) susie64_search_paths_input: String,
     pub(crate) ffmpeg_search_paths_input: String,
+    pub(crate) move_folder1_input: String,
+    pub(crate) move_folder2_input: String,
+    pub(crate) copy_folder1_input: String,
+    pub(crate) copy_folder2_input: String,
     pub(crate) key_mapping_rows: Vec<KeyMappingRowDraft>,
     pub(crate) key_mapping_error: Option<String>,
 }

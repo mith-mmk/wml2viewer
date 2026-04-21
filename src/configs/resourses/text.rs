@@ -153,7 +153,6 @@ pub(crate) enum UiTextKey {
     MenuImageSection,
     MenuViewSection,
     MenuInfoSection,
-    MenuSettingsSection,
     MenuAboutSection,
     MoveItem,
     CopyItem,
@@ -179,6 +178,29 @@ pub(crate) enum UiTextKey {
     DeleteFileAction,
     RenameFileAction,
     ReservedKeyWarning,
+    FileActionTarget,
+    DeleteWithTrashWarning,
+    DeleteConfirmQuestion,
+    RenameExtensionFixed,
+    UnsupportedFilesystemAction,
+    FileActionDefaults,
+    MoveDestinationFolders,
+    MoveFolder1,
+    MoveFolder2,
+    UseAsMove,
+    ActiveMoveFolder,
+    CopyDestinationFolders,
+    CopyFolder1,
+    CopyFolder2,
+    UseAsCopy,
+    ActiveCopyFolder,
+    Folder1,
+    Folder2,
+    AlertTitle,
+    DestinationPathEmpty,
+    RenameTargetEmpty,
+    CurrentTargetNotEditableFile,
+    RenderWorkerDisconnected,
 }
 
 pub(crate) fn tr(locale: &str, key: UiTextKey) -> &'static str {
@@ -367,7 +389,6 @@ fn en(key: UiTextKey) -> &'static str {
         UiTextKey::MenuImageSection => "Save Image",
         UiTextKey::MenuViewSection => "View",
         UiTextKey::MenuInfoSection => "Information",
-        UiTextKey::MenuSettingsSection => "Settings",
         UiTextKey::MenuAboutSection => "About",
         UiTextKey::MoveItem => "Move",
         UiTextKey::CopyItem => "Copy",
@@ -393,6 +414,31 @@ fn en(key: UiTextKey) -> &'static str {
         UiTextKey::DeleteFileAction => "Delete File",
         UiTextKey::RenameFileAction => "Rename File",
         UiTextKey::ReservedKeyWarning => "Reserved (cannot be changed)",
+        UiTextKey::FileActionTarget => "Target",
+        UiTextKey::DeleteWithTrashWarning => {
+            "Move to trash if possible. If trash move fails, delete permanently."
+        }
+        UiTextKey::DeleteConfirmQuestion => "Are you sure?",
+        UiTextKey::RenameExtensionFixed => "Extension is fixed and cannot be changed.",
+        UiTextKey::UnsupportedFilesystemAction => "Unsupported filesystem action",
+        UiTextKey::FileActionDefaults => "File Action Defaults",
+        UiTextKey::MoveDestinationFolders => "Move destination folders (Folder1 / Folder2)",
+        UiTextKey::MoveFolder1 => "Move Folder1",
+        UiTextKey::MoveFolder2 => "Move Folder2",
+        UiTextKey::UseAsMove => "Use as Move",
+        UiTextKey::ActiveMoveFolder => "Active Move Folder",
+        UiTextKey::CopyDestinationFolders => "Copy destination folders (Folder1 / Folder2)",
+        UiTextKey::CopyFolder1 => "Copy Folder1",
+        UiTextKey::CopyFolder2 => "Copy Folder2",
+        UiTextKey::UseAsCopy => "Use as Copy",
+        UiTextKey::ActiveCopyFolder => "Active Copy Folder",
+        UiTextKey::Folder1 => "Folder1",
+        UiTextKey::Folder2 => "Folder2",
+        UiTextKey::AlertTitle => "Alert",
+        UiTextKey::DestinationPathEmpty => "Destination path is empty",
+        UiTextKey::RenameTargetEmpty => "Rename target is empty",
+        UiTextKey::CurrentTargetNotEditableFile => "Current target is not editable file",
+        UiTextKey::RenderWorkerDisconnected => "Render worker disconnected",
     }
 }
 
@@ -569,7 +615,6 @@ fn ja(key: UiTextKey) -> &'static str {
         UiTextKey::MenuImageSection => "画像を保存",
         UiTextKey::MenuViewSection => "表示",
         UiTextKey::MenuInfoSection => "情報",
-        UiTextKey::MenuSettingsSection => "設定",
         UiTextKey::MenuAboutSection => "このプログラムについて",
         UiTextKey::MoveItem => "移動",
         UiTextKey::CopyItem => "コピー",
@@ -595,5 +640,67 @@ fn ja(key: UiTextKey) -> &'static str {
         UiTextKey::DeleteFileAction => "ファイルを削除",
         UiTextKey::RenameFileAction => "ファイル名を変更",
         UiTextKey::ReservedKeyWarning => "予約済み（変更できません）",
+        UiTextKey::FileActionTarget => "対象",
+        UiTextKey::DeleteWithTrashWarning => {
+            "可能ならゴミ箱へ移動します。失敗した場合は完全に削除します。"
+        }
+        UiTextKey::DeleteConfirmQuestion => "よろしいですか？",
+        UiTextKey::RenameExtensionFixed => "拡張子は固定で変更できません。",
+        UiTextKey::UnsupportedFilesystemAction => "未対応のファイル操作です",
+        UiTextKey::FileActionDefaults => "ファイル操作の既定値",
+        UiTextKey::MoveDestinationFolders => "移動先フォルダ (Folder1 / Folder2)",
+        UiTextKey::MoveFolder1 => "移動先 Folder1",
+        UiTextKey::MoveFolder2 => "移動先 Folder2",
+        UiTextKey::UseAsMove => "移動先に使う",
+        UiTextKey::ActiveMoveFolder => "現在の移動先",
+        UiTextKey::CopyDestinationFolders => "コピー先フォルダ (Folder1 / Folder2)",
+        UiTextKey::CopyFolder1 => "コピー先 Folder1",
+        UiTextKey::CopyFolder2 => "コピー先 Folder2",
+        UiTextKey::UseAsCopy => "コピー先に使う",
+        UiTextKey::ActiveCopyFolder => "現在のコピー先",
+        UiTextKey::Folder1 => "Folder1",
+        UiTextKey::Folder2 => "Folder2",
+        UiTextKey::AlertTitle => "アラート",
+        UiTextKey::DestinationPathEmpty => "移動先/コピー先のパスが空です",
+        UiTextKey::RenameTargetEmpty => "変更後の名前が空です",
+        UiTextKey::CurrentTargetNotEditableFile => "現在の対象は編集可能なファイルではありません",
+        UiTextKey::RenderWorkerDisconnected => "描画ワーカーとの接続が切断されました",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UiTextKey, tr};
+
+    #[test]
+    fn newly_added_file_action_keys_are_localized_in_english() {
+        assert_eq!(tr("en", UiTextKey::FileActionTarget), "Target");
+        assert_eq!(
+            tr("en", UiTextKey::UnsupportedFilesystemAction),
+            "Unsupported filesystem action"
+        );
+        assert_eq!(tr("en", UiTextKey::UseAsMove), "Use as Move");
+        assert_eq!(tr("en", UiTextKey::UseAsCopy), "Use as Copy");
+        assert_eq!(tr("en", UiTextKey::AlertTitle), "Alert");
+        assert_eq!(
+            tr("en", UiTextKey::CurrentTargetNotEditableFile),
+            "Current target is not editable file"
+        );
+    }
+
+    #[test]
+    fn newly_added_file_action_keys_are_localized_in_japanese() {
+        assert_eq!(tr("ja", UiTextKey::FileActionTarget), "対象");
+        assert_eq!(
+            tr("ja", UiTextKey::UnsupportedFilesystemAction),
+            "未対応のファイル操作です"
+        );
+        assert_eq!(tr("ja", UiTextKey::UseAsMove), "移動先に使う");
+        assert_eq!(tr("ja", UiTextKey::UseAsCopy), "コピー先に使う");
+        assert_eq!(tr("ja", UiTextKey::AlertTitle), "アラート");
+        assert_eq!(
+            tr("ja", UiTextKey::CurrentTargetNotEditableFile),
+            "現在の対象は編集可能なファイルではありません"
+        );
     }
 }

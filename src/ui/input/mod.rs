@@ -1,8 +1,8 @@
 pub(crate) mod dispatch;
 
-use crate::filesystem::function::{FunctionParams, call_fanction_for_action};
 use crate::options::ViewerAction;
 use crate::ui::input::dispatch::collect_triggered_actions;
+use crate::ui::viewer::FileActionDialogMode;
 use crate::ui::viewer::ViewerApp;
 use eframe::egui;
 use std::time::Instant;
@@ -24,10 +24,20 @@ impl ViewerApp {
             return;
         }
 
-        if self.overlay.alert_message.is_some() {
+        if self.overlay.dialog.is_some() {
             self.cancel_pending_single_click_navigation();
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                self.overlay.alert_message = None;
+                self.overlay.dialog = None;
+                self.suppress_next_pointer_intent = true;
+            }
+            return;
+        }
+
+        if self.file_action_dialog.open {
+            self.cancel_pending_single_click_navigation();
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.file_action_dialog.open = false;
+                self.file_action_dialog.mode = None;
                 self.suppress_next_pointer_intent = true;
             }
             return;
@@ -143,17 +153,7 @@ impl ViewerApp {
             ViewerAction::MoveFile
             | ViewerAction::CopyFile
             | ViewerAction::DeleteFile
-            | ViewerAction::RenameFile => match call_fanction_for_action(
-                &self.current_path,
-                action,
-                FunctionParams::default(),
-            ) {
-                Some(Ok(message)) => self.overlay.alert_message = Some(message),
-                Some(Err(err)) => self.overlay.alert_message = Some(err),
-                None => {
-                    self.overlay.alert_message = Some("Unsupported filesystem action".to_string());
-                }
-            },
+            | ViewerAction::RenameFile => self.open_file_action_dialog(action),
         }
     }
 
@@ -184,7 +184,7 @@ impl ViewerApp {
     }
 
     pub(crate) fn pointer_input_blocked(&self) -> bool {
-        self.save_dialog.open || self.overlay.alert_message.is_some()
+        self.save_dialog.open || self.file_action_dialog.open || self.overlay.dialog.is_some()
     }
 
     pub(crate) fn response_has_pointer_intent(&self, response: &egui::Response) -> bool {
@@ -225,6 +225,62 @@ impl ViewerApp {
                 self.left_menu_pos = pos;
                 self.show_left_menu = true;
             }
+        }
+    }
+
+    fn open_file_action_dialog(&mut self, action: ViewerAction) {
+        let mode = match action {
+            ViewerAction::MoveFile => FileActionDialogMode::Move,
+            ViewerAction::CopyFile => FileActionDialogMode::Copy,
+            ViewerAction::DeleteFile => FileActionDialogMode::Delete,
+            ViewerAction::RenameFile => FileActionDialogMode::Rename,
+            _ => return,
+        };
+
+        if !self.current_navigation_path.exists() || !self.current_navigation_path.is_file() {
+            self.open_dialog_with_title_key(
+                crate::ui::i18n::UiTextKey::AlertTitle,
+                format!(
+                    "{}: {}",
+                    self.text(crate::ui::i18n::UiTextKey::CurrentTargetNotEditableFile),
+                    self.current_navigation_path.display()
+                ),
+            );
+            return;
+        }
+
+        self.file_action_dialog.mode = Some(mode);
+        self.file_action_dialog.open = true;
+        match mode {
+            FileActionDialogMode::Move => {
+                self.file_action_dialog.destination_path_input = self
+                    .file_action
+                    .active_move_folder()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default();
+            }
+            FileActionDialogMode::Copy => {
+                self.file_action_dialog.destination_path_input = self
+                    .file_action
+                    .active_copy_folder()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default();
+            }
+            FileActionDialogMode::Rename => {
+                self.file_action_dialog.rename_stem_input = self
+                    .current_navigation_path
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                self.file_action_dialog.rename_extension = self
+                    .current_navigation_path
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+            }
+            FileActionDialogMode::Delete => {}
         }
     }
 }

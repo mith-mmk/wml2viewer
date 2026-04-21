@@ -123,24 +123,21 @@ impl ViewerApp {
                     }
                 });
 
-                ui.menu_button(self.text(UiTextKey::MenuInfoSection), |ui| {
-                    if ui.button(self.text(UiTextKey::ImageInformation)).clicked() {
-                        self.overlay.alert_message = Some(self.current_image_info_text());
-                        close_requested = true;
-                        ui.close();
-                    }
-                });
+                if ui.button(self.text(UiTextKey::ImageInformation)).clicked() {
+                    self.open_dialog_with_title_key(
+                        UiTextKey::MenuInfoSection,
+                        self.current_image_info_text(),
+                    );
+                    close_requested = true;
+                }
 
-                ui.menu_button(self.text(UiTextKey::MenuSettingsSection), |ui| {
-                    if ui.button(self.text(UiTextKey::ToggleSettings)).clicked() {
-                        self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleSettings);
-                        close_requested = true;
-                        ui.close();
-                    }
-                });
+                if ui.button(self.text(UiTextKey::ToggleSettings)).clicked() {
+                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleSettings);
+                    close_requested = true;
+                }
 
                 if ui.button(self.text(UiTextKey::MenuAboutSection)).clicked() {
-                    self.overlay.alert_message = Some(self.about_text());
+                    self.open_dialog_with_title_key(UiTextKey::MenuAboutSection, self.about_text());
                     close_requested = true;
                 }
             });

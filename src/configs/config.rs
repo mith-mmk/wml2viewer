@@ -9,9 +9,9 @@ use crate::dependent::default_config_dir;
 use crate::dependent::plugins::PluginConfig;
 use crate::drawers::affine::InterpolationAlgorithm;
 use crate::options::{
-    AppConfig, EndOfFolderOption, FontSizePreset, InputOptions, KeyBinding, MangaSeparatorOptions,
-    MangaSeparatorStyle, NavigationSortOption, PaneSide, RenderScaleMode, ResourceOptions,
-    RuntimeOptions, StorageOptions, ViewerAction, WindowUiTheme,
+    AppConfig, EndOfFolderOption, FileActionOptions, FileActionSlot, FontSizePreset, InputOptions,
+    KeyBinding, MangaSeparatorOptions, MangaSeparatorStyle, NavigationSortOption, PaneSide,
+    RenderScaleMode, ResourceOptions, RuntimeOptions, StorageOptions, ViewerAction, WindowUiTheme,
 };
 use crate::ui::viewer::options::{
     BackgroundStyle, RenderOptions, ViewerOptions, WindowOptions, WindowSize, WindowStartPosition,
@@ -317,12 +317,14 @@ enum NavigationSortConfigFile {
 #[serde(default)]
 struct FilesystemConfigFile {
     thumbnail: ThumbnailConfigFile,
+    file_action: FileActionConfigFile,
 }
 
 impl Default for FilesystemConfigFile {
     fn default() -> Self {
         Self {
             thumbnail: ThumbnailConfigFile::default(),
+            file_action: FileActionConfigFile::default(),
         }
     }
 }
@@ -339,6 +341,37 @@ impl Default for ThumbnailConfigFile {
             suppress_large_files: true,
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+struct FileActionConfigFile {
+    move_folder1: Option<PathBuf>,
+    move_folder2: Option<PathBuf>,
+    copy_folder1: Option<PathBuf>,
+    copy_folder2: Option<PathBuf>,
+    active_move_slot: FileActionSlotConfigFile,
+    active_copy_slot: FileActionSlotConfigFile,
+}
+
+impl Default for FileActionConfigFile {
+    fn default() -> Self {
+        Self {
+            move_folder1: None,
+            move_folder2: None,
+            copy_folder1: None,
+            copy_folder2: None,
+            active_move_slot: FileActionSlotConfigFile::Folder1,
+            active_copy_slot: FileActionSlotConfigFile::Folder1,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FileActionSlotConfigFile {
+    Folder1,
+    Folder2,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -474,6 +507,7 @@ impl From<ConfigFile> for AppConfig {
         config.navigation.sort = value.navigation.sort.into();
         config.runtime = value.runtime.into();
         config.runtime.workaround.thumbnail = value.filesystem.thumbnail.into();
+        config.file_action = value.filesystem.file_action.into();
         config
     }
 }
@@ -501,6 +535,7 @@ impl ConfigFile {
             resources: value.resources.into(),
             filesystem: FilesystemConfigFile {
                 thumbnail: thumbnail.into(),
+                file_action: value.file_action.into(),
             },
             plugins: value.plugins,
             storage: value.storage.into(),
@@ -586,6 +621,50 @@ impl From<ThumbnailConfigFile> for crate::options::ThumbnailWorkaroundOptions {
     fn from(value: ThumbnailConfigFile) -> Self {
         Self {
             suppress_large_files: value.suppress_large_files,
+        }
+    }
+}
+
+impl From<FileActionConfigFile> for FileActionOptions {
+    fn from(value: FileActionConfigFile) -> Self {
+        Self {
+            move_folder1: value.move_folder1,
+            move_folder2: value.move_folder2,
+            copy_folder1: value.copy_folder1,
+            copy_folder2: value.copy_folder2,
+            active_move_slot: value.active_move_slot.into(),
+            active_copy_slot: value.active_copy_slot.into(),
+        }
+    }
+}
+
+impl From<FileActionOptions> for FileActionConfigFile {
+    fn from(value: FileActionOptions) -> Self {
+        Self {
+            move_folder1: value.move_folder1,
+            move_folder2: value.move_folder2,
+            copy_folder1: value.copy_folder1,
+            copy_folder2: value.copy_folder2,
+            active_move_slot: value.active_move_slot.into(),
+            active_copy_slot: value.active_copy_slot.into(),
+        }
+    }
+}
+
+impl From<FileActionSlotConfigFile> for FileActionSlot {
+    fn from(value: FileActionSlotConfigFile) -> Self {
+        match value {
+            FileActionSlotConfigFile::Folder1 => Self::Folder1,
+            FileActionSlotConfigFile::Folder2 => Self::Folder2,
+        }
+    }
+}
+
+impl From<FileActionSlot> for FileActionSlotConfigFile {
+    fn from(value: FileActionSlot) -> Self {
+        match value {
+            FileActionSlot::Folder1 => Self::Folder1,
+            FileActionSlot::Folder2 => Self::Folder2,
         }
     }
 }

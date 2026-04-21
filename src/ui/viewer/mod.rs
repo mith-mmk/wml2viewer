@@ -9,9 +9,10 @@ use crate::filesystem::{
     is_browser_container, navigation_branch_path, resolve_end_path, resolve_navigation_entry_path,
     resolve_start_path, set_archive_zip_workaround, spawn_filesystem_worker,
 };
+use crate::filesystem::function::{FunctionParams, call_fanction_for_action};
 use crate::options::{
-    AppConfig, EndOfFolderOption, InputOptions, KeyBinding, NavigationSortOption, PluginConfig,
-    ResourceOptions, RuntimeOptions, ViewerAction,
+    AppConfig, EndOfFolderOption, FileActionOptions, InputOptions, KeyBinding,
+    NavigationSortOption, PluginConfig, ResourceOptions, RuntimeOptions, ViewerAction,
 };
 use crate::ui::i18n::{UiTextKey, tr};
 use crate::ui::menu::fileviewer::state::{
@@ -44,8 +45,9 @@ pub mod options;
 mod state;
 use options::ZoomOption;
 pub(crate) use state::KeyMappingRowDraft;
+pub(crate) use state::FileActionDialogMode;
 pub(crate) use state::SettingsDraftState;
-use state::{SaveDialogState, ViewerOverlayState};
+use state::{FileActionDialogState, OverlayDialogState, SaveDialogState, ViewerOverlayState};
 
 const NAVIGATION_REPEAT_INTERVAL: Duration = Duration::from_millis(180);
 const POINTER_SINGLE_CLICK_DELAY: Duration = Duration::from_millis(500);
@@ -83,6 +85,7 @@ pub(crate) struct ViewerApp {
     pub(crate) plugins: PluginConfig,
     pub(crate) storage: crate::options::StorageOptions,
     pub(crate) runtime: RuntimeOptions,
+    pub(crate) file_action: FileActionOptions,
     pub(crate) applied_locale: String,
     pub(crate) loaded_font_names: Vec<String>,
     pub(crate) resource_locale_input: String,
@@ -133,6 +136,7 @@ pub(crate) struct ViewerApp {
     pub(crate) suppress_next_pointer_intent: bool,
     pub(crate) left_menu_pos: Pos2,
     pub(crate) save_dialog: SaveDialogState,
+    pub(crate) file_action_dialog: FileActionDialogState,
     pub(crate) show_filer: bool,
     pub(crate) show_subfiler: bool,
     pub(crate) filer: FilerState,
@@ -472,6 +476,10 @@ fn locale_input_from_config(config: &AppConfig) -> String {
     config.resources.locale.clone().unwrap_or_default()
 }
 
+fn optional_path_to_string(path: Option<&PathBuf>) -> String {
+    path.map(|value| value.display().to_string()).unwrap_or_default()
+}
+
 pub(crate) fn build_settings_draft(config: &AppConfig) -> SettingsDraftState {
     let effective_keymap = config.input.merged_with_defaults();
     SettingsDraftState {
@@ -480,6 +488,10 @@ pub(crate) fn build_settings_draft(config: &AppConfig) -> SettingsDraftState {
         resource_font_paths_input: join_search_paths(&config.resources.font_paths),
         susie64_search_paths_input: join_search_paths(&config.plugins.susie64.search_path),
         ffmpeg_search_paths_input: join_search_paths(&config.plugins.ffmpeg.search_path),
+        move_folder1_input: optional_path_to_string(config.file_action.move_folder1.as_ref()),
+        move_folder2_input: optional_path_to_string(config.file_action.move_folder2.as_ref()),
+        copy_folder1_input: optional_path_to_string(config.file_action.copy_folder1.as_ref()),
+        copy_folder2_input: optional_path_to_string(config.file_action.copy_folder2.as_ref()),
         key_mapping_rows: key_mapping_rows_from_map(&effective_keymap),
         key_mapping_error: None,
     }
@@ -601,6 +613,7 @@ impl ViewerApp {
             plugins: config.plugins,
             storage: config.storage,
             runtime: config.runtime,
+            file_action: config.file_action,
             applied_locale: locale,
             loaded_font_names: loaded_fonts,
             resource_locale_input,
@@ -654,6 +667,7 @@ impl ViewerApp {
                 file_name: default_save_file_name(&path),
                 ..SaveDialogState::default()
             },
+            file_action_dialog: FileActionDialogState::default(),
             show_filer: show_filer_on_start,
             show_subfiler: false,
             filer: FilerState::default(),
@@ -1501,6 +1515,14 @@ impl ViewerApp {
         });
     }
 
+    pub(crate) fn open_dialog(&mut self, title: String, message: String) {
+        self.overlay.dialog = Some(OverlayDialogState { title, message });
+    }
+
+    pub(crate) fn open_dialog_with_title_key(&mut self, title: UiTextKey, message: String) {
+        self.open_dialog(self.text(title).to_string(), message);
+    }
+
     fn color_image_from_canvas(&self, canvas: &Canvas) -> egui::ColorImage {
         let mut image = canvas_to_color_image(canvas);
         if self.options.grayscale {
@@ -1624,6 +1646,203 @@ impl ViewerApp {
         self.save_dialog.open = open;
     }
 
+    fn execute_file_action_dialog(&mut self) {
+        let Some(mode) = self.file_action_dialog.mode else {
+            return;
+        };
+        let target = self.current_navigation_path.clone();
+        let action = match mode {
+            FileActionDialogMode::Move => ViewerAction::MoveFile,
+            FileActionDialogMode::Copy => ViewerAction::CopyFile,
+            FileActionDialogMode::Delete => ViewerAction::DeleteFile,
+            FileActionDialogMode::Rename => ViewerAction::RenameFile,
+        };
+
+        let params = match mode {
+            FileActionDialogMode::Move | FileActionDialogMode::Copy => {
+                let destination = self.file_action_dialog.destination_path_input.trim();
+                if destination.is_empty() {
+                    self.open_dialog_with_title_key(
+                        UiTextKey::AlertTitle,
+                        self.text(UiTextKey::DestinationPathEmpty).to_string(),
+                    );
+                    return;
+                }
+                FunctionParams {
+                    destination_path: Some(PathBuf::from(destination)),
+                    rename_to: None,
+                }
+            }
+            FileActionDialogMode::Delete => FunctionParams::default(),
+            FileActionDialogMode::Rename => {
+                let stem = self.file_action_dialog.rename_stem_input.trim();
+                if stem.is_empty() {
+                    self.open_dialog_with_title_key(
+                        UiTextKey::AlertTitle,
+                        self.text(UiTextKey::RenameTargetEmpty).to_string(),
+                    );
+                    return;
+                }
+                let rename_to = if self.file_action_dialog.rename_extension.is_empty() {
+                    stem.to_string()
+                } else {
+                    format!("{}.{}", stem, self.file_action_dialog.rename_extension)
+                };
+                FunctionParams {
+                    destination_path: None,
+                    rename_to: Some(rename_to),
+                }
+            }
+        };
+
+        match call_fanction_for_action(&target, action, params.clone()) {
+            Some(Ok(message)) => {
+                if matches!(mode, FileActionDialogMode::Move | FileActionDialogMode::Copy) {
+                    let destination =
+                        PathBuf::from(self.file_action_dialog.destination_path_input.trim());
+                    match mode {
+                        FileActionDialogMode::Move => match self.file_action.active_move_slot {
+                            crate::options::FileActionSlot::Folder1 => {
+                                self.file_action.move_folder1 = Some(destination);
+                            }
+                            crate::options::FileActionSlot::Folder2 => {
+                                self.file_action.move_folder2 = Some(destination);
+                            }
+                        },
+                        FileActionDialogMode::Copy => match self.file_action.active_copy_slot {
+                            crate::options::FileActionSlot::Folder1 => {
+                                self.file_action.copy_folder1 = Some(destination);
+                            }
+                            crate::options::FileActionSlot::Folder2 => {
+                                self.file_action.copy_folder2 = Some(destination);
+                            }
+                        },
+                        _ => {}
+                    }
+                    self.persist_config_async();
+                }
+                self.file_action_dialog.open = false;
+                self.file_action_dialog.mode = None;
+                self.save_dialog.message = Some(message);
+
+                match mode {
+                    FileActionDialogMode::Copy => {
+                        self.refresh_current_filer_directory();
+                    }
+                    FileActionDialogMode::Rename => {
+                        let mut renamed_path = target.clone();
+                        let stem = self.file_action_dialog.rename_stem_input.trim();
+                        let file_name = if self.file_action_dialog.rename_extension.is_empty() {
+                            stem.to_string()
+                        } else {
+                            format!("{}.{}", stem, self.file_action_dialog.rename_extension)
+                        };
+                        renamed_path.set_file_name(file_name);
+                        let _ = self.request_load_path(renamed_path.clone());
+                        self.refresh_current_filer_directory();
+                    }
+                    FileActionDialogMode::Move | FileActionDialogMode::Delete => {
+                        let _ = self.next_image();
+                        self.refresh_current_filer_directory();
+                    }
+                }
+            }
+            Some(Err(err)) => {
+                self.open_dialog_with_title_key(UiTextKey::AlertTitle, err);
+            }
+            None => {
+                self.open_dialog_with_title_key(
+                    UiTextKey::AlertTitle,
+                    self.text(UiTextKey::UnsupportedFilesystemAction).to_string(),
+                );
+            }
+        }
+    }
+
+    fn file_action_dialog_ui(&mut self, ctx: &egui::Context) {
+        if !self.file_action_dialog.open {
+            return;
+        }
+
+        let Some(mode) = self.file_action_dialog.mode else {
+            self.file_action_dialog.open = false;
+            return;
+        };
+
+        let mut open = self.file_action_dialog.open;
+        let mut apply_requested = false;
+        let mut close_requested = false;
+        let title = match mode {
+            FileActionDialogMode::Move => self.text(UiTextKey::MoveItem),
+            FileActionDialogMode::Copy => self.text(UiTextKey::CopyItem),
+            FileActionDialogMode::Delete => self.text(UiTextKey::DeleteItem),
+            FileActionDialogMode::Rename => self.text(UiTextKey::RenameItem),
+        };
+        egui::Window::new(title)
+            .open(&mut open)
+            .resizable(false)
+            .collapsible(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "{}: {}",
+                    self.text(UiTextKey::FileActionTarget),
+                    self.current_navigation_path.display()
+                ));
+                match mode {
+                    FileActionDialogMode::Move | FileActionDialogMode::Copy => {
+                        ui.separator();
+                        ui.label(self.text(UiTextKey::Directory));
+                        ui.horizontal(|ui| {
+                            ui.text_edit_singleline(
+                                &mut self.file_action_dialog.destination_path_input,
+                            );
+                            if ui.button(self.text(UiTextKey::Browse)).clicked() {
+                                if let Some(path) = pick_save_directory() {
+                                    self.file_action_dialog.destination_path_input =
+                                        path.to_string_lossy().into_owned();
+                                }
+                            }
+                        });
+                    }
+                    FileActionDialogMode::Delete => {
+                        ui.separator();
+                        ui.label(self.text(UiTextKey::DeleteWithTrashWarning));
+                        ui.label(self.text(UiTextKey::DeleteConfirmQuestion));
+                    }
+                    FileActionDialogMode::Rename => {
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.label(self.text(UiTextKey::NameLabel));
+                            ui.text_edit_singleline(&mut self.file_action_dialog.rename_stem_input);
+                            if !self.file_action_dialog.rename_extension.is_empty() {
+                                ui.label(format!(".{}", self.file_action_dialog.rename_extension));
+                            }
+                        });
+                        ui.label(self.text(UiTextKey::RenameExtensionFixed));
+                    }
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button(self.text(UiTextKey::Apply)).clicked() {
+                        apply_requested = true;
+                    }
+                    if ui.button(self.text(UiTextKey::Cancel)).clicked() {
+                        close_requested = true;
+                    }
+                });
+            });
+
+        if apply_requested {
+            self.execute_file_action_dialog();
+        }
+        if close_requested {
+            open = false;
+            self.file_action_dialog.mode = None;
+        }
+        self.file_action_dialog.open = open;
+    }
+
     fn status_panel_ui(&mut self, ctx: &egui::Context) {
         let Some(message) = &self.save_dialog.message else {
             return;
@@ -1699,25 +1918,25 @@ impl ViewerApp {
     }
 
     fn alert_dialog_ui(&mut self, ctx: &egui::Context) {
-        let Some(message) = self.overlay.alert_message.clone() else {
+        let Some(dialog) = self.overlay.dialog.clone() else {
             return;
         };
 
         let mut open = true;
         let mut close_requested = false;
-        egui::Window::new("Alert")
+        egui::Window::new(dialog.title)
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .open(&mut open)
             .show(ctx, |ui| {
-                ui.label(message);
+                ui.label(dialog.message);
                 if ui.button(self.text(UiTextKey::Close)).clicked() {
                     close_requested = true;
                 }
             });
         if close_requested || !open {
-            self.overlay.alert_message = None;
+            self.overlay.dialog = None;
             self.cancel_pending_single_click_navigation();
             self.suppress_next_pointer_intent = true;
         }
@@ -3582,7 +3801,10 @@ impl ViewerApp {
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     self.log_bench_state("viewer.poll_worker.disconnected", serde_json::json!({}));
-                    self.overlay.alert_message = Some("render worker disconnected".to_string());
+                    self.open_dialog_with_title_key(
+                        UiTextKey::AlertTitle,
+                        self.text(UiTextKey::RenderWorkerDisconnected).to_string(),
+                    );
                     self.overlay.clear_loading_message();
                     self.respawn_render_worker();
                     if !self.empty_mode {
@@ -4197,6 +4419,7 @@ impl eframe::App for ViewerApp {
         self.restart_prompt_ui(ctx);
         self.alert_dialog_ui(ctx);
         self.save_dialog_ui(ctx);
+        self.file_action_dialog_ui(ctx);
         self.left_click_menu_ui(ctx);
         self.run_bench_automation(ctx);
         self.filer_ui(ctx);

@@ -1,4 +1,5 @@
 use crate::options::ViewerAction;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,33 +42,139 @@ pub fn call_function(
     function: FilesystemFunction,
     params: FunctionParams,
 ) -> Result<String, String> {
+    ensure_regular_existing_file(target_path)?;
     match function {
-        FilesystemFunction::MoveFile => match params.destination_path {
-            Some(destination) => Ok(format!(
-                "planned: move {} -> {}",
+        FilesystemFunction::MoveFile => {
+            let destination_dir = params
+                .destination_path
+                .ok_or_else(|| "move requires destination path".to_string())?;
+            let destination = resolve_destination_file_path(target_path, &destination_dir)?;
+            move_file(target_path, &destination)?;
+            Ok(format!(
+                "Moved: {} -> {}",
                 target_path.display(),
                 destination.display()
-            )),
-            None => Err("move requires destination path".to_string()),
-        },
-        FilesystemFunction::CopyFile => match params.destination_path {
-            Some(destination) => Ok(format!(
-                "planned: copy {} -> {}",
+            ))
+        }
+        FilesystemFunction::CopyFile => {
+            let destination_dir = params
+                .destination_path
+                .ok_or_else(|| "copy requires destination path".to_string())?;
+            let destination = resolve_destination_file_path(target_path, &destination_dir)?;
+            fs::copy(target_path, &destination).map_err(|err| err.to_string())?;
+            Ok(format!(
+                "Copied: {} -> {}",
                 target_path.display(),
                 destination.display()
-            )),
-            None => Err("copy requires destination path".to_string()),
-        },
-        FilesystemFunction::DeleteFile => Ok(format!("planned: delete {}", target_path.display())),
-        FilesystemFunction::RenameFile => match params.rename_to {
-            Some(name) if !name.trim().is_empty() => Ok(format!(
-                "planned: rename {} -> {}",
+            ))
+        }
+        FilesystemFunction::DeleteFile => {
+            let deleted_via = if try_move_to_trash(target_path) {
+                "trash"
+            } else {
+                fs::remove_file(target_path).map_err(|err| err.to_string())?;
+                "delete"
+            };
+            Ok(format!("Deleted ({deleted_via}): {}", target_path.display()))
+        }
+        FilesystemFunction::RenameFile => {
+            let new_name = params
+                .rename_to
+                .ok_or_else(|| "rename requires new name".to_string())?;
+            let destination = resolve_rename_path(target_path, &new_name)?;
+            fs::rename(target_path, &destination).map_err(|err| err.to_string())?;
+            Ok(format!(
+                "Renamed: {} -> {}",
                 target_path.display(),
-                name
-            )),
-            _ => Err("rename requires new name".to_string()),
-        },
+                destination.display()
+            ))
+        }
     }
+}
+
+fn ensure_regular_existing_file(target_path: &Path) -> Result<(), String> {
+    if !target_path.exists() {
+        return Err(format!("target does not exist: {}", target_path.display()));
+    }
+    if !target_path.is_file() {
+        return Err(format!(
+            "target is not a regular file: {}",
+            target_path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_destination_file_path(target_path: &Path, destination_dir: &Path) -> Result<PathBuf, String> {
+    if destination_dir.as_os_str().is_empty() {
+        return Err("destination path is empty".to_string());
+    }
+    fs::create_dir_all(destination_dir).map_err(|err| err.to_string())?;
+    let file_name = target_path
+        .file_name()
+        .ok_or_else(|| "target file name not found".to_string())?;
+    Ok(destination_dir.join(file_name))
+}
+
+fn move_file(source: &Path, destination: &Path) -> Result<(), String> {
+    match fs::rename(source, destination) {
+        Ok(()) => Ok(()),
+        Err(rename_err) => {
+            // Cross-device moves can fail with rename; fallback to copy+remove.
+            fs::copy(source, destination).map_err(|copy_err| {
+                format!(
+                    "move failed: {rename_err}; copy fallback failed: {copy_err}"
+                )
+            })?;
+            fs::remove_file(source).map_err(|remove_err| {
+                format!(
+                    "move copy fallback partially failed: copied to {}, but remove failed: {remove_err}",
+                    destination.display()
+                )
+            })
+        }
+    }
+}
+
+fn resolve_rename_path(target_path: &Path, rename_to: &str) -> Result<PathBuf, String> {
+    let new_name = rename_to.trim();
+    if new_name.is_empty() {
+        return Err("rename requires new name".to_string());
+    }
+    if Path::new(new_name).components().count() != 1 {
+        return Err("rename must be a single file name".to_string());
+    }
+    let old_ext = target_path.extension().and_then(|value| value.to_str());
+    let new_ext = Path::new(new_name).extension().and_then(|value| value.to_str());
+    if old_ext != new_ext {
+        return Err("rename cannot change file extension".to_string());
+    }
+    let parent = target_path
+        .parent()
+        .ok_or_else(|| "target parent directory not found".to_string())?;
+    Ok(parent.join(new_name))
+}
+
+#[cfg(target_os = "windows")]
+fn try_move_to_trash(target_path: &Path) -> bool {
+    use std::process::Command;
+
+    let escaped_path = target_path.display().to_string().replace('\'', "''");
+    let script = format!(
+        "Add-Type -AssemblyName Microsoft.VisualBasic; \
+[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('{escaped_path}', \
+[Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs, \
+[Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)"
+    );
+    Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn try_move_to_trash(_target_path: &Path) -> bool {
+    false
 }
 
 pub fn call_function_for_action(
@@ -87,7 +194,6 @@ pub fn call_fanction_for_action(
     call_function_for_action(target_path, action, params)
 }
 
-// Keep compatibility with existing request wording ("call_fanction").
 pub fn call_fanction(
     target_path: &Path,
     function: FilesystemFunction,
@@ -98,49 +204,48 @@ pub fn call_fanction(
 
 #[cfg(test)]
 mod tests {
-    use super::{FilesystemFunction, FunctionParams, call_function, call_function_for_action};
-    use crate::options::ViewerAction;
-    use std::path::Path;
+    use super::{FilesystemFunction, FunctionParams, call_function};
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_test_dir() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("wml2viewer-filefn-{unique}"))
+    }
 
     #[test]
     fn move_without_destination_returns_error() {
+        let root = temp_test_dir();
+        std::fs::create_dir_all(&root).expect("test dir should be created");
+        let src = root.join("a.png");
+        std::fs::write(&src, b"abc").expect("source should be written");
+
+        let result = call_function(&src, FilesystemFunction::MoveFile, FunctionParams::default());
+        assert!(result.is_err());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rename_rejects_extension_change() {
+        let root = temp_test_dir();
+        std::fs::create_dir_all(&root).expect("test dir should be created");
+        let src = root.join("a.png");
+        std::fs::write(&src, b"abc").expect("source should be written");
+
         let result = call_function(
-            Path::new("C:/tmp/a.png"),
-            FilesystemFunction::MoveFile,
-            FunctionParams::default(),
+            &src,
+            FilesystemFunction::RenameFile,
+            FunctionParams {
+                rename_to: Some("b.jpg".to_string()),
+                ..FunctionParams::default()
+            },
         );
         assert!(result.is_err());
-    }
 
-    #[test]
-    fn delete_returns_planned_message() {
-        let result = call_function(
-            Path::new("C:/tmp/a.png"),
-            FilesystemFunction::DeleteFile,
-            FunctionParams::default(),
-        )
-        .expect("delete should produce message");
-        assert!(result.contains("planned: delete"));
-    }
-
-    #[test]
-    fn call_function_for_action_routes_filesystem_actions_only() {
-        let result = call_function_for_action(
-            Path::new("C:/tmp/a.png"),
-            ViewerAction::DeleteFile,
-            FunctionParams::default(),
-        )
-        .expect("filesystem action should be routed")
-        .expect("delete should produce message");
-        assert!(result.contains("planned: delete"));
-
-        assert!(
-            call_function_for_action(
-                Path::new("C:/tmp/a.png"),
-                ViewerAction::NextImage,
-                FunctionParams::default(),
-            )
-            .is_none()
-        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

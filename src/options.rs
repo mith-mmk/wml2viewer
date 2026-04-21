@@ -24,6 +24,7 @@ pub struct AppConfig {
     pub storage: StorageOptions,
     pub input: InputOptions,
     pub navigation: NavigationOptions,
+    pub file_action: FileActionOptions,
     pub runtime: RuntimeOptions,
 }
 
@@ -238,6 +239,60 @@ mod tests {
 pub struct StorageOptions {
     pub path_record: bool,
     pub path: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileActionSlot {
+    Folder1,
+    Folder2,
+}
+
+impl Default for FileActionSlot {
+    fn default() -> Self {
+        Self::Folder1
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct FileActionOptions {
+    pub move_folder1: Option<PathBuf>,
+    pub move_folder2: Option<PathBuf>,
+    pub copy_folder1: Option<PathBuf>,
+    pub copy_folder2: Option<PathBuf>,
+    pub active_move_slot: FileActionSlot,
+    pub active_copy_slot: FileActionSlot,
+}
+
+impl FileActionOptions {
+    pub fn set_move_folder1(&mut self) {
+        self.active_move_slot = FileActionSlot::Folder1;
+    }
+
+    pub fn set_move_folder2(&mut self) {
+        self.active_move_slot = FileActionSlot::Folder2;
+    }
+
+    pub fn set_copy_folder1(&mut self) {
+        self.active_copy_slot = FileActionSlot::Folder1;
+    }
+
+    pub fn set_copy_folder2(&mut self) {
+        self.active_copy_slot = FileActionSlot::Folder2;
+    }
+
+    pub fn active_move_folder(&self) -> Option<&PathBuf> {
+        match self.active_move_slot {
+            FileActionSlot::Folder1 => self.move_folder1.as_ref(),
+            FileActionSlot::Folder2 => self.move_folder2.as_ref(),
+        }
+    }
+
+    pub fn active_copy_folder(&self) -> Option<&PathBuf> {
+        match self.active_copy_slot {
+            FileActionSlot::Folder1 => self.copy_folder1.as_ref(),
+            FileActionSlot::Folder2 => self.copy_folder2.as_ref(),
+        }
+    }
 }
 
 #[derive(Clone)]

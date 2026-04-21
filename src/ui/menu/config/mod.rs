@@ -7,7 +7,8 @@ use crate::dependent::{
 use crate::drawers::affine::InterpolationAlgorithm;
 use crate::filesystem::set_archive_zip_workaround;
 use crate::options::{
-    AppConfig, EndOfFolderOption, KeyBinding, NavigationOptions, PaneSide, ViewerAction,
+    AppConfig, EndOfFolderOption, FileActionSlot, KeyBinding, NavigationOptions, PaneSide,
+    ViewerAction,
     default_key_mapping,
 };
 use crate::ui::i18n::UiTextKey;
@@ -797,6 +798,125 @@ impl ViewerApp {
                         );
                     });
             });
+            ui.separator();
+            ui.label(self.text(UiTextKey::FileActionDefaults));
+            ui.label(self.text(UiTextKey::MoveDestinationFolders));
+            ui.horizontal(|ui| {
+                ui.label(self.text(UiTextKey::MoveFolder1));
+                if ui
+                    .text_edit_singleline(&mut draft_state.move_folder1_input)
+                    .changed()
+                {
+                    draft.file_action.move_folder1 =
+                        parse_optional_path(&draft_state.move_folder1_input);
+                }
+                if ui.button(self.text(UiTextKey::Browse)).clicked() {
+                    if let Some(path) = pick_save_directory() {
+                        draft.file_action.move_folder1 = Some(path);
+                        draft_state.move_folder1_input = draft
+                            .file_action
+                            .move_folder1
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                    }
+                }
+                if ui.button(self.text(UiTextKey::UseAsMove)).clicked() {
+                    draft.file_action.set_move_folder1();
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label(self.text(UiTextKey::MoveFolder2));
+                if ui
+                    .text_edit_singleline(&mut draft_state.move_folder2_input)
+                    .changed()
+                {
+                    draft.file_action.move_folder2 =
+                        parse_optional_path(&draft_state.move_folder2_input);
+                }
+                if ui.button(self.text(UiTextKey::Browse)).clicked() {
+                    if let Some(path) = pick_save_directory() {
+                        draft.file_action.move_folder2 = Some(path);
+                        draft_state.move_folder2_input = draft
+                            .file_action
+                            .move_folder2
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                    }
+                }
+                if ui.button(self.text(UiTextKey::UseAsMove)).clicked() {
+                    draft.file_action.set_move_folder2();
+                }
+            });
+            ui.label(format!(
+                "{}: {}",
+                self.text(UiTextKey::ActiveMoveFolder),
+                match draft.file_action.active_move_slot {
+                    FileActionSlot::Folder1 => self.text(UiTextKey::Folder1),
+                    FileActionSlot::Folder2 => self.text(UiTextKey::Folder2),
+                }
+            ));
+
+            ui.add_space(6.0);
+            ui.label(self.text(UiTextKey::CopyDestinationFolders));
+            ui.horizontal(|ui| {
+                ui.label(self.text(UiTextKey::CopyFolder1));
+                if ui
+                    .text_edit_singleline(&mut draft_state.copy_folder1_input)
+                    .changed()
+                {
+                    draft.file_action.copy_folder1 =
+                        parse_optional_path(&draft_state.copy_folder1_input);
+                }
+                if ui.button(self.text(UiTextKey::Browse)).clicked() {
+                    if let Some(path) = pick_save_directory() {
+                        draft.file_action.copy_folder1 = Some(path);
+                        draft_state.copy_folder1_input = draft
+                            .file_action
+                            .copy_folder1
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                    }
+                }
+                if ui.button(self.text(UiTextKey::UseAsCopy)).clicked() {
+                    draft.file_action.set_copy_folder1();
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label(self.text(UiTextKey::CopyFolder2));
+                if ui
+                    .text_edit_singleline(&mut draft_state.copy_folder2_input)
+                    .changed()
+                {
+                    draft.file_action.copy_folder2 =
+                        parse_optional_path(&draft_state.copy_folder2_input);
+                }
+                if ui.button(self.text(UiTextKey::Browse)).clicked() {
+                    if let Some(path) = pick_save_directory() {
+                        draft.file_action.copy_folder2 = Some(path);
+                        draft_state.copy_folder2_input = draft
+                            .file_action
+                            .copy_folder2
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                    }
+                }
+                if ui.button(self.text(UiTextKey::UseAsCopy)).clicked() {
+                    draft.file_action.set_copy_folder2();
+                }
+            });
+            ui.label(format!(
+                "{}: {}",
+                self.text(UiTextKey::ActiveCopyFolder),
+                match draft.file_action.active_copy_slot {
+                    FileActionSlot::Folder1 => self.text(UiTextKey::Folder1),
+                    FileActionSlot::Folder2 => self.text(UiTextKey::Folder2),
+                }
+            ));
+
             let remember_changed = ui
                 .checkbox(
                     &mut draft.storage.path_record,
@@ -844,23 +964,29 @@ impl ViewerApp {
                         .and_then(|exe| register_system_file_associations(&exe).ok())
                     {
                         Some(()) => {
-                            self.overlay.alert_message =
-                                Some(self.text(UiTextKey::RegisteredFileAssociations).to_string());
+                            self.open_dialog_with_title_key(
+                                UiTextKey::Settings,
+                                self.text(UiTextKey::RegisteredFileAssociations).to_string(),
+                            );
                         }
                         None => {
-                            self.overlay.alert_message =
-                                Some(self.text(UiTextKey::FailedFileAssociations).to_string());
+                            self.open_dialog_with_title_key(
+                                UiTextKey::Settings,
+                                self.text(UiTextKey::FailedFileAssociations).to_string(),
+                            );
                         }
                     }
                 }
                 if ui.button(self.text(UiTextKey::CleanSystem)).clicked() {
                     match clean_system_integration() {
                         Ok(()) => {
-                            self.overlay.alert_message =
-                                Some(self.text(UiTextKey::CleanedSystemIntegration).to_string());
+                            self.open_dialog_with_title_key(
+                                UiTextKey::Settings,
+                                self.text(UiTextKey::CleanedSystemIntegration).to_string(),
+                            );
                         }
                         Err(err) => {
-                            self.overlay.alert_message = Some(err.to_string());
+                            self.open_dialog_with_title_key(UiTextKey::Settings, err.to_string());
                         }
                     }
                 }
@@ -936,6 +1062,7 @@ impl ViewerApp {
         self.plugins = config.plugins;
         self.storage = config.storage;
         self.runtime = config.runtime;
+        self.file_action = config.file_action;
         self.input_options = config.input;
         self.keymap = self.input_options.merged_with_defaults();
         self.end_of_folder = config.navigation.end_of_folder;
@@ -987,6 +1114,7 @@ impl ViewerApp {
             plugins: self.plugins.clone(),
             storage: self.storage.clone(),
             runtime: self.runtime.clone(),
+            file_action: self.file_action.clone(),
             input: self.input_options.clone(),
             resources: self.resources.clone(),
             navigation: NavigationOptions {
@@ -1014,6 +1142,11 @@ fn keymap_from_rows(
     let warning = (!duplicate_rows.is_empty())
         .then(|| format!("{} duplicate binding(s) detected", duplicate_rows.len()));
     (parsed, warning)
+}
+
+fn parse_optional_path(input: &str) -> Option<std::path::PathBuf> {
+    let trimmed = input.trim();
+    (!trimmed.is_empty()).then(|| std::path::PathBuf::from(trimmed))
 }
 
 fn can_encode_with_default_overlay(
