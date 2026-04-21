@@ -4,3 +4,4 @@ dist/
 .test*
 Cargo.lock
 test_data/
+.env
