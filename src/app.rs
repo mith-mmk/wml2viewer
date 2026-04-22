@@ -16,7 +16,7 @@ use std::error::Error;
 use std::path::Path;
 use std::path::PathBuf;
 
-const APP_ICON_PNG: &[u8] = include_bytes!("../resources/wml2viwer.png");
+const APP_ICON_PNG: &[u8] = include_bytes!("../resources/wml2viewer.png");
 
 pub fn run(
     image_path: Option<PathBuf>,

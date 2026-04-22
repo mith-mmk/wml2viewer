@@ -205,11 +205,11 @@ impl ViewerApp {
     fn about_text(&self) -> String {
         format!(
             "{}\n{}: {}\n{}: {}\n{}: {}",
-            crate::get_prograname(),
+            crate::get_program_name(),
             self.text(UiTextKey::Version),
             crate::get_version(),
             self.text(UiTextKey::Author),
-            crate::get_auther(),
+            crate::get_author(),
             self.text(UiTextKey::Copyright),
             crate::get_copyright(),
         )

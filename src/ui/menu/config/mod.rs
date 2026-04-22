@@ -939,7 +939,7 @@ impl ViewerApp {
             ui.label(format!(
                 "{}: {}",
                 self.text(UiTextKey::ProgramName),
-                crate::get_prograname()
+                crate::get_program_name()
             ));
             ui.label(format!(
                 "{}: {}",
@@ -949,7 +949,7 @@ impl ViewerApp {
             ui.label(format!(
                 "{}: {}",
                 self.text(UiTextKey::Author),
-                crate::get_auther()
+                crate::get_author()
             ));
             ui.label(format!(
                 "{}: {}",
