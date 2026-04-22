@@ -647,7 +647,7 @@
 - [x] 名前でソートのicon(sort.svg)を差し替えました
 - [x] 設定: タブ[システム]を最後追加し[拡張子を登録]と[システム登録を削除]をウィンドウから移動
 - [x] 設定: タブ[システム]: 
-    - [x] get_prograname() ,get_version(), get_copyright(), get_auther() 取得したプログラム名、(C) 作者名 バージョン表記
+    - [x] get_program_name(), get_version(), get_copyright(), get_author() 取得したプログラム名、(C) 作者名 バージョン表記
     - [x] [拡張子を登録]と[システム登録を削除]
 - [+] issue: 設定：ナビゲーション→[保存先を記憶]を押すと固まりやすい
 - [x] issue: [`home`][`end`]を押したときzip(仮想フォルダ)の最初と最後ではなく、フォルダの最後のzipに飛ぶ

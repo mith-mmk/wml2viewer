@@ -1,8 +1,8 @@
 #[cfg(target_os = "windows")]
 fn main() {
     let mut res = winres::WindowsResource::new();
-    res.set_icon("resources/wml2viwer.ico");
-    let _ = res.compile();
+    res.set_icon("resources/wml2viewer.ico");
+    res.compile().expect("failed to compile Windows resources");
 }
 
 #[cfg(not(target_os = "windows"))]
