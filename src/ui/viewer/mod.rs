@@ -4,12 +4,12 @@ use crate::configs::resourses::{AppliedResources, apply_resources};
 use crate::dependent::{default_download_dir, default_temp_dir, pick_save_directory};
 use crate::drawers::canvas::Canvas;
 use crate::drawers::image::{LoadedImage, SaveFormat, save_loaded_image};
+use crate::filesystem::function::{FunctionParams, call_fanction_for_action};
 use crate::filesystem::{
     FilesystemCommand, FilesystemResult, adjacent_entry, archive_prefers_low_io,
     is_browser_container, navigation_branch_path, resolve_end_path, resolve_navigation_entry_path,
     resolve_start_path, set_archive_zip_workaround, spawn_filesystem_worker,
 };
-use crate::filesystem::function::{FunctionParams, call_fanction_for_action};
 use crate::options::{
     AppConfig, EndOfFolderOption, FileActionOptions, InputOptions, KeyBinding,
     NavigationSortOption, PluginConfig, ResourceOptions, RuntimeOptions, ViewerAction,
@@ -41,14 +41,14 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-pub mod options;
 mod dialogs;
 mod navigation;
+pub mod options;
 mod state;
 mod workers;
 use options::ZoomOption;
-pub(crate) use state::KeyMappingRowDraft;
 pub(crate) use state::FileActionDialogMode;
+pub(crate) use state::KeyMappingRowDraft;
 pub(crate) use state::SettingsDraftState;
 use state::{FileActionDialogState, OverlayDialogState, SaveDialogState, ViewerOverlayState};
 
@@ -490,7 +490,8 @@ fn locale_input_from_config(config: &AppConfig) -> String {
 }
 
 fn optional_path_to_string(path: Option<&PathBuf>) -> String {
-    path.map(|value| value.display().to_string()).unwrap_or_default()
+    path.map(|value| value.display().to_string())
+        .unwrap_or_default()
 }
 
 pub(crate) fn build_settings_draft(config: &AppConfig) -> SettingsDraftState {
@@ -2374,7 +2375,6 @@ impl ViewerApp {
         Ok(())
     }
 }
-
 
 impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {

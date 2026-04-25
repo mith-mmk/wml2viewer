@@ -432,5 +432,3 @@ fn blend_rgba(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
 #[cfg(test)]
 #[path = "../../tests/support/src/drawers/image_tests.rs"]
 mod tests;
-
-

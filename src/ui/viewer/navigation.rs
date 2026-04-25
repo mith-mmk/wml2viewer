@@ -287,7 +287,4 @@ impl ViewerApp {
         );
         self.respawn_filesystem_worker();
     }
-
 }
-
-

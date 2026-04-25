@@ -52,5 +52,3 @@ fn normalize_extensions(extensions: Vec<String>) -> BTreeSet<String> {
 #[cfg(test)]
 #[path = "../tests/support/src/wml2_formats_tests.rs"]
 mod tests;
-
-

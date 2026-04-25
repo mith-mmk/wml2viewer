@@ -8,8 +8,7 @@ use crate::drawers::affine::InterpolationAlgorithm;
 use crate::filesystem::set_archive_zip_workaround;
 use crate::options::{
     AppConfig, EndOfFolderOption, FileActionSlot, KeyBinding, NavigationOptions, PaneSide,
-    ViewerAction,
-    default_key_mapping,
+    ViewerAction, default_key_mapping,
 };
 use crate::ui::i18n::UiTextKey;
 use crate::ui::input::dispatch::{
@@ -1306,5 +1305,3 @@ fn normalize_draft_render_options(render: &mut crate::ui::viewer::options::Rende
         render.zoom_method = InterpolationAlgorithm::Bilinear;
     }
 }
-
-

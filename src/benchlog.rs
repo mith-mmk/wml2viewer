@@ -96,5 +96,3 @@ fn timestamp_token() -> String {
 #[cfg(test)]
 #[path = "../tests/support/src/benchlog_tests.rs"]
 mod tests;
-
-

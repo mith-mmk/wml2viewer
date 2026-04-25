@@ -350,5 +350,3 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 #[cfg(test)]
 #[path = "../../tests/support/src/drawers/affine_tests.rs"]
 mod tests;
-
-

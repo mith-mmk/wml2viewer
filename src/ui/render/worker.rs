@@ -290,5 +290,3 @@ pub(crate) fn worker_send_error(err: mpsc::SendError<RenderCommand>) -> Box<dyn 
 #[cfg(test)]
 #[path = "../../../tests/support/src/ui/render/worker_tests.rs"]
 mod tests;
-
-

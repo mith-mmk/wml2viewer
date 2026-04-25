@@ -15,10 +15,12 @@ use crate::ui::viewer::ViewerApp;
 use crate::ui::viewer::options::PaneSide;
 use chrono::{DateTime, Local};
 use eframe::egui;
-use exif::{In, Reader, Tag};
-use std::fs::File;
-use std::io::BufReader;
 use std::time::SystemTime;
+use wml2::draw::image_from_file;
+use wml2::metadata::exif::parse_exif;
+use wml2::metadata::{DataMap, Metadata};
+use wml2::tiff::header::{DataPack, TiffHeader};
+use wml2::tiff::tags::{gps_mapper, tag_mapper};
 
 impl ViewerApp {
     pub(crate) fn left_click_menu_ui(&mut self, ctx: &egui::Context) {
@@ -977,78 +979,204 @@ fn file_format_label(path: &std::path::Path) -> String {
 fn append_exif_sections(lines: &mut Vec<String>, path: &std::path::Path) {
     lines.push(String::new());
     lines.push("[EXIF / Camera]".to_string());
-    let file = match File::open(path) {
-        Ok(file) => file,
-        Err(_) => {
-            lines.push("(not available)".to_string());
-            lines.push(String::new());
-            lines.push("[EXIF / Shooting]".to_string());
-            lines.push("(not available)".to_string());
-            lines.push(String::new());
-            lines.push("[EXIF / GPS]".to_string());
-            lines.push("(not available)".to_string());
-            return;
-        }
-    };
-    let mut reader = BufReader::new(file);
-    let exif = match Reader::new().read_from_container(&mut reader) {
-        Ok(exif) => exif,
-        Err(_) => {
-            lines.push("(not available)".to_string());
-            lines.push(String::new());
-            lines.push("[EXIF / Shooting]".to_string());
-            lines.push("(not available)".to_string());
-            lines.push(String::new());
-            lines.push("[EXIF / GPS]".to_string());
-            lines.push("(not available)".to_string());
-            return;
-        }
+    let Some(tags) = load_wml2_exif_tags(path) else {
+        append_empty_exif_sections(lines);
+        return;
     };
 
-    let camera_tags = [Tag::Make, Tag::Model, Tag::LensModel, Tag::Software];
-    let shooting_tags = [
-        Tag::DateTimeOriginal,
-        Tag::ExposureTime,
-        Tag::FNumber,
-        Tag::ISOSpeed,
-        Tag::FocalLength,
-        Tag::ExposureBiasValue,
-        Tag::Flash,
-        Tag::WhiteBalance,
-    ];
-    let gps_tags = [
-        Tag::GPSLatitude,
-        Tag::GPSLongitude,
-        Tag::GPSAltitude,
-        Tag::GPSDateStamp,
-        Tag::GPSTimeStamp,
-    ];
-
-    append_exif_tag_group(lines, &exif, &camera_tags);
+    append_exif_tag_group(
+        lines,
+        &tags,
+        &[
+            ExifTagSpec::primary(0x010f),
+            ExifTagSpec::primary(0x0110),
+            ExifTagSpec::exif(0xa434),
+            ExifTagSpec::primary(0x0131),
+        ],
+    );
     lines.push(String::new());
     lines.push("[EXIF / Shooting]".to_string());
-    append_exif_tag_group(lines, &exif, &shooting_tags);
+    append_exif_tag_group(
+        lines,
+        &tags,
+        &[
+            ExifTagSpec::exif(0x9003),
+            ExifTagSpec::exif(0x829a),
+            ExifTagSpec::exif(0x829d),
+            ExifTagSpec::exif(0x8827),
+            ExifTagSpec::exif(0x920a),
+            ExifTagSpec::exif(0x9204),
+            ExifTagSpec::exif(0x9209),
+            ExifTagSpec::exif(0xa403),
+        ],
+    );
     lines.push(String::new());
     lines.push("[EXIF / GPS]".to_string());
-    append_exif_tag_group(lines, &exif, &gps_tags);
+    append_exif_tag_group(
+        lines,
+        &tags,
+        &[
+            ExifTagSpec::gps(0x0002),
+            ExifTagSpec::gps(0x0004),
+            ExifTagSpec::gps(0x0006),
+            ExifTagSpec::gps(0x001d),
+            ExifTagSpec::gps(0x0007),
+        ],
+    );
 }
 
-fn append_exif_tag_group(lines: &mut Vec<String>, exif: &exif::Exif, tags: &[Tag]) {
+fn append_empty_exif_sections(lines: &mut Vec<String>) {
+    lines.push("(not available)".to_string());
+    lines.push(String::new());
+    lines.push("[EXIF / Shooting]".to_string());
+    lines.push("(not available)".to_string());
+    lines.push(String::new());
+    lines.push("[EXIF / GPS]".to_string());
+    lines.push("(not available)".to_string());
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExifIfdKind {
+    Primary,
+    Exif,
+    Gps,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExifTagSpec {
+    ifd: ExifIfdKind,
+    tagid: u16,
+}
+
+impl ExifTagSpec {
+    const fn primary(tagid: u16) -> Self {
+        Self {
+            ifd: ExifIfdKind::Primary,
+            tagid,
+        }
+    }
+
+    const fn exif(tagid: u16) -> Self {
+        Self {
+            ifd: ExifIfdKind::Exif,
+            tagid,
+        }
+    }
+
+    const fn gps(tagid: u16) -> Self {
+        Self {
+            ifd: ExifIfdKind::Gps,
+            tagid,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct ExifTagSets {
+    primary: Vec<TiffHeader>,
+    exif: Vec<TiffHeader>,
+    gps: Vec<TiffHeader>,
+}
+
+fn load_wml2_exif_tags(path: &std::path::Path) -> Option<ExifTagSets> {
+    let image = image_from_file(path.to_string_lossy().into_owned()).ok()?;
+    let metadata = image.metadata.as_ref()?;
+    exif_tags_from_metadata(metadata)
+}
+
+fn exif_tags_from_metadata(metadata: &Metadata) -> Option<ExifTagSets> {
+    exif_tags_from_value(metadata.get("EXIF"))
+        .or_else(|| exif_tags_from_value(metadata.get("Tiff headers")))
+}
+
+fn exif_tags_from_value(value: Option<&DataMap>) -> Option<ExifTagSets> {
+    let headers = match value? {
+        DataMap::Exif(headers) => headers.clone(),
+        DataMap::Raw(bytes) => parse_exif(bytes).ok()?,
+        _ => return None,
+    };
+
+    Some(ExifTagSets {
+        primary: headers.headers,
+        exif: headers.exif.unwrap_or_default(),
+        gps: headers.gps.unwrap_or_default(),
+    })
+}
+
+fn append_exif_tag_group(lines: &mut Vec<String>, tags: &ExifTagSets, specs: &[ExifTagSpec]) {
     let mut found = 0usize;
-    for tag in tags {
-        if let Some(field) = exif.get_field(*tag, In::PRIMARY) {
-            let value = normalize_backslash_display(&field.display_value().with_unit(exif).to_string());
-            lines.push(format!(
-                "{}: {}",
-                field.tag,
-                value
-            ));
+    for spec in specs {
+        if let Some(line) = format_exif_tag_line(tags, *spec) {
+            lines.push(line);
             found += 1;
         }
     }
     if found == 0 {
         lines.push("(not available)".to_string());
     }
+}
+
+fn format_exif_tag_line(tags: &ExifTagSets, spec: ExifTagSpec) -> Option<String> {
+    let headers = match spec.ifd {
+        ExifIfdKind::Primary => &tags.primary,
+        ExifIfdKind::Exif => &tags.exif,
+        ExifIfdKind::Gps => &tags.gps,
+    };
+    let header = headers
+        .iter()
+        .find(|header| header.tagid == spec.tagid as usize)?;
+    let name = match spec.ifd {
+        ExifIfdKind::Gps => gps_mapper(spec.tagid, &header.data, header.length).0,
+        _ => tag_mapper(spec.tagid, &header.data, header.length).0,
+    };
+    let value = normalize_backslash_display(
+        format_tiff_data(&header.data, header.length)
+            .trim()
+            .trim_end_matches('\0'),
+    );
+    Some(format!("{name}: {value}"))
+}
+
+fn format_tiff_data(data: &DataPack, length: usize) -> String {
+    match data {
+        DataPack::Ascii(value) => value.clone(),
+        DataPack::Bytes(values) => format_scalar_list(values.iter().take(length).copied()),
+        DataPack::SByte(values) => format_scalar_list(values.iter().take(length).copied()),
+        DataPack::Short(values) => format_scalar_list(values.iter().take(length).copied()),
+        DataPack::Long(values) => format_scalar_list(values.iter().take(length).copied()),
+        DataPack::SShort(values) => format_scalar_list(values.iter().take(length).copied()),
+        DataPack::SLong(values) => format_scalar_list(values.iter().take(length).copied()),
+        DataPack::Float(values) => format_scalar_list(values.iter().take(length).copied()),
+        DataPack::Double(values) => format_scalar_list(values.iter().take(length).copied()),
+        DataPack::Rational(values) => values
+            .iter()
+            .take(length)
+            .map(|value| format!("{}/{}", value.n, value.d))
+            .collect::<Vec<_>>()
+            .join(" "),
+        DataPack::SRational(values) => values
+            .iter()
+            .take(length)
+            .map(|value| format!("{}/{}", value.n, value.d))
+            .collect::<Vec<_>>()
+            .join(" "),
+        DataPack::Unkown(values) | DataPack::Undef(values) => values
+            .iter()
+            .take(length)
+            .map(|value| format!("{value:02x}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
+}
+
+fn format_scalar_list<T>(values: impl Iterator<Item = T>) -> String
+where
+    T: std::fmt::Display,
+{
+    values
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn normalize_backslash_display(text: &str) -> String {
@@ -1066,5 +1194,3 @@ fn normalize_backslash_display(text: &str) -> String {
 #[cfg(test)]
 #[path = "../../../../tests/support/src/ui/menu/fileviewer/mod_tests.rs"]
 mod tests;
-
-

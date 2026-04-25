@@ -405,5 +405,3 @@ fn decode_zip_name(file: &zip::read::ZipFile<'_>) -> String {
 #[cfg(test)]
 #[path = "../../tests/support/src/filesystem/zip_file_tests.rs"]
 mod tests;
-
-

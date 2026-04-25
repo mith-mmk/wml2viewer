@@ -232,5 +232,3 @@ fn auto_font_size(monitor_size: egui::Vec2, pixels_per_point: f32) -> f32 {
 #[cfg(test)]
 #[path = "../../../tests/support/src/configs/resourses/mod_tests.rs"]
 mod tests;
-
-

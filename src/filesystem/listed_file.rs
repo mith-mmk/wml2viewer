@@ -54,5 +54,3 @@ fn parse_listed_file_text(path: &Path, text: &str) -> Option<Vec<PathBuf>> {
 #[cfg(test)]
 #[path = "../../tests/support/src/filesystem/listed_file_tests.rs"]
 mod tests;
-
-

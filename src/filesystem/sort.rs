@@ -124,5 +124,3 @@ fn trim_leading_zeros(chars: &[char]) -> &[char] {
 #[cfg(test)]
 #[path = "../../tests/support/src/filesystem/sort_tests.rs"]
 mod tests;
-
-

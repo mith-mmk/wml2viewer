@@ -154,5 +154,3 @@ fn windows_drive_root(path: &Path) -> Option<std::path::PathBuf> {
 #[cfg(test)]
 #[path = "../tests/support/src/path_classification_tests.rs"]
 mod tests;
-
-

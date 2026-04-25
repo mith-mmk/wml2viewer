@@ -173,5 +173,3 @@ fn usage_error(program: &OsString) -> Box<dyn Error> {
 #[cfg(test)]
 #[path = "../tests/support/src/main_tests.rs"]
 mod tests;
-
-

@@ -360,5 +360,3 @@ pub enum NavigationSortOption {
     Date,
     Size,
 }
-
-

@@ -207,5 +207,3 @@ fn bench_path_context(path: &Path) -> serde_json::Value {
 #[cfg(test)]
 #[path = "../tests/support/src/app_tests.rs"]
 mod tests;
-
-

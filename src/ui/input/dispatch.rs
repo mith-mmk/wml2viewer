@@ -108,5 +108,3 @@ fn key_name_to_egui(key: &str) -> Option<egui::Key> {
 #[cfg(test)]
 #[path = "../../../tests/support/src/ui/input/dispatch_tests.rs"]
 mod tests;
-
-

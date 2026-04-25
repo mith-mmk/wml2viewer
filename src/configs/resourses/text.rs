@@ -671,5 +671,3 @@ fn ja(key: UiTextKey) -> &'static str {
 #[cfg(test)]
 #[path = "../../../tests/support/src/configs/resourses/text_tests.rs"]
 mod tests;
-
-

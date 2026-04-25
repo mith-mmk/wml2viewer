@@ -575,5 +575,3 @@ fn runtime_plugin_extensions() -> &'static Mutex<Vec<String>> {
 #[cfg(test)]
 #[path = "../../../tests/support/src/dependent/plugins/mod_tests.rs"]
 mod tests;
-
-

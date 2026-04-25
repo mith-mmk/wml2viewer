@@ -154,5 +154,3 @@ fn to_utf16(path: &Path) -> Vec<u16> {
 #[cfg(all(test, target_os = "windows"))]
 #[path = "../../../tests/support/src/dependent/plugins/system_tests.rs"]
 mod tests;
-
-

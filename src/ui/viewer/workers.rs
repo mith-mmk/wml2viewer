@@ -76,7 +76,11 @@ impl ViewerApp {
         self.preload_cache.remove(index)
     }
 
-    pub(super) fn apply_companion_loaded(&mut self, path: Option<PathBuf>, display: DisplayedPageState) {
+    pub(super) fn apply_companion_loaded(
+        &mut self,
+        path: Option<PathBuf>,
+        display: DisplayedPageState,
+    ) {
         let previous_companion = self.companion_display.clone();
         let layout_changed = path.is_some()
             || previous_companion
@@ -204,7 +208,10 @@ impl ViewerApp {
         Ok(())
     }
 
-    pub(super) fn request_navigation(&mut self, mut command: FilesystemCommand) -> Result<(), Box<dyn Error>> {
+    pub(super) fn request_navigation(
+        &mut self,
+        mut command: FilesystemCommand,
+    ) -> Result<(), Box<dyn Error>> {
         self.sync_navigation_sort_with_filer_sort();
         self.spawn_navigation_workers();
         if !self.navigator_ready {
@@ -1317,5 +1324,3 @@ impl ViewerApp {
         }
     }
 }
-
-

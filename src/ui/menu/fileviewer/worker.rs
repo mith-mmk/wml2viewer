@@ -439,5 +439,3 @@ fn label_for_path(path: &std::path::Path) -> String {
 #[cfg(test)]
 #[path = "../../../../tests/support/src/ui/menu/fileviewer/worker_tests.rs"]
 mod tests;
-
-

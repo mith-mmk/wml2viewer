@@ -1379,5 +1379,3 @@ fn metadata_size_key(path: &Path) -> u64 {
 #[cfg(test)]
 #[path = "../../tests/support/src/filesystem/mod_tests.rs"]
 mod tests;
-
-

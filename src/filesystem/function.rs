@@ -75,7 +75,10 @@ pub fn call_function(
                 fs::remove_file(target_path).map_err(|err| err.to_string())?;
                 "delete"
             };
-            Ok(format!("Deleted ({deleted_via}): {}", target_path.display()))
+            Ok(format!(
+                "Deleted ({deleted_via}): {}",
+                target_path.display()
+            ))
         }
         FilesystemFunction::RenameFile => {
             let new_name = params
@@ -105,7 +108,10 @@ fn ensure_regular_existing_file(target_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_destination_file_path(target_path: &Path, destination_dir: &Path) -> Result<PathBuf, String> {
+fn resolve_destination_file_path(
+    target_path: &Path,
+    destination_dir: &Path,
+) -> Result<PathBuf, String> {
     if destination_dir.as_os_str().is_empty() {
         return Err("destination path is empty".to_string());
     }
@@ -122,9 +128,7 @@ fn move_file(source: &Path, destination: &Path) -> Result<(), String> {
         Err(rename_err) => {
             // Cross-device moves can fail with rename; fallback to copy+remove.
             fs::copy(source, destination).map_err(|copy_err| {
-                format!(
-                    "move failed: {rename_err}; copy fallback failed: {copy_err}"
-                )
+                format!("move failed: {rename_err}; copy fallback failed: {copy_err}")
             })?;
             fs::remove_file(source).map_err(|remove_err| {
                 format!(
@@ -145,7 +149,9 @@ fn resolve_rename_path(target_path: &Path, rename_to: &str) -> Result<PathBuf, S
         return Err("rename must be a single file name".to_string());
     }
     let old_ext = target_path.extension().and_then(|value| value.to_str());
-    let new_ext = Path::new(new_name).extension().and_then(|value| value.to_str());
+    let new_ext = Path::new(new_name)
+        .extension()
+        .and_then(|value| value.to_str());
     if old_ext != new_ext {
         return Err("rename cannot change file extension".to_string());
     }
@@ -205,5 +211,3 @@ pub fn call_fanction(
 #[cfg(test)]
 #[path = "../../tests/support/src/filesystem/function_tests.rs"]
 mod tests;
-
-

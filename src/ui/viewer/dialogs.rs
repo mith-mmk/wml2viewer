@@ -175,7 +175,10 @@ impl ViewerApp {
 
         match call_fanction_for_action(&target, action, params.clone()) {
             Some(Ok(message)) => {
-                if matches!(mode, FileActionDialogMode::Move | FileActionDialogMode::Copy) {
+                if matches!(
+                    mode,
+                    FileActionDialogMode::Move | FileActionDialogMode::Copy
+                ) {
                     let destination =
                         PathBuf::from(self.file_action_dialog.destination_path_input.trim());
                     match mode {
@@ -231,7 +234,8 @@ impl ViewerApp {
             None => {
                 self.open_dialog_with_title_key(
                     UiTextKey::AlertTitle,
-                    self.text(UiTextKey::UnsupportedFilesystemAction).to_string(),
+                    self.text(UiTextKey::UnsupportedFilesystemAction)
+                        .to_string(),
                 );
             }
         }
@@ -419,6 +423,4 @@ impl ViewerApp {
             self.suppress_next_pointer_intent = true;
         }
     }
-
 }
-
