@@ -62,4 +62,5 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - Enabling providers allows formats like `avif` and `jp2` to be handled
 
 # update log
-- 2026-04-17: 0.0.14 preview3 released
+- 2026-04-17 0.0.14 preview3 released
+- 2026-04-25 0.0.15 preview4 released, right click menu added, key bidings added, and some bugs fixed.
