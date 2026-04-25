@@ -28,7 +28,6 @@
 - Windows リソースコンパイル時のアイコンファイル名を修正（`wml2viwer` → `wml2viewer`）
 - コードの可読性・保守性向上のためのリファクタリング
 - テストフォーマットおよび構造の改善
-- `.env` を `.gitignore` に追加
 
 ---
 
@@ -49,8 +48,6 @@
 - `benchlog.rs` によるベンチマークログ機能の追加
 - `DisplayedPageState` に関連フィールドを統合したコンパニオン状態管理のリファクタリング
 - プリロードキャッシュ機能の追加
-- ドキュメント整備（`docs/modules.md`, `docs/state.md`, `docs/nexttodo.md`, `docs/followup.md`）
-- CI/CD ワークフロー設定（`.github/workflows/release.yml`）
 
 ### Fixed
 - Zip ナビゲーションのバグ修正
