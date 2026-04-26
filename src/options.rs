@@ -51,6 +51,10 @@ pub enum ViewerAction {
     CopyFile,
     DeleteFile,
     RenameFile,
+    SetMoveFolder1,
+    SetMoveFolder2,
+    SetCopyFolder1,
+    SetCopyFolder2,
 }
 
 impl ViewerAction {
@@ -77,6 +81,10 @@ impl ViewerAction {
             ViewerAction::CopyFile,
             ViewerAction::DeleteFile,
             ViewerAction::RenameFile,
+            ViewerAction::SetMoveFolder1,
+            ViewerAction::SetMoveFolder2,
+            ViewerAction::SetCopyFolder1,
+            ViewerAction::SetCopyFolder2,
         ]
     }
 
@@ -103,6 +111,10 @@ impl ViewerAction {
             ViewerAction::CopyFile => "CopyFile",
             ViewerAction::DeleteFile => "DeleteFile",
             ViewerAction::RenameFile => "RenameFile",
+            ViewerAction::SetMoveFolder1 => "SetMoveFolder1",
+            ViewerAction::SetMoveFolder2 => "SetMoveFolder2",
+            ViewerAction::SetCopyFolder1 => "SetCopyFolder1",
+            ViewerAction::SetCopyFolder2 => "SetCopyFolder2",
         }
     }
 

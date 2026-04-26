@@ -1229,6 +1229,10 @@ fn viewer_action_label(viewer: &ViewerApp, action: ViewerAction) -> &'static str
         ViewerAction::CopyFile => viewer.text(UiTextKey::CopyFileAction),
         ViewerAction::DeleteFile => viewer.text(UiTextKey::DeleteFileAction),
         ViewerAction::RenameFile => viewer.text(UiTextKey::RenameFileAction),
+        ViewerAction::SetMoveFolder1 => viewer.text(UiTextKey::SetMoveFolder1Action),
+        ViewerAction::SetMoveFolder2 => viewer.text(UiTextKey::SetMoveFolder2Action),
+        ViewerAction::SetCopyFolder1 => viewer.text(UiTextKey::SetCopyFolder1Action),
+        ViewerAction::SetCopyFolder2 => viewer.text(UiTextKey::SetCopyFolder2Action),
     }
 }
 

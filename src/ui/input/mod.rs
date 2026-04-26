@@ -154,6 +154,10 @@ impl ViewerApp {
             | ViewerAction::CopyFile
             | ViewerAction::DeleteFile
             | ViewerAction::RenameFile => self.open_file_action_dialog(action),
+            ViewerAction::SetMoveFolder1 => self.set_active_file_action_slot(action),
+            ViewerAction::SetMoveFolder2 => self.set_active_file_action_slot(action),
+            ViewerAction::SetCopyFolder1 => self.set_active_file_action_slot(action),
+            ViewerAction::SetCopyFolder2 => self.set_active_file_action_slot(action),
         }
     }
 
@@ -282,5 +286,16 @@ impl ViewerApp {
             }
             FileActionDialogMode::Delete => {}
         }
+    }
+
+    fn set_active_file_action_slot(&mut self, action: ViewerAction) {
+        match action {
+            ViewerAction::SetMoveFolder1 => self.file_action.set_move_folder1(),
+            ViewerAction::SetMoveFolder2 => self.file_action.set_move_folder2(),
+            ViewerAction::SetCopyFolder1 => self.file_action.set_copy_folder1(),
+            ViewerAction::SetCopyFolder2 => self.file_action.set_copy_folder2(),
+            _ => return,
+        }
+        self.persist_config_async();
     }
 }

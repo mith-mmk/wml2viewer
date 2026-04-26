@@ -95,6 +95,8 @@
   - `Key` 欄はキー入力イベントを直接拾って入力できる（キーボード + マウスボタン + ホイール）
   - マウス入力は `MousePrimary` / `MouseSecondary` / `MouseMiddle` / `MouseExtra1` / `MouseExtra2` / `MouseWheelUp` / `MouseWheelDown` を扱う
   - 同一キー+修飾キーの重複は UI 上で警告表示し、適用時は後勝ちで解決する
+  - `SetMoveFolder1` / `SetMoveFolder2` / `SetCopyFolder1` / `SetCopyFolder2` は、ファイル操作ダイアログを開かずに移動先・コピー先の active slot だけを切り替える
+  - active slot の切り替えは即時に `config.toml` へ保存し、次回の `MoveFile` / `CopyFile` ダイアログ初期値へ反映する
 
 ### ファンクション追加手順（実装者向け）
 
@@ -191,6 +193,8 @@
 - Filer
   - directory scan を worker 化する
   - sort / filter / extension filter / thumbnail を持つ
+  - メインファイラーは左右どちらかの `SidePanel`、サブファイラーは下部 `TopBottomPanel` として表示し、ビューアー中央表示の周辺に固定する
+  - サムネイルはファイラー内の view mode とサブファイラー内の横スクロール領域で表示し、独立した浮動ウィンドウにはしない
 
 ## 旧SPECからの整理点
 
