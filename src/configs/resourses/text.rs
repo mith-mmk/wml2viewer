@@ -487,14 +487,14 @@ fn ja(key: UiTextKey) -> &'static str {
         UiTextKey::WindowSizeExact => "ウィンドウサイズ: 固定",
         UiTextKey::UseExactSize => "固定サイズを使う",
         UiTextKey::UseRelativeSize => "相対サイズを使う",
-        UiTextKey::EndOfFolder => "フォルダ終端",
-        UiTextKey::ReloadCurrent => "現在を再読込",
+        UiTextKey::EndOfFolder => "フォルダの終わり",
+        UiTextKey::ReloadCurrent => "カレントを再読込",
         UiTextKey::Close => "閉じる",
         UiTextKey::SaveAs => "保存形式",
         UiTextKey::Next => "次へ",
         UiTextKey::ToggleSettings => "設定を切替",
-        UiTextKey::ToggleFiler => "ファイラーを切替",
-        UiTextKey::ToggleManga => "マンガを切替",
+        UiTextKey::ToggleFiler => "ファイラーの切替",
+        UiTextKey::ToggleManga => "マンガモードの切替",
         UiTextKey::NoDisplayableFileFound => "表示できるファイルがありません。",
         UiTextKey::OpenDirectoryOrFileFromFiler => {
             "ファイラーからディレクトリまたはファイルを開いてください。"
@@ -657,7 +657,7 @@ fn ja(key: UiTextKey) -> &'static str {
             "可能ならゴミ箱へ移動します。失敗した場合は完全に削除します。"
         }
         UiTextKey::DeleteConfirmQuestion => "よろしいですか？",
-        UiTextKey::RenameExtensionFixed => "拡張子は固定で変更できません。",
+        UiTextKey::RenameExtensionFixed => "拡張子は変更できません。",
         UiTextKey::UnsupportedFilesystemAction => "未対応のファイル操作です",
         UiTextKey::FileActionDefaults => "ファイル操作の既定値",
         UiTextKey::MoveDestinationFolders => "移動先フォルダ (Folder1 / Folder2)",
