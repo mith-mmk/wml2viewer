@@ -139,6 +139,7 @@
 
 - `runtime.current_file` は終了時のスナップショットとして保存され、起動時の初期 path に使われます。
 - startup は first image 表示を優先し、filesystem/filer worker の同期は後続 phase へ遅延できる構造に寄せています。
+- 起動直後の UI は最初のフレームから破綻しないことを前提にします。初期 `NativeOptions` は設定に近い安全なサイズで開始し、viewport / panel サイズの安定待ちは明示的な再描画要求で進め、ユーザー操作イベントに依存して再レイアウトしないようにします。
 - `filesystem.thumbnail.suppress_large_files` はフィル更新時の負荷を抑えるための実装寄り設定です。
 - `viewer.fade` は現状 UI / 永続化にまだ出していないため、仕様上は「runtime-only の予備」として扱います。
 - `window.size` と `window.start_position` は TOML 上では tagged enum です。

@@ -1,5 +1,9 @@
-use super::{bench_path_context, determine_startup_paths};
+use super::{
+    bench_path_context, configured_window_size, determine_startup_paths, initial_native_window_size,
+};
 use crate::path_classification::normalize_bench_path;
+use crate::ui::viewer::options::WindowSize;
+use eframe::egui;
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -74,4 +78,36 @@ fn startup_mode_shows_filer_for_missing_plain_file() {
 
     assert!(startup_load_path.is_none());
     assert!(show_filer_on_start);
+}
+
+#[test]
+fn initial_native_window_size_uses_config_instead_of_tiny_bootstrap_size() {
+    let relative = initial_native_window_size(&WindowSize::Relative(0.6));
+    assert!((relative[0] - 768.0).abs() < 0.01);
+    assert!((relative[1] - 432.0).abs() < 0.01);
+    assert_eq!(
+        initial_native_window_size(&WindowSize::Exact {
+            width: 100.0,
+            height: 100.0,
+        }),
+        [320.0, 240.0]
+    );
+}
+
+#[test]
+fn configured_window_size_clamps_to_monitor_and_minimum() {
+    assert_eq!(
+        configured_window_size(
+            &WindowSize::Exact {
+                width: 3000.0,
+                height: 2000.0,
+            },
+            egui::vec2(1280.0, 720.0),
+        ),
+        egui::vec2(1280.0, 720.0)
+    );
+    assert_eq!(
+        configured_window_size(&WindowSize::Relative(0.1), egui::vec2(1280.0, 720.0)),
+        egui::vec2(320.0, 240.0)
+    );
 }

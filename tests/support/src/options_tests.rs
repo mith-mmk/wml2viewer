@@ -11,6 +11,17 @@ fn default_key_mapping_includes_f5_reload() {
 }
 
 #[test]
+fn default_key_mapping_uses_numpad_name_for_zoom_reset() {
+    let map = default_key_mapping();
+
+    assert_eq!(
+        map.get(&KeyBinding::new("Numpad0").with_shift()),
+        Some(&ViewerAction::ZoomReset)
+    );
+    assert!(!map.contains_key(&KeyBinding::new("Num0").with_shift()));
+}
+
+#[test]
 fn replace_default_keymap_uses_only_custom_bindings() {
     let mut key_mapping = HashMap::new();
     key_mapping.insert(KeyBinding::new("Space"), ViewerAction::PrevImage);

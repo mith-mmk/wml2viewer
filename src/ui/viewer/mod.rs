@@ -15,6 +15,7 @@ use crate::options::{
     NavigationSortOption, PluginConfig, ResourceOptions, RuntimeOptions, ViewerAction,
 };
 use crate::ui::i18n::{UiTextKey, tr};
+use crate::ui::input::dispatch::canonical_key_binding_name;
 use crate::ui::menu::fileviewer::state::{
     FilerEntry, FilerSortField, FilerState, FilerUserRequest, NameSortMode,
 };
@@ -55,6 +56,8 @@ use state::{FileActionDialogState, OverlayDialogState, SaveDialogState, ViewerOv
 const NAVIGATION_REPEAT_INTERVAL: Duration = Duration::from_millis(180);
 const POINTER_SINGLE_CLICK_DELAY: Duration = Duration::from_millis(500);
 const WAITING_CARD_DELAY: Duration = Duration::from_millis(180);
+const STARTUP_LAYOUT_SETTLE_FRAMES: usize = 8;
+const STARTUP_LAYOUT_REPAINT_INTERVAL: Duration = Duration::from_millis(16);
 const PRELOAD_CACHE_CAPACITY: usize = 2;
 const ZIP_TO_ZIP_RANDOM_WALK_ROUNDS: usize = 8;
 const RENDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -411,6 +414,26 @@ fn viewport_size_changed(current: egui::Vec2, previous: egui::Vec2) -> bool {
     (current.x - previous.x).abs() > 1.0 || (current.y - previous.y).abs() > 1.0
 }
 
+fn startup_layout_is_settling(
+    frame_counter: usize,
+    current: egui::Vec2,
+    previous: egui::Vec2,
+) -> bool {
+    frame_counter < STARTUP_LAYOUT_SETTLE_FRAMES && viewport_size_changed(current, previous)
+}
+
+fn should_recalculate_fit_layout(
+    empty_mode: bool,
+    current: egui::Vec2,
+    previous: egui::Vec2,
+    pending_fit_recalc: bool,
+    zoom_option: &ZoomOption,
+) -> bool {
+    !empty_mode
+        && !matches!(zoom_option, ZoomOption::None)
+        && (viewport_size_changed(current, previous) || pending_fit_recalc)
+}
+
 fn default_save_file_name(path: &std::path::Path) -> String {
     path.file_stem()
         .and_then(|name| name.to_str())
@@ -517,7 +540,7 @@ pub(crate) fn key_mapping_rows_from_map(
     let mut rows = keymap
         .iter()
         .map(|(binding, action)| KeyMappingRowDraft {
-            binding: binding.clone(),
+            binding: canonical_key_binding(binding),
             action: *action,
         })
         .collect::<Vec<_>>();
@@ -531,6 +554,15 @@ pub(crate) fn key_mapping_rows_from_map(
             .then(lhs.binding.alt.cmp(&rhs.binding.alt))
     });
     rows
+}
+
+fn canonical_key_binding(binding: &KeyBinding) -> KeyBinding {
+    KeyBinding {
+        key: canonical_key_binding_name(&binding.key),
+        ctrl: binding.ctrl,
+        alt: binding.alt,
+        shift: binding.shift,
+    }
 }
 
 impl ViewerApp {
@@ -2427,15 +2459,20 @@ impl eframe::App for ViewerApp {
 
             let viewport = ui.max_rect().size();
             let startup_viewport_settling =
-                self.frame_counter < 8 && viewport_size_changed(viewport, self.last_viewport_size);
+                startup_layout_is_settling(self.frame_counter, viewport, self.last_viewport_size);
 
             if startup_viewport_settling {
                 self.last_viewport_size = viewport;
-            } else if !self.empty_mode
-                && (viewport_size_changed(viewport, self.last_viewport_size)
-                    || self.pending_fit_recalc)
-                && !matches!(self.render_options.zoom_option, ZoomOption::None)
-            {
+                self.pending_fit_recalc |= !self.empty_mode
+                    && !matches!(self.render_options.zoom_option, ZoomOption::None);
+                ctx.request_repaint_after(STARTUP_LAYOUT_REPAINT_INTERVAL);
+            } else if should_recalculate_fit_layout(
+                self.empty_mode,
+                viewport,
+                self.last_viewport_size,
+                self.pending_fit_recalc,
+                &self.render_options.zoom_option,
+            ) {
                 self.last_viewport_size = viewport;
                 self.pending_fit_recalc = false;
 

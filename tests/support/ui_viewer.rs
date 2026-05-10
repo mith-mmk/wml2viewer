@@ -50,6 +50,29 @@ fn build_settings_draft_starts_from_effective_keymap() {
 }
 
 #[test]
+fn build_settings_draft_canonicalizes_legacy_num_aliases() {
+    let mut config = AppConfig::default();
+    config.input.replace_default_keymap = true;
+    config.input.key_mapping.insert(
+        KeyBinding::new("Num0").with_shift(),
+        ViewerAction::ZoomReset,
+    );
+
+    let draft = build_settings_draft(&config);
+
+    assert!(draft.key_mapping_rows.iter().any(|row| {
+        row.binding == KeyBinding::new("Numpad0").with_shift()
+            && row.action == ViewerAction::ZoomReset
+    }));
+    assert!(
+        !draft
+            .key_mapping_rows
+            .iter()
+            .any(|row| row.binding == KeyBinding::new("Num0").with_shift())
+    );
+}
+
+#[test]
 fn remember_preloaded_entry_in_cache_keeps_two_most_recent_entries() {
     let mut cache = VecDeque::new();
     remember_preloaded_entry_in_cache(&mut cache, dummy_preloaded_entry("a"));
@@ -634,4 +657,43 @@ fn spread_companion_path_for_navigation_uses_same_branch_neighbor() {
     assert_eq!(companion.as_deref(), Some(second.as_path()));
 
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn startup_layout_settles_with_repaint_until_viewport_is_stable() {
+    assert!(startup_layout_is_settling(
+        1,
+        egui::vec2(320.0, 240.0),
+        egui::Vec2::ZERO,
+    ));
+    assert!(!startup_layout_is_settling(
+        STARTUP_LAYOUT_SETTLE_FRAMES,
+        egui::vec2(768.0, 432.0),
+        egui::vec2(768.0, 432.0),
+    ));
+}
+
+#[test]
+fn fit_layout_recalculates_after_startup_settling_when_pending() {
+    assert!(should_recalculate_fit_layout(
+        false,
+        egui::vec2(768.0, 432.0),
+        egui::vec2(768.0, 432.0),
+        true,
+        &ZoomOption::FitScreen,
+    ));
+    assert!(!should_recalculate_fit_layout(
+        true,
+        egui::vec2(768.0, 432.0),
+        egui::vec2(768.0, 432.0),
+        true,
+        &ZoomOption::FitScreen,
+    ));
+    assert!(!should_recalculate_fit_layout(
+        false,
+        egui::vec2(768.0, 432.0),
+        egui::vec2(320.0, 240.0),
+        true,
+        &ZoomOption::None,
+    ));
 }

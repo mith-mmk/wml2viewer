@@ -1,7 +1,9 @@
 use super::{
-    ExifTagSets, ExifTagSpec, append_exif_tag_group, format_exif_tag_line, locale_datetime_pattern,
-    normalize_backslash_display,
+    ExifTagSets, ExifTagSpec, append_exif_tag_group, clamp_popup_position, filer_width_range,
+    format_exif_tag_line, locale_datetime_pattern, normalize_backslash_display,
+    subfiler_height_range,
 };
+use eframe::egui;
 use wml2::tiff::header::{DataPack, TiffHeader};
 
 #[test]
@@ -63,4 +65,32 @@ fn append_exif_tag_group_reports_not_available_when_group_is_empty() {
         &[ExifTagSpec::gps(0x0002)],
     );
     assert_eq!(lines, vec!["(not available)".to_string()]);
+}
+
+#[test]
+fn popup_position_is_clamped_inside_tiny_initial_rect() {
+    let content = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(320.0, 240.0));
+    let pos = clamp_popup_position(egui::pos2(300.0, 220.0), content, egui::vec2(280.0, 220.0));
+
+    assert_eq!(pos, egui::pos2(40.0, 20.0));
+}
+
+#[test]
+fn filer_width_leaves_room_for_viewer_on_tiny_initial_rect() {
+    let content = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(320.0, 240.0));
+    let range = filer_width_range(content, 420.0);
+
+    assert_eq!(range.min, 160.0);
+    assert_eq!(range.max, 160.0);
+    assert_eq!(range.default, 160.0);
+}
+
+#[test]
+fn subfiler_height_leaves_room_for_viewer_on_tiny_initial_rect() {
+    let content = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(320.0, 240.0));
+    let range = subfiler_height_range(content);
+
+    assert!(range.default <= 110.0);
+    assert!(range.max < 120.0);
+    assert!(range.min <= range.default);
 }

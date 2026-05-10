@@ -175,7 +175,7 @@ pub fn default_key_mapping() -> HashMap<KeyBinding, ViewerAction> {
     map.insert(KeyBinding::new("Plus"), ViewerAction::ZoomIn);
     map.insert(KeyBinding::new("Minus"), ViewerAction::ZoomOut);
     map.insert(
-        KeyBinding::new("Num0").with_shift(),
+        KeyBinding::new("Numpad0").with_shift(),
         ViewerAction::ZoomReset,
     );
     map.insert(KeyBinding::new("Enter"), ViewerAction::ToggleFullscreen);

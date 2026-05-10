@@ -22,6 +22,23 @@ use wml2::metadata::{DataMap, Metadata};
 use wml2::tiff::header::{DataPack, TiffHeader};
 use wml2::tiff::tags::{gps_mapper, tag_mapper};
 
+const FILER_REGULAR_MIN_WIDTH: f32 = 240.0;
+const FILER_COMPACT_MIN_WIDTH: f32 = 144.0;
+const FILER_VIEWER_RESERVED_WIDTH: f32 = 280.0;
+const FILER_REGULAR_MAX_WIDTH: f32 = 420.0;
+const SUBFILER_REGULAR_MIN_HEIGHT: f32 = 88.0;
+const SUBFILER_COMPACT_MIN_HEIGHT: f32 = 72.0;
+const SUBFILER_DEFAULT_HEIGHT: f32 = 110.0;
+const POPUP_MENU_WIDTH: f32 = 280.0;
+const POPUP_MENU_ESTIMATED_HEIGHT: f32 = 360.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PanelSizeRange {
+    default: f32,
+    min: f32,
+    max: f32,
+}
+
 impl ViewerApp {
     pub(crate) fn left_click_menu_ui(&mut self, ctx: &egui::Context) {
         if !self.show_left_menu {
@@ -29,16 +46,27 @@ impl ViewerApp {
         }
         self.cancel_pending_single_click_navigation();
 
+        let content_rect = ctx.content_rect();
+        let popup_pos = clamp_popup_position(
+            self.left_menu_pos,
+            content_rect,
+            egui::vec2(POPUP_MENU_WIDTH, POPUP_MENU_ESTIMATED_HEIGHT),
+        );
+        let popup_max_width = (content_rect.width() - 16.0)
+            .max(260.0)
+            .min(POPUP_MENU_WIDTH + 80.0);
         let mut open = self.show_left_menu;
         let mut close_requested = false;
         let window_response = egui::Window::new(self.text(UiTextKey::Menu))
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_pos(self.left_menu_pos)
+            .fixed_pos(popup_pos)
+            .default_size(egui::vec2(POPUP_MENU_WIDTH, 240.0))
             .open(&mut open)
             .show(ctx, |ui| {
                 ui.set_min_width(260.0);
+                ui.set_max_width(popup_max_width);
                 ui.menu_button(self.text(UiTextKey::MenuFileSection), |ui| {
                     if ui.button(self.text(UiTextKey::ReloadCurrent)).clicked() {
                         let _ = self.reload_current();
@@ -223,11 +251,12 @@ impl ViewerApp {
         }
 
         let content = ctx.content_rect();
-        let max_width = if content.width() >= content.height() * 1.5 {
-            (content.width() * 0.5).max(280.0)
-        } else {
-            420.0
+        let preferred_width = match self.filer.view_mode {
+            FilerViewMode::ThumbnailLarge => 420.0,
+            FilerViewMode::ThumbnailMedium => 360.0,
+            _ => 300.0,
         };
+        let width_range = filer_width_range(content, preferred_width);
 
         let panel = match self.window_options.pane_side {
             PaneSide::Left => egui::SidePanel::left("filer_panel"),
@@ -236,13 +265,9 @@ impl ViewerApp {
 
         panel
             .resizable(true)
-            .default_width(match self.filer.view_mode {
-                FilerViewMode::ThumbnailLarge => 420.0,
-                FilerViewMode::ThumbnailMedium => 360.0,
-                _ => 300.0,
-            })
-            .min_width(240.0)
-            .max_width(max_width)
+            .default_width(width_range.default)
+            .min_width(width_range.min)
+            .max_width(width_range.max)
             .show(ctx, |ui| {
                 let mut refresh_requested = false;
                 let list_text = self.text(UiTextKey::List);
@@ -712,9 +737,12 @@ impl ViewerApp {
             return;
         }
 
+        let height_range = subfiler_height_range(ctx.content_rect());
         egui::TopBottomPanel::bottom("subfiler_panel")
             .resizable(true)
-            .default_height(110.0)
+            .default_height(height_range.default)
+            .min_height(height_range.min)
+            .max_height(height_range.max)
             .show(ctx, |ui| {
                 let mut close_requested = false;
                 let focus_target = self.pending_subfiler_focus_path.clone();
@@ -836,6 +864,77 @@ impl ViewerApp {
     pub(crate) fn bench_activate_filer_entry(&mut self, entry: FilerEntry) {
         self.activate_filer_entry(entry);
     }
+}
+
+fn filer_width_range(content: egui::Rect, preferred: f32) -> PanelSizeRange {
+    let width = content.width().max(1.0);
+    let compact = width < 520.0;
+    let min = if compact {
+        (width * 0.5).clamp(FILER_COMPACT_MIN_WIDTH, FILER_REGULAR_MIN_WIDTH)
+    } else {
+        FILER_REGULAR_MIN_WIDTH
+    }
+    .min(width);
+    let viewer_reserved = if compact {
+        (width * 0.5).max(120.0)
+    } else {
+        FILER_VIEWER_RESERVED_WIDTH
+    };
+    let design_max = if content.width() >= content.height() * 1.5 {
+        (content.width() * 0.5).max(FILER_VIEWER_RESERVED_WIDTH)
+    } else {
+        FILER_REGULAR_MAX_WIDTH
+    };
+    let absolute_max = (width - viewer_reserved).max(min);
+    let max = design_max.min(absolute_max).max(min);
+    PanelSizeRange {
+        default: preferred.clamp(min, max),
+        min,
+        max,
+    }
+}
+
+fn subfiler_height_range(content: egui::Rect) -> PanelSizeRange {
+    let height = content.height().max(1.0);
+    let compact = height < 360.0;
+    let min = if compact {
+        SUBFILER_COMPACT_MIN_HEIGHT.min(height)
+    } else {
+        SUBFILER_REGULAR_MIN_HEIGHT
+    };
+    let viewer_reserved = if compact {
+        (height * 0.55).max(120.0)
+    } else {
+        240.0
+    };
+    let design_max = (height * 0.4).clamp(SUBFILER_DEFAULT_HEIGHT, 180.0);
+    let absolute_max = (height - viewer_reserved).max(min);
+    let max = design_max.min(absolute_max).max(min);
+    PanelSizeRange {
+        default: SUBFILER_DEFAULT_HEIGHT.clamp(min, max),
+        min,
+        max,
+    }
+}
+
+fn clamp_popup_position(
+    position: egui::Pos2,
+    content: egui::Rect,
+    estimated_size: egui::Vec2,
+) -> egui::Pos2 {
+    let max_x = content.right() - estimated_size.x;
+    let max_y = content.bottom() - estimated_size.y;
+    let x = if max_x <= content.left() {
+        content.left()
+    } else {
+        position.x.clamp(content.left(), max_x)
+    };
+    let y = if max_y <= content.top() {
+        content.top()
+    } else {
+        position.y.clamp(content.top(), max_y)
+    };
+    egui::pos2(x, y)
 }
 
 fn icon_toolbar_button(

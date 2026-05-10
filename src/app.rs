@@ -17,6 +17,9 @@ use std::path::Path;
 use std::path::PathBuf;
 
 const APP_ICON_PNG: &[u8] = include_bytes!("../resources/wml2viewer.png");
+const MIN_WINDOW_SIZE: egui::Vec2 = egui::vec2(320.0, 240.0);
+const STARTUP_REFERENCE_SCREEN_SIZE: egui::Vec2 = egui::vec2(1280.0, 720.0);
+const MAX_INITIAL_WINDOW_SIZE: egui::Vec2 = egui::vec2(1920.0, 1080.0);
 
 pub fn run(
     image_path: Option<PathBuf>,
@@ -76,8 +79,8 @@ pub fn run(
                 eframe::icon_data::from_png_bytes(APP_ICON_PNG)
                     .unwrap_or_else(|_| egui::IconData::default()),
             )
-            .with_inner_size([320.0, 240.0])
-            .with_min_inner_size([320.0, 240.0]),
+            .with_inner_size(initial_native_window_size(&config.window.size))
+            .with_min_inner_size([MIN_WINDOW_SIZE.x, MIN_WINDOW_SIZE.y]),
         ..Default::default()
     };
 
@@ -93,17 +96,7 @@ pub fn run(
                     .unwrap_or(egui::vec2(1280.0, 720.0))
             });
 
-            let window_size = match config.window.size.clone() {
-                WindowSize::Relative(ratio) => {
-                    let ratio = ratio.clamp(0.1, 1.0);
-                    egui::vec2(screen.x * ratio, screen.y * ratio)
-                }
-                WindowSize::Exact { width, height } => egui::vec2(width, height),
-            };
-            let window_size = egui::vec2(
-                window_size.x.clamp(320.0, screen.x),
-                window_size.y.clamp(240.0, screen.y),
-            );
+            let window_size = configured_window_size(&config.window.size, screen);
 
             cc.egui_ctx
                 .send_viewport_cmd(egui::ViewportCommand::InnerSize(window_size));
@@ -170,6 +163,33 @@ fn determine_startup_paths(
             true,
         )
     }
+}
+
+fn initial_native_window_size(size: &WindowSize) -> [f32; 2] {
+    let size = configured_window_size(size, STARTUP_REFERENCE_SCREEN_SIZE);
+    let size = egui::vec2(
+        size.x.min(MAX_INITIAL_WINDOW_SIZE.x),
+        size.y.min(MAX_INITIAL_WINDOW_SIZE.y),
+    );
+    [size.x, size.y]
+}
+
+fn configured_window_size(size: &WindowSize, screen: egui::Vec2) -> egui::Vec2 {
+    let window_size = match size {
+        WindowSize::Relative(ratio) => {
+            let ratio = ratio.clamp(0.1, 1.0);
+            egui::vec2(screen.x * ratio, screen.y * ratio)
+        }
+        WindowSize::Exact { width, height } => egui::vec2(*width, *height),
+    };
+    egui::vec2(
+        window_size
+            .x
+            .clamp(MIN_WINDOW_SIZE.x, screen.x.max(MIN_WINDOW_SIZE.x)),
+        window_size
+            .y
+            .clamp(MIN_WINDOW_SIZE.y, screen.y.max(MIN_WINDOW_SIZE.y)),
+    )
 }
 
 fn apply_window_theme(ctx: &egui::Context, theme: WindowUiTheme) {

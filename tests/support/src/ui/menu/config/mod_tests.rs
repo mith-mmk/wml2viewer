@@ -1,9 +1,13 @@
 use super::{
-    can_encode_with_default_overlay, capture_pressed_key_name, duplicate_binding_row_indices,
-    is_reserved_binding, keymap_from_rows, overlay_keymap_from_effective,
+    INPUT_ACTION_FIELD_WIDTH, INPUT_KEY_FIELD_WIDTH, SETTINGS_INPUT_DEFAULT_WIDTH,
+    SETTINGS_INPUT_MIN_WIDTH, SETTINGS_MIN_WIDTH, can_encode_with_default_overlay,
+    capture_pressed_key_name, centered_cell_rect, duplicate_binding_row_indices,
+    input_bindings_table_width, input_settings_content_width, is_reserved_binding,
+    keymap_from_rows, overlay_keymap_from_effective, settings_dialog_default_size,
+    settings_dialog_min_width,
 };
 use crate::options::{KeyBinding, ViewerAction};
-use crate::ui::viewer::KeyMappingRowDraft;
+use crate::ui::viewer::{KeyMappingRowDraft, SettingsTab};
 use eframe::egui;
 use std::collections::HashMap;
 
@@ -76,9 +80,66 @@ fn duplicate_rows_emit_warning_and_last_wins() {
 }
 
 #[test]
+fn duplicate_rows_treat_num_aliases_as_numpad() {
+    let rows = vec![
+        KeyMappingRowDraft {
+            binding: KeyBinding::new("Num0").with_shift(),
+            action: ViewerAction::ZoomReset,
+        },
+        KeyMappingRowDraft {
+            binding: KeyBinding::new("Numpad0").with_shift(),
+            action: ViewerAction::ZoomReset,
+        },
+    ];
+    let duplicates = duplicate_binding_row_indices(&rows);
+    let (parsed, warning) = keymap_from_rows(&rows, &duplicates);
+
+    assert!(duplicates.contains(&0));
+    assert!(duplicates.contains(&1));
+    assert!(warning.is_some());
+    assert!(parsed.contains_key(&KeyBinding::new("Numpad0").with_shift()));
+    assert!(!parsed.contains_key(&KeyBinding::new("Num0").with_shift()));
+}
+
+#[test]
 fn capture_pressed_key_name_returns_none_without_events() {
     let ctx = egui::Context::default();
     assert!(capture_pressed_key_name(&ctx).is_none());
+}
+
+#[test]
+fn input_settings_dialog_starts_wider_than_regular_tabs() {
+    let content = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1280.0, 720.0));
+
+    assert_eq!(
+        settings_dialog_min_width(content, SettingsTab::Input),
+        SETTINGS_INPUT_MIN_WIDTH
+    );
+    assert_eq!(
+        settings_dialog_min_width(content, SettingsTab::Viewer),
+        SETTINGS_MIN_WIDTH
+    );
+    assert_eq!(
+        settings_dialog_default_size(content, SettingsTab::Input).x,
+        SETTINGS_INPUT_DEFAULT_WIDTH
+    );
+    assert!(
+        settings_dialog_default_size(content, SettingsTab::Input).x
+            > settings_dialog_default_size(content, SettingsTab::Viewer).x
+    );
+    assert!(INPUT_KEY_FIELD_WIDTH >= 180.0);
+    assert!(input_bindings_table_width() >= INPUT_ACTION_FIELD_WIDTH + INPUT_KEY_FIELD_WIDTH);
+    assert!(input_settings_content_width() >= input_bindings_table_width());
+}
+
+#[test]
+fn modifier_checkbox_rect_is_centered_in_column_cell() {
+    let cell = egui::Rect::from_min_size(egui::pos2(520.0, 64.0), egui::vec2(56.0, 20.0));
+    let checkbox = centered_cell_rect(cell, egui::vec2(18.0, 18.0));
+
+    assert_eq!(checkbox.center(), cell.center());
+    assert!(checkbox.left() > cell.left());
+    assert!(checkbox.right() < cell.right());
 }
 
 #[test]
