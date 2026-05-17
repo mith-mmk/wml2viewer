@@ -64,3 +64,4 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 # update log
 - 2026-04-17 0.0.14 preview3 released
 - 2026-04-25 0.0.15 preview4 released, right click menu added, key bidings added, and some bugs fixed.
+- 2026-05-17 0.0.16 preview4 released, adjusted the UI.
