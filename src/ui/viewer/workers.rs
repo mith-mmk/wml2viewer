@@ -395,6 +395,7 @@ impl ViewerApp {
             let _ = self.request_resize_current();
         } else {
             self.rebuild_current_texture();
+            self.start_image_transition();
             if self.active_fs_request_id.is_none() {
                 self.overlay.clear_loading_message();
             }

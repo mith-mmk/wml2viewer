@@ -27,6 +27,8 @@ fn available_save_formats_are_filtered_by_encoder_extensions() {
 fn associated_file_extensions_include_viewer_specific_types() {
     let extensions = associated_file_extensions();
     assert!(extensions.iter().any(|ext| ext == ".zip"));
+    assert!(extensions.iter().any(|ext| ext == ".lha"));
+    assert!(extensions.iter().any(|ext| ext == ".lzh"));
     assert!(extensions.iter().any(|ext| ext == ".wmltxt"));
     assert!(extensions.iter().any(|ext| ext == ".png"));
 }

@@ -8,7 +8,17 @@ fn make_temp_dir() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data");
+    let base = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::current_exe().ok().and_then(|path| {
+                path.parent()
+                    .and_then(|deps| deps.parent())
+                    .map(std::path::Path::to_path_buf)
+            })
+        })
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+        .join(".test_wml2viewer");
     fs::create_dir_all(&base).unwrap();
     let dir = base.join(format!(".test_listed_file_{unique}"));
     fs::create_dir_all(&dir).unwrap();

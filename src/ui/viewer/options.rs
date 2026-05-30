@@ -9,6 +9,7 @@ pub struct ViewerOptions {
     pub background: BackgroundStyle,
     pub fade: bool,
     pub animation: bool,
+    pub transition: TransitionOptions,
     pub grayscale: bool,
     pub manga_mode: bool,
     pub manga_right_to_left: bool,
@@ -22,12 +23,40 @@ impl Default for ViewerOptions {
             background: BackgroundStyle::Solid([0, 0, 0, 255]),
             fade: false,
             animation: true,
+            transition: TransitionOptions::default(),
             grayscale: false,
             manga_mode: false,
             manga_right_to_left: true,
             manga_separator: MangaSeparatorOptions::default(),
         }
     }
+}
+
+#[derive(Clone)]
+pub struct TransitionOptions {
+    pub effect: TransitionEffect,
+    pub duration_ms: u64,
+}
+
+impl Default for TransitionOptions {
+    fn default() -> Self {
+        Self {
+            effect: TransitionEffect::None,
+            duration_ms: 180,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransitionEffect {
+    None,
+    Fade,
+    SlideRightToLeft,
+    SlideLeftToRight,
+    SlideTopToBottom,
+    SlideBottomToTop,
+    SpiralWipeIn,
+    SpiralWipeOut,
 }
 
 #[derive(Clone)]

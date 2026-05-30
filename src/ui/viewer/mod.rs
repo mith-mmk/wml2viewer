@@ -11,8 +11,9 @@ use crate::filesystem::{
     resolve_start_path, set_archive_zip_workaround, spawn_filesystem_worker,
 };
 use crate::options::{
-    AppConfig, EndOfFolderOption, FileActionOptions, InputOptions, KeyBinding,
-    NavigationSortOption, PluginConfig, ResourceOptions, RuntimeOptions, ViewerAction,
+    AppConfig, EndOfFolderOption, FileActionOptions, FilesystemOptions, FolderRefreshMode,
+    InputOptions, KeyBinding, NavigationSortOption, PluginConfig, ResourceOptions, RuntimeOptions,
+    TransitionEffect, ViewerAction,
 };
 use crate::ui::i18n::{UiTextKey, tr};
 use crate::ui::input::dispatch::canonical_key_binding_name;
@@ -58,6 +59,7 @@ const POINTER_SINGLE_CLICK_DELAY: Duration = Duration::from_millis(500);
 const WAITING_CARD_DELAY: Duration = Duration::from_millis(180);
 const STARTUP_LAYOUT_SETTLE_FRAMES: usize = 8;
 const STARTUP_LAYOUT_REPAINT_INTERVAL: Duration = Duration::from_millis(16);
+const AUTO_FOLDER_REFRESH_INTERVAL: Duration = Duration::from_millis(1000);
 const PRELOAD_CACHE_CAPACITY: usize = 2;
 const ZIP_TO_ZIP_RANDOM_WALK_ROUNDS: usize = 8;
 const RENDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -72,6 +74,8 @@ pub(crate) struct ViewerApp {
     pub(crate) default_texture: TextureHandle,
     pub(crate) prev_texture: Option<TextureHandle>,
     pub(crate) current_texture: TextureHandle,
+    pending_transition_previous: Option<TransitionPreviousState>,
+    active_transition: Option<ImageTransitionState>,
     pub(crate) egui_ctx: egui::Context,
 
     pub(crate) zoom: f32,
@@ -91,6 +95,7 @@ pub(crate) struct ViewerApp {
     pub(crate) window_options: WindowOptions,
     pub(crate) resources: ResourceOptions,
     pub(crate) plugins: PluginConfig,
+    pub(crate) filesystem_options: FilesystemOptions,
     pub(crate) storage: crate::options::StorageOptions,
     pub(crate) runtime: RuntimeOptions,
     pub(crate) file_action: FileActionOptions,
@@ -174,6 +179,8 @@ pub(crate) struct ViewerApp {
     pub(crate) bench_initial_load_logged: bool,
     pub(crate) bench_startup_sync_logged: bool,
     bench_automation: Option<BenchAutomationState>,
+    last_auto_refresh_at: Instant,
+    pub(crate) last_auto_refresh_signature: Option<(PathBuf, u64)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -232,6 +239,20 @@ struct BenchAutomationState {
     next_index: usize,
     next_action_at: Instant,
     random_state: u64,
+}
+
+#[derive(Clone)]
+struct TransitionPreviousState {
+    texture: TextureHandle,
+    draw_size: egui::Vec2,
+}
+
+#[derive(Clone)]
+struct ImageTransitionState {
+    effect: TransitionEffect,
+    started_at: Instant,
+    duration: Duration,
+    previous: TransitionPreviousState,
 }
 
 #[derive(Clone)]
@@ -638,6 +659,8 @@ impl ViewerApp {
             default_texture: default_texture.clone(),
             prev_texture: None,
             current_texture: default_texture.clone(),
+            pending_transition_previous: None,
+            active_transition: None,
             egui_ctx: cc.egui_ctx.clone(),
 
             zoom,
@@ -657,6 +680,7 @@ impl ViewerApp {
             window_options: config.window,
             resources: config.resources,
             plugins: config.plugins,
+            filesystem_options: config.filesystem,
             storage: config.storage,
             runtime: config.runtime,
             file_action: config.file_action,
@@ -749,6 +773,8 @@ impl ViewerApp {
                 next_action_at: Instant::now() + Duration::from_millis(250),
                 random_state: 0x5eed_cafe_d15c_a11e,
             }),
+            last_auto_refresh_at: Instant::now(),
+            last_auto_refresh_signature: None,
         };
 
         this.save_dialog.output_dir = this
@@ -989,6 +1015,52 @@ impl ViewerApp {
         }
     }
 
+    fn poll_auto_folder_refresh(&mut self) {
+        if !matches!(
+            self.filesystem_options.folder_refresh,
+            FolderRefreshMode::Auto
+        ) {
+            self.last_auto_refresh_signature = None;
+            return;
+        }
+        if self.last_auto_refresh_at.elapsed() < AUTO_FOLDER_REFRESH_INTERVAL {
+            return;
+        }
+        self.last_auto_refresh_at = Instant::now();
+
+        let Some(dir) = self
+            .filer
+            .directory
+            .clone()
+            .or_else(|| self.current_directory())
+        else {
+            self.last_auto_refresh_signature = None;
+            return;
+        };
+        let Some(signature) = folder_refresh_signature(&dir) else {
+            self.last_auto_refresh_signature = None;
+            return;
+        };
+        let previous = self
+            .last_auto_refresh_signature
+            .replace((dir.clone(), signature));
+        if previous
+            .as_ref()
+            .is_some_and(|(previous_dir, previous_signature)| {
+                previous_dir == &dir && *previous_signature != signature
+            })
+            && self.filer.pending_request_id.is_none()
+        {
+            self.log_bench_state(
+                "viewer.filer.auto_refresh_detected",
+                serde_json::json!({
+                    "directory": dir.display().to_string(),
+                }),
+            );
+            self.refresh_current_filer_directory();
+        }
+    }
+
     fn texture_options(&self) -> TextureOptions {
         texture_options_for_scale_mode(
             self.render_options.scale_mode,
@@ -1069,6 +1141,139 @@ impl ViewerApp {
         self.options.animation && self.rendered.is_animated()
     }
 
+    fn transition_effect_enabled(&self) -> bool {
+        self.options.animation
+            && !matches!(self.options.transition.effect, TransitionEffect::None)
+            && !self.options.manga_mode
+            && !self.current_texture_is_default
+    }
+
+    fn prepare_image_transition(&mut self, switching_image: bool, branch_changed: bool) {
+        self.pending_transition_previous = None;
+        self.active_transition = None;
+        if !switching_image || branch_changed || !self.transition_effect_enabled() {
+            return;
+        }
+        self.pending_transition_previous = Some(TransitionPreviousState {
+            texture: self.current_texture.clone(),
+            draw_size: vec2(
+                self.current_canvas().width() as f32 * self.current_draw_scale(),
+                self.current_canvas().height() as f32 * self.current_draw_scale(),
+            ),
+        });
+    }
+
+    fn start_image_transition(&mut self) {
+        let Some(previous) = self.pending_transition_previous.take() else {
+            return;
+        };
+        if matches!(self.options.transition.effect, TransitionEffect::None)
+            || self.current_texture_is_default
+        {
+            return;
+        }
+        self.active_transition = Some(ImageTransitionState {
+            effect: self.options.transition.effect,
+            started_at: Instant::now(),
+            duration: Duration::from_millis(self.options.transition.duration_ms.max(1)),
+            previous,
+        });
+    }
+
+    fn draw_transition_image(
+        &mut self,
+        ui: &mut egui::Ui,
+        draw_size: egui::Vec2,
+    ) -> egui::Response {
+        let Some(state) = self.active_transition.clone() else {
+            return ui.add(
+                egui::Image::from_texture(&self.current_texture)
+                    .fit_to_exact_size(draw_size)
+                    .sense(egui::Sense::click()),
+            );
+        };
+        let progress = transition_progress(state.started_at, state.duration);
+        if progress >= 1.0 {
+            self.active_transition = None;
+            return ui.add(
+                egui::Image::from_texture(&self.current_texture)
+                    .fit_to_exact_size(draw_size)
+                    .sense(egui::Sense::click()),
+            );
+        }
+
+        let (rect, response) = ui.allocate_exact_size(draw_size, egui::Sense::click());
+        let previous_rect = centered_rect(rect, state.previous.draw_size);
+        let current_rect = rect;
+        match state.effect {
+            TransitionEffect::None => {
+                ui.painter().image(
+                    self.current_texture.id(),
+                    current_rect,
+                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+            TransitionEffect::Fade => {
+                paint_texture(
+                    ui.painter(),
+                    state.previous.texture.id(),
+                    previous_rect,
+                    1.0 - progress,
+                );
+                paint_texture(
+                    ui.painter(),
+                    self.current_texture.id(),
+                    current_rect,
+                    progress,
+                );
+            }
+            TransitionEffect::SlideRightToLeft
+            | TransitionEffect::SlideLeftToRight
+            | TransitionEffect::SlideTopToBottom
+            | TransitionEffect::SlideBottomToTop => {
+                let offset = slide_transition_offset(state.effect, rect.size(), progress);
+                paint_texture(
+                    ui.painter(),
+                    state.previous.texture.id(),
+                    previous_rect.translate(offset.previous),
+                    1.0,
+                );
+                paint_texture(
+                    ui.painter(),
+                    self.current_texture.id(),
+                    current_rect.translate(offset.current),
+                    1.0,
+                );
+            }
+            TransitionEffect::SpiralWipeIn | TransitionEffect::SpiralWipeOut => {
+                paint_texture(
+                    ui.painter(),
+                    state.previous.texture.id(),
+                    previous_rect,
+                    1.0,
+                );
+                let reveal = spiral_reveal_rect(current_rect, progress);
+                ui.painter().with_clip_rect(reveal).image(
+                    self.current_texture.id(),
+                    current_rect,
+                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+                if matches!(state.effect, TransitionEffect::SpiralWipeOut) {
+                    paint_texture(
+                        ui.painter(),
+                        state.previous.texture.id(),
+                        previous_rect,
+                        1.0 - progress,
+                    );
+                }
+            }
+        }
+        ui.ctx().request_repaint_after(Duration::from_millis(16));
+        response
+    }
+
     fn current_canvas(&self) -> &Canvas {
         if self.animation_enabled() {
             self.rendered.frame_canvas(self.current_frame)
@@ -1117,6 +1322,7 @@ impl ViewerApp {
         if reset_branch_cache {
             self.prev_texture = None;
         }
+        self.active_transition = None;
         self.current_texture = self.default_texture.clone();
         self.current_texture_is_default = true;
         self.texture_display_scale = 1.0;
@@ -1159,6 +1365,8 @@ impl ViewerApp {
         self.completed_loops = 0;
         self.last_frame_at = Instant::now();
         self.texture_display_scale = 1.0;
+        self.pending_transition_previous = None;
+        self.active_transition = None;
         self.current_texture = self.default_texture.clone();
         self.current_texture_is_default = true;
     }
@@ -1267,7 +1475,7 @@ impl ViewerApp {
         }
         if let Some(parent) = self.current_navigation_path.parent() {
             let marker = parent.file_name().and_then(|name| name.to_str());
-            if matches!(marker, Some("__wmlv__" | "__zipv__")) {
+            if matches!(marker, Some("__wmlv__" | "__zipv__" | "__lhav__")) {
                 return parent.parent().map(|path| path.to_path_buf());
             }
             return Some(parent.to_path_buf());
@@ -2306,7 +2514,9 @@ impl ViewerApp {
                 "switching_image": switching_image,
             }),
         );
+        self.prepare_image_transition(switching_image, branch_changed);
         if self.try_take_preloaded(&navigation_path) {
+            self.start_image_transition();
             self.log_bench_state(
                 "viewer.request_load_target.preloaded_hit",
                 serde_json::json!({
@@ -2418,6 +2628,7 @@ impl eframe::App for ViewerApp {
         self.poll_preload_worker();
         self.poll_filesystem();
         self.poll_filer_worker();
+        self.poll_auto_folder_refresh();
         self.poll_thumbnail_worker();
         self.poll_save_result();
         self.sync_manga_companion(ctx);
@@ -2493,34 +2704,30 @@ impl eframe::App for ViewerApp {
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     let spread_active = self.manga_spread_active();
-                    let companion = self.visible_companion();
-
-                    let companion_draw_size = companion.map(|(companion_rendered, _)| {
-                        vec2(
-                            companion_rendered.canvas.width() as f32 * self.companion_draw_scale(),
-                            companion_rendered.canvas.height() as f32 * self.companion_draw_scale(),
-                        )
-                    });
-                    let total_draw_size = if spread_active {
-                        if let Some(companion_draw_size) = companion_draw_size {
+                    let response = if spread_active {
+                        let companion = self.visible_companion();
+                        let companion_draw_size = companion.map(|(companion_rendered, _)| {
+                            vec2(
+                                companion_rendered.canvas.width() as f32
+                                    * self.companion_draw_scale(),
+                                companion_rendered.canvas.height() as f32
+                                    * self.companion_draw_scale(),
+                            )
+                        });
+                        let total_draw_size = if let Some(companion_draw_size) = companion_draw_size
+                        {
                             vec2(
                                 draw_size.x + companion_draw_size.x,
                                 draw_size.y.max(companion_draw_size.y),
                             )
                         } else {
                             draw_size
-                        }
-                    } else {
-                        draw_size
-                    };
-                    let offset = aligned_offset(viewport, total_draw_size, self.options.align);
-
-                    ui.add_space(offset.y.max(0.0));
-
-                    let inner = ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 0.0;
-                        ui.add_space(offset.x.max(0.0));
-                        if spread_active {
+                        };
+                        let offset = aligned_offset(viewport, total_draw_size, self.options.align);
+                        ui.add_space(offset.y.max(0.0));
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 0.0;
+                            ui.add_space(offset.x.max(0.0));
                             if let Some((_, companion_texture)) = companion {
                                 let companion_draw_size = companion_draw_size.unwrap_or(draw_size);
                                 let draw_companion_first = self.options.manga_right_to_left;
@@ -2566,22 +2773,24 @@ impl eframe::App for ViewerApp {
                                     ),
                                 )
                             }
-                        } else {
-                            Some(
-                                ui.add(
-                                    egui::Image::from_texture(&self.current_texture)
-                                        .fit_to_exact_size(draw_size)
-                                        .sense(egui::Sense::click()),
-                                ),
-                            )
-                        }
-                    });
+                        })
+                        .inner
+                    } else {
+                        let offset = aligned_offset(viewport, draw_size, self.options.align);
+                        ui.add_space(offset.y.max(0.0));
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 0.0;
+                            ui.add_space(offset.x.max(0.0));
+                            Some(self.draw_transition_image(ui, draw_size))
+                        })
+                        .inner
+                    };
                     let display_response = ui.interact(
                         display_rect,
                         ui.id().with("viewer_display_area"),
                         egui::Sense::click(),
                     );
-                    if let Some(response) = inner.inner {
+                    if let Some(response) = response {
                         if !self.handle_pointer_input(&response)
                             && self.response_has_pointer_intent(&display_response)
                         {
@@ -2836,6 +3045,136 @@ fn filer_snapshot_changed_in_same_directory(
         previous,
         Some((directory, signature))
             if directory == snapshot_directory && signature != snapshot_signature
+    )
+}
+
+fn folder_refresh_signature(path: &Path) -> Option<u64> {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.to_string_lossy().hash(&mut hasher);
+    let metadata = std::fs::metadata(path).ok()?;
+    metadata.is_dir().hash(&mut hasher);
+    metadata.len().hash(&mut hasher);
+    metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default()
+        .hash(&mut hasher);
+
+    if metadata.is_dir() {
+        let mut rows = std::fs::read_dir(path)
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|entry| {
+                let entry_path = entry.path();
+                let metadata = entry.metadata().ok();
+                let modified = metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.modified().ok())
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_nanos())
+                    .unwrap_or_default();
+                (
+                    entry_path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    metadata
+                        .as_ref()
+                        .map(|metadata| metadata.is_dir())
+                        .unwrap_or(false),
+                    metadata
+                        .as_ref()
+                        .map(|metadata| metadata.len())
+                        .unwrap_or(0),
+                    modified,
+                )
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+        rows.hash(&mut hasher);
+    }
+
+    Some(hasher.finish())
+}
+
+fn transition_progress(started_at: Instant, duration: Duration) -> f32 {
+    if duration.is_zero() {
+        return 1.0;
+    }
+    (started_at.elapsed().as_secs_f32() / duration.as_secs_f32()).clamp(0.0, 1.0)
+}
+
+fn centered_rect(container: egui::Rect, size: egui::Vec2) -> egui::Rect {
+    let size = vec2(
+        size.x.min(container.width()),
+        size.y.min(container.height()),
+    );
+    egui::Rect::from_center_size(container.center(), size)
+}
+
+fn paint_texture(
+    painter: &egui::Painter,
+    texture_id: egui::TextureId,
+    rect: egui::Rect,
+    opacity: f32,
+) {
+    let alpha = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+    painter.image(
+        texture_id,
+        rect,
+        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+        egui::Color32::from_white_alpha(alpha),
+    );
+}
+
+struct SlideTransitionOffset {
+    previous: egui::Vec2,
+    current: egui::Vec2,
+}
+
+fn slide_transition_offset(
+    effect: TransitionEffect,
+    size: egui::Vec2,
+    progress: f32,
+) -> SlideTransitionOffset {
+    match effect {
+        TransitionEffect::SlideRightToLeft => SlideTransitionOffset {
+            previous: vec2(-size.x * progress, 0.0),
+            current: vec2(size.x * (1.0 - progress), 0.0),
+        },
+        TransitionEffect::SlideLeftToRight => SlideTransitionOffset {
+            previous: vec2(size.x * progress, 0.0),
+            current: vec2(-size.x * (1.0 - progress), 0.0),
+        },
+        TransitionEffect::SlideTopToBottom => SlideTransitionOffset {
+            previous: vec2(0.0, size.y * progress),
+            current: vec2(0.0, -size.y * (1.0 - progress)),
+        },
+        TransitionEffect::SlideBottomToTop => SlideTransitionOffset {
+            previous: vec2(0.0, -size.y * progress),
+            current: vec2(0.0, size.y * (1.0 - progress)),
+        },
+        _ => SlideTransitionOffset {
+            previous: egui::Vec2::ZERO,
+            current: egui::Vec2::ZERO,
+        },
+    }
+}
+
+fn spiral_reveal_rect(rect: egui::Rect, progress: f32) -> egui::Rect {
+    let eased = (progress.clamp(0.0, 1.0) * std::f32::consts::FRAC_PI_2).sin();
+    let turns = 3.0;
+    let phase = (progress * turns).fract();
+    let width_ratio = (eased + (phase * 0.12)).clamp(0.0, 1.0);
+    let height_ratio = (eased + ((1.0 - phase) * 0.12)).clamp(0.0, 1.0);
+    egui::Rect::from_center_size(
+        rect.center(),
+        vec2(
+            rect.width() * width_ratio.max(0.01),
+            rect.height() * height_ratio.max(0.01),
+        ),
     )
 }
 

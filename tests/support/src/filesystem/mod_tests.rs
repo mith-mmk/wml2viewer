@@ -3,17 +3,36 @@ use crate::dependent::plugins::{
     PluginCapabilityConfig, PluginConfig, PluginExtensionConfig, PluginModuleConfig,
     PluginProviderConfig, set_runtime_plugin_config,
 };
+use oxiarc_archive::LzhWriter;
 use std::io::Write;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use zip::write::SimpleFileOptions;
+
+const TINY_PNG: &[u8] = &[
+    0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, b'I', b'H', b'D', b'R',
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+    0x89, 0x00, 0x00, 0x00, 0x0D, b'I', b'D', b'A', b'T', 0x78, 0x9C, 0x63, 0xF8, 0xCF, 0xC0, 0xF0,
+    0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99, 0x3D, 0x1D, 0x00, 0x00, 0x00, 0x00, b'I', b'E',
+    b'N', b'D', 0xAE, 0x42, 0x60, 0x82,
+];
 
 fn make_temp_dir() -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data");
+    let base = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::current_exe().ok().and_then(|path| {
+                path.parent()
+                    .and_then(|deps| deps.parent())
+                    .map(Path::to_path_buf)
+            })
+        })
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+        .join(".test_wml2viewer");
     fs::create_dir_all(&base).unwrap();
     let dir = base.join(format!(".test_nav_{unique}"));
     fs::create_dir_all(&dir).unwrap();
@@ -33,6 +52,15 @@ fn make_zip_with_entries(path: &Path, names: &[&str]) {
         zip.write_all(b"not-a-real-image").unwrap();
     }
     zip.finish().unwrap();
+}
+
+fn make_lha_with_entries(path: &Path, entries: &[(&str, &[u8])]) {
+    let file = fs::File::create(path).unwrap();
+    let mut lha = LzhWriter::new(file);
+    for (name, bytes) in entries {
+        lha.add_file(name, bytes).unwrap();
+    }
+    lha.finish().unwrap();
 }
 
 #[test]
@@ -221,6 +249,95 @@ fn zip_file_is_expanded_as_virtual_children() {
     assert!(entries.iter().any(|entry| is_virtual_zip_child(entry)));
 
     let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn lha_file_is_expanded_as_virtual_children() {
+    let dir = make_temp_dir();
+    let before = dir.join("before.webp");
+    let archive = dir.join("images.lha");
+    let after = dir.join("after.gif");
+
+    fs::write(&before, []).unwrap();
+    fs::write(&after, []).unwrap();
+    make_lha_with_entries(
+        &archive,
+        &[
+            ("001.png", b"first"),
+            ("sub/002.jpg", b"second"),
+            ("note.txt", b"ignored"),
+        ],
+    );
+
+    let mut cache = FilesystemCache::default();
+    let entries = cache.supported_entries(&dir);
+    assert!(entries.contains(&before));
+    assert!(entries.contains(&after));
+    assert!(entries.iter().any(|entry| is_virtual_lha_child(entry)));
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn lha_virtual_child_bytes_can_be_loaded() {
+    let dir = make_temp_dir();
+    let archive = dir.join("images.lzh");
+    make_lha_with_entries(&archive, &[("001.png", b"first"), ("002.png", b"second")]);
+
+    let children = build_lha_virtual_children(&archive);
+    assert_eq!(children.len(), 2);
+    assert_eq!(
+        load_virtual_image_bytes(&children[0]),
+        Some(b"first".to_vec())
+    );
+    assert_eq!(virtual_image_size(&children[1]), Some(6));
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn generated_lha_virtual_child_image_can_be_decoded() {
+    let dir = make_temp_dir();
+    let archive = dir.join("images.lzh");
+    make_lha_with_entries(&archive, &[("001.png", TINY_PNG)]);
+
+    let children = build_lha_virtual_children(&archive);
+    assert_eq!(children.len(), 1);
+    let bytes = load_virtual_image_bytes(&children[0]).expect("LZH child bytes should load");
+    let image = crate::drawers::image::load_canvas_from_bytes_with_hint(&bytes, Some(&children[0]))
+        .expect("LZH child image should decode");
+
+    assert_eq!(image.canvas.width(), 1);
+    assert_eq!(image.canvas.height(), 1);
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn error_lzh_sample_decodes_at_least_one_image_if_available() {
+    let archive = Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/errors/error.lzh");
+    if !archive.exists() {
+        return;
+    }
+
+    let children = build_lha_virtual_children(&archive);
+    assert!(
+        !children.is_empty(),
+        "test_data/errors/error.lzh should expose image entries"
+    );
+
+    let decoded_count = children
+        .iter()
+        .filter_map(|child| {
+            let bytes = load_virtual_image_bytes(child)?;
+            crate::drawers::image::load_canvas_from_bytes_with_hint(&bytes, Some(child)).ok()
+        })
+        .count();
+
+    assert!(
+        decoded_count > 0,
+        "at least one image in test_data/errors/error.lzh should extract and decode"
+    );
 }
 
 #[test]

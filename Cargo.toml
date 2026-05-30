@@ -13,6 +13,8 @@ eframe = "0.33"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+oxiarc-archive = "0.2"
+delharc = "0.6"
 wml2 = { version = "0.0.23", features = ["multithread"] }
 #wml2 = { path="../wml2/wml2", features = ["multithread"] }
 directories = "6.0.0"

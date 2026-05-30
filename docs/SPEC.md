@@ -24,6 +24,8 @@
 
 - `viewer`
   - `animation`
+  - `transition.effect` = `none` / `fade` / `slide_right_to_left` / `slide_left_to_right` / `slide_top_to_bottom` / `slide_bottom_to_top` / `spiral_wipe_in` / `spiral_wipe_out`
+  - `transition.duration_ms`
   - `grayscale`
   - `manga_mode`
   - `manga_right_to_left`
@@ -69,7 +71,8 @@
   - `path`
 
 - `filesystem`
-  - 現行では `thumbnail.suppress_large_files` のみを持つ
+  - `folder_refresh` = `manual` / `auto`
+  - `thumbnail.suppress_large_files`
   - 旧仕様にあった `protocol` や `zip_encoding` は config ではなく実装側の役割に寄っている
 
 - `runtime`
@@ -182,7 +185,7 @@
 ## 代表的な動作
 
 - Viewer
-  - 単一画像、zip、`.wmltxt` を画像一覧として扱う
+  - 単一画像、zip、LHA/LZH、`.wmltxt` を画像一覧として扱う
   - manga mode で 2 枚表示に対応する
   - preload / companion / overlay を worker 分離する
 

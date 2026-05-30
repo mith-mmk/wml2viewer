@@ -10,8 +10,8 @@ pub use crate::configs::resourses::{FontSizePreset, ResourceOptions};
 pub use crate::dependent::plugins::PluginConfig;
 pub use crate::ui::viewer::options::{
     BackgroundStyle, MangaSeparatorOptions, MangaSeparatorStyle, PaneSide, RenderOptions,
-    RenderScaleMode, ViewerOptions, WindowOptions, WindowSize, WindowStartPosition, WindowUiTheme,
-    ZoomOption,
+    RenderScaleMode, TransitionEffect, TransitionOptions, ViewerOptions, WindowOptions, WindowSize,
+    WindowStartPosition, WindowUiTheme, ZoomOption,
 };
 
 #[derive(Clone, Default)]
@@ -21,11 +21,31 @@ pub struct AppConfig {
     pub render: RenderOptions,
     pub resources: ResourceOptions,
     pub plugins: PluginConfig,
+    pub filesystem: FilesystemOptions,
     pub storage: StorageOptions,
     pub input: InputOptions,
     pub navigation: NavigationOptions,
     pub file_action: FileActionOptions,
     pub runtime: RuntimeOptions,
+}
+
+#[derive(Clone)]
+pub struct FilesystemOptions {
+    pub folder_refresh: FolderRefreshMode,
+}
+
+impl Default for FilesystemOptions {
+    fn default() -> Self {
+        Self {
+            folder_refresh: FolderRefreshMode::Manual,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FolderRefreshMode {
+    Manual,
+    Auto,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

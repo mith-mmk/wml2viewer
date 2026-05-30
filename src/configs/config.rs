@@ -9,9 +9,11 @@ use crate::dependent::default_config_dir;
 use crate::dependent::plugins::PluginConfig;
 use crate::drawers::affine::InterpolationAlgorithm;
 use crate::options::{
-    AppConfig, EndOfFolderOption, FileActionOptions, FileActionSlot, FontSizePreset, InputOptions,
-    KeyBinding, MangaSeparatorOptions, MangaSeparatorStyle, NavigationSortOption, PaneSide,
-    RenderScaleMode, ResourceOptions, RuntimeOptions, StorageOptions, ViewerAction, WindowUiTheme,
+    AppConfig, EndOfFolderOption, FileActionOptions, FileActionSlot, FilesystemOptions,
+    FolderRefreshMode, FontSizePreset, InputOptions, KeyBinding, MangaSeparatorOptions,
+    MangaSeparatorStyle, NavigationSortOption, PaneSide, RenderScaleMode, ResourceOptions,
+    RuntimeOptions, StorageOptions, TransitionEffect, TransitionOptions, ViewerAction,
+    WindowUiTheme,
 };
 use crate::ui::viewer::options::{
     BackgroundStyle, RenderOptions, ViewerOptions, WindowOptions, WindowSize, WindowStartPosition,
@@ -39,6 +41,7 @@ struct ConfigFile {
 #[serde(default)]
 struct ViewerConfigFile {
     animation: bool,
+    transition: TransitionConfigFile,
     grayscale: bool,
     manga_mode: bool,
     manga_right_to_left: bool,
@@ -50,6 +53,7 @@ impl Default for ViewerConfigFile {
     fn default() -> Self {
         Self {
             animation: true,
+            transition: TransitionConfigFile::default(),
             grayscale: false,
             manga_mode: false,
             manga_right_to_left: true,
@@ -59,6 +63,35 @@ impl Default for ViewerConfigFile {
             },
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+struct TransitionConfigFile {
+    effect: TransitionEffectConfigFile,
+    duration_ms: u64,
+}
+
+impl Default for TransitionConfigFile {
+    fn default() -> Self {
+        Self {
+            effect: TransitionEffectConfigFile::None,
+            duration_ms: 180,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TransitionEffectConfigFile {
+    None,
+    Fade,
+    SlideRightToLeft,
+    SlideLeftToRight,
+    SlideTopToBottom,
+    SlideBottomToTop,
+    SpiralWipeIn,
+    SpiralWipeOut,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -316,6 +349,7 @@ enum NavigationSortConfigFile {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 struct FilesystemConfigFile {
+    folder_refresh: FolderRefreshConfigFile,
     thumbnail: ThumbnailConfigFile,
     file_action: FileActionConfigFile,
 }
@@ -323,10 +357,18 @@ struct FilesystemConfigFile {
 impl Default for FilesystemConfigFile {
     fn default() -> Self {
         Self {
+            folder_refresh: FolderRefreshConfigFile::Manual,
             thumbnail: ThumbnailConfigFile::default(),
             file_action: FileActionConfigFile::default(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FolderRefreshConfigFile {
+    Manual,
+    Auto,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -492,6 +534,7 @@ impl From<ConfigFile> for AppConfig {
             background: value.viewer.background.into(),
             fade: config.viewer.fade,
             animation: value.viewer.animation,
+            transition: value.viewer.transition.into(),
             grayscale: value.viewer.grayscale,
             manga_mode: value.viewer.manga_mode,
             manga_right_to_left: value.viewer.manga_right_to_left,
@@ -501,6 +544,9 @@ impl From<ConfigFile> for AppConfig {
         config.render = value.render.into();
         config.resources = value.resources.into();
         config.plugins = value.plugins;
+        config.filesystem = FilesystemOptions {
+            folder_refresh: value.filesystem.folder_refresh.into(),
+        };
         config.storage = value.storage.into();
         config.input = value.input.into();
         config.navigation.end_of_folder = value.navigation.end_of_folder.into();
@@ -524,6 +570,7 @@ impl ConfigFile {
         Self {
             viewer: ViewerConfigFile {
                 animation: value.viewer.animation,
+                transition: value.viewer.transition.into(),
                 grayscale: value.viewer.grayscale,
                 manga_mode: value.viewer.manga_mode,
                 manga_right_to_left: value.viewer.manga_right_to_left,
@@ -534,6 +581,7 @@ impl ConfigFile {
             render: value.render.into(),
             resources: value.resources.into(),
             filesystem: FilesystemConfigFile {
+                folder_refresh: value.filesystem.folder_refresh.into(),
                 thumbnail: thumbnail.into(),
                 file_action: value.file_action.into(),
             },
@@ -833,6 +881,54 @@ impl From<RenderOptions> for RenderConfigFile {
     }
 }
 
+impl From<TransitionConfigFile> for TransitionOptions {
+    fn from(value: TransitionConfigFile) -> Self {
+        Self {
+            effect: value.effect.into(),
+            duration_ms: value.duration_ms.max(1),
+        }
+    }
+}
+
+impl From<TransitionOptions> for TransitionConfigFile {
+    fn from(value: TransitionOptions) -> Self {
+        Self {
+            effect: value.effect.into(),
+            duration_ms: value.duration_ms.max(1),
+        }
+    }
+}
+
+impl From<TransitionEffectConfigFile> for TransitionEffect {
+    fn from(value: TransitionEffectConfigFile) -> Self {
+        match value {
+            TransitionEffectConfigFile::None => TransitionEffect::None,
+            TransitionEffectConfigFile::Fade => TransitionEffect::Fade,
+            TransitionEffectConfigFile::SlideRightToLeft => TransitionEffect::SlideRightToLeft,
+            TransitionEffectConfigFile::SlideLeftToRight => TransitionEffect::SlideLeftToRight,
+            TransitionEffectConfigFile::SlideTopToBottom => TransitionEffect::SlideTopToBottom,
+            TransitionEffectConfigFile::SlideBottomToTop => TransitionEffect::SlideBottomToTop,
+            TransitionEffectConfigFile::SpiralWipeIn => TransitionEffect::SpiralWipeIn,
+            TransitionEffectConfigFile::SpiralWipeOut => TransitionEffect::SpiralWipeOut,
+        }
+    }
+}
+
+impl From<TransitionEffect> for TransitionEffectConfigFile {
+    fn from(value: TransitionEffect) -> Self {
+        match value {
+            TransitionEffect::None => Self::None,
+            TransitionEffect::Fade => Self::Fade,
+            TransitionEffect::SlideRightToLeft => Self::SlideRightToLeft,
+            TransitionEffect::SlideLeftToRight => Self::SlideLeftToRight,
+            TransitionEffect::SlideTopToBottom => Self::SlideTopToBottom,
+            TransitionEffect::SlideBottomToTop => Self::SlideBottomToTop,
+            TransitionEffect::SpiralWipeIn => Self::SpiralWipeIn,
+            TransitionEffect::SpiralWipeOut => Self::SpiralWipeOut,
+        }
+    }
+}
+
 impl From<MangaSeparatorConfigFile> for MangaSeparatorOptions {
     fn from(value: MangaSeparatorConfigFile) -> Self {
         Self {
@@ -907,6 +1003,24 @@ impl From<StorageOptions> for StorageConfigFile {
         Self {
             path_record: value.path_record,
             path: value.path,
+        }
+    }
+}
+
+impl From<FolderRefreshConfigFile> for FolderRefreshMode {
+    fn from(value: FolderRefreshConfigFile) -> Self {
+        match value {
+            FolderRefreshConfigFile::Manual => FolderRefreshMode::Manual,
+            FolderRefreshConfigFile::Auto => FolderRefreshMode::Auto,
+        }
+    }
+}
+
+impl From<FolderRefreshMode> for FolderRefreshConfigFile {
+    fn from(value: FolderRefreshMode) -> Self {
+        match value {
+            FolderRefreshMode::Manual => Self::Manual,
+            FolderRefreshMode::Auto => Self::Auto,
         }
     }
 }
@@ -1033,6 +1147,29 @@ impl From<RenderScaleMode> for RenderScaleModeConfigFile {
             RenderScaleMode::FastGpu => Self::FastGpu,
             RenderScaleMode::PreciseCpu => Self::PreciseCpu,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_viewer_and_filesystem_options_round_trip() {
+        let mut config = AppConfig::default();
+        config.viewer.transition.effect = TransitionEffect::Fade;
+        config.viewer.transition.duration_ms = 320;
+        config.filesystem.folder_refresh = FolderRefreshMode::Auto;
+
+        let file = ConfigFile::from(config);
+        let round_trip = AppConfig::from(file);
+
+        assert_eq!(round_trip.viewer.transition.effect, TransitionEffect::Fade);
+        assert_eq!(round_trip.viewer.transition.duration_ms, 320);
+        assert_eq!(
+            round_trip.filesystem.folder_refresh,
+            FolderRefreshMode::Auto
+        );
     }
 }
 

@@ -35,6 +35,8 @@ pub fn associated_file_extensions() -> Vec<String> {
         .map(|ext| format!(".{ext}"))
         .collect();
     extensions.push(".zip".to_string());
+    extensions.push(".lha".to_string());
+    extensions.push(".lzh".to_string());
     extensions.push(".wmltxt".to_string());
     extensions.sort();
     extensions.dedup();

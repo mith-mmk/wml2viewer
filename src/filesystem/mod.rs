@@ -1,4 +1,5 @@
 pub mod function;
+mod lha_file;
 mod listed_file;
 mod sort;
 mod zip_file;
@@ -17,6 +18,7 @@ use crate::benchlog::log_global_bench_event;
 use crate::dependent::plugins::path_supported_by_plugins;
 use crate::options::{EndOfFolderOption, NavigationSortOption};
 use crate::wml2_formats::supports_decoder_extension;
+use lha_file::{lha_entry_record, load_lha_entries, load_lha_entry_bytes};
 use listed_file::load_listed_file_entries;
 pub(crate) use sort::{compare_natural_str, compare_os_str};
 use zip_file::{
@@ -27,6 +29,7 @@ pub(crate) use zip_file::{load_zip_entries_unsorted, sort_zip_entries};
 
 const LISTED_FILE_EXTENSION: &str = "wmltxt";
 const LISTED_VIRTUAL_MARKER: &str = "__wmlv__";
+const LHA_VIRTUAL_MARKER: &str = "__lhav__";
 const ZIP_FILE_EXTENSION: &str = "zip";
 const ZIP_VIRTUAL_MARKER: &str = "__zipv__";
 
@@ -347,12 +350,21 @@ pub fn resolve_start_path(path: &Path) -> Option<PathBuf> {
     if is_virtual_zip_child(path) {
         return Some(path.to_path_buf());
     }
+    if is_virtual_lha_child(path) {
+        return Some(path.to_path_buf());
+    }
 
     if let Some(target) = resolve_virtual_listed_child(path) {
         return resolve_start_path(&target);
     }
 
     if is_zip_file_path(path) {
+        let mut cache = FilesystemCache::default();
+        let navigation_path = cache.first_supported_file(path)?;
+        return resolve_start_path(&navigation_path);
+    }
+
+    if is_lha_file_path(path) {
         let mut cache = FilesystemCache::default();
         let navigation_path = cache.first_supported_file(path)?;
         return resolve_start_path(&navigation_path);
@@ -377,12 +389,21 @@ pub fn resolve_end_path(path: &Path) -> Option<PathBuf> {
     if is_virtual_zip_child(path) {
         return Some(path.to_path_buf());
     }
+    if is_virtual_lha_child(path) {
+        return Some(path.to_path_buf());
+    }
 
     if let Some(target) = resolve_virtual_listed_child(path) {
         return resolve_end_path(&target);
     }
 
     if is_zip_file_path(path) {
+        let mut cache = FilesystemCache::default();
+        let navigation_path = cache.last_supported_file(path)?;
+        return resolve_end_path(&navigation_path);
+    }
+
+    if is_lha_file_path(path) {
         let mut cache = FilesystemCache::default();
         let navigation_path = cache.last_supported_file(path)?;
         return resolve_end_path(&navigation_path);
@@ -406,6 +427,10 @@ pub fn resolve_end_path(path: &Path) -> Option<PathBuf> {
 pub fn load_virtual_image_bytes(path: &Path) -> Option<Vec<u8>> {
     resolve_virtual_zip_child(path)
         .and_then(|(archive, index)| load_zip_entry_bytes(&archive, index))
+        .or_else(|| {
+            resolve_virtual_lha_child(path)
+                .and_then(|(archive, index)| load_lha_entry_bytes(&archive, index))
+        })
 }
 
 pub fn set_archive_zip_workaround(options: crate::options::ZipWorkaroundOptions) {
@@ -426,6 +451,11 @@ pub fn virtual_image_size(path: &Path) -> Option<u64> {
     resolve_virtual_zip_child(path)
         .and_then(|(archive, index)| zip_entry_record(&archive, index))
         .map(|entry| entry.size)
+        .or_else(|| {
+            resolve_virtual_lha_child(path)
+                .and_then(|(archive, index)| lha_entry_record(&archive, index))
+                .map(|entry| entry.size)
+        })
 }
 
 #[allow(dead_code)]
@@ -440,6 +470,10 @@ pub fn list_openable_entries(dir: &Path, sort: NavigationSortOption) -> Vec<Path
 pub fn list_browser_entries(dir: &Path, sort: NavigationSortOption) -> Vec<PathBuf> {
     if is_zip_file_path(dir) {
         return scan_zip_virtual_directory(dir, sort).files;
+    }
+
+    if is_lha_file_path(dir) {
+        return scan_lha_virtual_directory(dir, sort).files;
     }
 
     if is_listed_file_path(dir) {
@@ -473,7 +507,7 @@ pub fn list_browser_entries(dir: &Path, sort: NavigationSortOption) -> Vec<PathB
 }
 
 pub fn is_browser_container(path: &Path) -> bool {
-    path.is_dir() || is_zip_file_path(path) || is_listed_file_path(path)
+    path.is_dir() || is_zip_file_path(path) || is_lha_file_path(path) || is_listed_file_path(path)
 }
 
 pub fn navigation_branch_path(path: &Path) -> Option<PathBuf> {
@@ -696,12 +730,20 @@ fn resolve_navigation_path(path: &Path, cache: &mut FilesystemCache) -> Option<P
         return resolve_start_path(path).map(|_| path.to_path_buf());
     }
 
+    if is_virtual_lha_child(path) {
+        return resolve_start_path(path).map(|_| path.to_path_buf());
+    }
+
     if is_virtual_listed_child(path) {
         return rebase_virtual_listed_child_path(path, cache)
             .or_else(|| resolve_start_path(path).map(|_| path.to_path_buf()));
     }
 
-    if is_listed_file_path(path) || is_zip_file_path(path) || path.is_dir() {
+    if is_listed_file_path(path)
+        || is_zip_file_path(path)
+        || is_lha_file_path(path)
+        || path.is_dir()
+    {
         return cache
             .first_supported_file(path)
             .or_else(|| Some(path.to_path_buf()));
@@ -748,6 +790,10 @@ fn edge_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Vec<PathBuf>
         return Some(cache.supported_entries(&zip_root));
     }
 
+    if let Some(lha_root) = lha_virtual_root(path) {
+        return Some(cache.supported_entries(&lha_root));
+    }
+
     if let Some(listed_root) = listed_virtual_root(path) {
         return Some(cache.supported_entries(&listed_root));
     }
@@ -772,13 +818,19 @@ fn direct_image_entries_for_edge(path: &Path, cache: &mut FilesystemCache) -> Op
     }
 
     let mut entries = cache.listing(&dir).file_entries.clone();
-    entries.retain(|entry| !is_zip_file_path(entry) && !is_listed_file_path(entry));
+    entries.retain(|entry| {
+        !is_zip_file_path(entry) && !is_lha_file_path(entry) && !is_listed_file_path(entry)
+    });
     Some(entries)
 }
 
 fn flat_container_dir(path: &Path) -> Option<PathBuf> {
     if let Some(zip_root) = zip_virtual_root(path) {
         return Some(zip_root);
+    }
+
+    if let Some(lha_root) = lha_virtual_root(path) {
+        return Some(lha_root);
     }
 
     if let Some(listed_root) = listed_virtual_root(path) {
@@ -789,12 +841,20 @@ fn flat_container_dir(path: &Path) -> Option<PathBuf> {
 }
 
 fn next_policy_directory(path: &Path) -> Option<PathBuf> {
-    if path.is_dir() || is_zip_file_path(path) || is_listed_file_path(path) {
+    if path.is_dir()
+        || is_zip_file_path(path)
+        || is_lha_file_path(path)
+        || is_listed_file_path(path)
+    {
         return Some(path.to_path_buf());
     }
 
     if let Some(zip_root) = zip_virtual_root(path) {
         return Some(zip_root);
+    }
+
+    if let Some(lha_root) = lha_virtual_root(path) {
+        return Some(lha_root);
     }
 
     if let Some(listed_root) = listed_virtual_root(path) {
@@ -805,12 +865,20 @@ fn next_policy_directory(path: &Path) -> Option<PathBuf> {
 }
 
 fn recursive_branch_dir(path: &Path) -> Option<PathBuf> {
-    if path.is_dir() || is_zip_file_path(path) || is_listed_file_path(path) {
+    if path.is_dir()
+        || is_zip_file_path(path)
+        || is_lha_file_path(path)
+        || is_listed_file_path(path)
+    {
         return Some(path.to_path_buf());
     }
 
     if let Some(zip_root) = zip_virtual_root(path) {
         return Some(zip_root);
+    }
+
+    if let Some(lha_root) = lha_virtual_root(path) {
+        return Some(lha_root);
     }
 
     if let Some(listed_root) = listed_virtual_root(path) {
@@ -910,6 +978,8 @@ impl FilesystemCache {
                     files.extend(build_listed_virtual_children(&path));
                 } else if is_zip_file_path(&path) {
                     files.extend(build_zip_virtual_children(&path));
+                } else if is_lha_file_path(&path) {
+                    files.extend(build_lha_virtual_children(&path));
                 } else {
                     files.push(path);
                 }
@@ -921,7 +991,7 @@ impl FilesystemCache {
     }
 
     fn navigation_entries(&mut self, dir: &Path) -> Vec<PathBuf> {
-        if is_zip_file_path(dir) || is_listed_file_path(dir) {
+        if is_zip_file_path(dir) || is_lha_file_path(dir) || is_listed_file_path(dir) {
             return self.supported_entries(dir);
         }
         self.listing(dir).file_entries.clone()
@@ -949,6 +1019,21 @@ fn scan_directory_listing(dir: &Path, sort: NavigationSortOption) -> DirectoryLi
             serde_json::json!({
                 "directory": dir.display().to_string(),
                 "kind": "zip",
+                "file_count": listing.files.len(),
+                "dir_count": listing.dirs.len(),
+                "elapsed_ms": started_at.elapsed().as_millis() as u64,
+            }),
+        );
+        return listing;
+    }
+
+    if is_lha_file_path(dir) {
+        let listing = scan_lha_virtual_directory(dir, sort);
+        log_global_bench_event(
+            "filesystem.scan_directory_listing",
+            serde_json::json!({
+                "directory": dir.display().to_string(),
+                "kind": "lha",
                 "file_count": listing.files.len(),
                 "dir_count": listing.dirs.len(),
                 "elapsed_ms": started_at.elapsed().as_millis() as u64,
@@ -1021,6 +1106,24 @@ fn scan_zip_virtual_directory(zip_file: &Path, sort: NavigationSortOption) -> Di
     }
 }
 
+fn scan_lha_virtual_directory(lha_file: &Path, sort: NavigationSortOption) -> DirectoryListing {
+    let entries = load_lha_entries(lha_file).unwrap_or_default();
+    let mut files = entries
+        .iter()
+        .map(|entry| lha_virtual_child_path(lha_file, entry.index, &entry.name))
+        .collect::<Vec<_>>();
+    sort_paths(&mut files, sort);
+
+    DirectoryListing {
+        file_entries: files.clone(),
+        files_expanded: true,
+        first_file: files.first().cloned(),
+        last_file: files.last().cloned(),
+        files,
+        dirs: Vec::new(),
+    }
+}
+
 fn scan_real_directory_listing(dir: &Path, sort: NavigationSortOption) -> DirectoryListing {
     let Some(entries) = fs::read_dir(dir).ok() else {
         return DirectoryListing::default();
@@ -1074,6 +1177,12 @@ fn first_supported_path_for_entry(path: &Path, sort: NavigationSortOption) -> Op
             .into_iter()
             .next();
     }
+    if is_lha_file_path(path) {
+        return scan_lha_virtual_directory(path, sort)
+            .files
+            .into_iter()
+            .next();
+    }
     resolve_start_path(path)
 }
 
@@ -1090,6 +1199,12 @@ fn last_supported_path_for_entry(path: &Path, sort: NavigationSortOption) -> Opt
             .into_iter()
             .last();
     }
+    if is_lha_file_path(path) {
+        return scan_lha_virtual_directory(path, sort)
+            .files
+            .into_iter()
+            .last();
+    }
     resolve_start_path(path)
 }
 
@@ -1098,6 +1213,7 @@ pub(crate) fn browser_entry_path_from_dir_entry(entry: &fs::DirEntry) -> Option<
     let path = entry.path();
     if is_supported_image_name(&file_name)
         || is_listed_file_name(&file_name)
+        || is_lha_file_name(&file_name)
         || is_zip_file_name(&file_name)
     {
         return Some(path);
@@ -1116,11 +1232,17 @@ fn dir_entry_is_directory(entry: &fs::DirEntry) -> bool {
 
 fn dir_entry_is_browser_file(entry: &fs::DirEntry, path: &Path) -> bool {
     let file_name = entry.file_name();
-    is_supported_image_name(&file_name) || is_listed_file_path(path) || is_zip_file_path(path)
+    is_supported_image_name(&file_name)
+        || is_listed_file_path(path)
+        || is_zip_file_path(path)
+        || is_lha_file_path(path)
 }
 
 fn dir_entry_is_browser_container(entry: &fs::DirEntry, path: &Path) -> bool {
-    is_listed_file_path(path) || is_zip_file_path(path) || dir_entry_is_directory(entry)
+    is_listed_file_path(path)
+        || is_zip_file_path(path)
+        || is_lha_file_path(path)
+        || dir_entry_is_directory(entry)
 }
 
 fn build_listed_virtual_children(listed_file: &Path) -> Vec<PathBuf> {
@@ -1140,6 +1262,14 @@ fn build_zip_virtual_children(zip_file: &Path) -> Vec<PathBuf> {
         .unwrap_or_default()
         .into_iter()
         .map(|entry| zip_virtual_child_path(zip_file, entry.index, &entry.name))
+        .collect()
+}
+
+fn build_lha_virtual_children(lha_file: &Path) -> Vec<PathBuf> {
+    load_lha_entries(lha_file)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|entry| lha_virtual_child_path(lha_file, entry.index, &entry.name))
         .collect()
 }
 
@@ -1194,12 +1324,27 @@ fn zip_virtual_child_path(zip_file: &Path, index: usize, entry_name: &str) -> Pa
     path
 }
 
+fn lha_virtual_child_path(lha_file: &Path, index: usize, entry_name: &str) -> PathBuf {
+    let mut path = lha_file.to_path_buf();
+    path.push(LHA_VIRTUAL_MARKER);
+    let name = Path::new(entry_name)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("entry");
+    path.push(format!("{index:08}__{name}"));
+    path
+}
+
 fn listed_virtual_root(path: &Path) -> Option<PathBuf> {
     listed_virtual_child_info(path).map(|(root, _)| root)
 }
 
 fn zip_virtual_root(path: &Path) -> Option<PathBuf> {
     zip_virtual_child_info(path).map(|(root, _)| root)
+}
+
+fn lha_virtual_root(path: &Path) -> Option<PathBuf> {
+    lha_virtual_child_info(path).map(|(root, _)| root)
 }
 
 fn resolve_virtual_listed_child(path: &Path) -> Option<PathBuf> {
@@ -1211,6 +1356,10 @@ fn resolve_virtual_listed_child(path: &Path) -> Option<PathBuf> {
 
 fn resolve_virtual_zip_child(path: &Path) -> Option<(PathBuf, usize)> {
     zip_virtual_child_info(path)
+}
+
+fn resolve_virtual_lha_child(path: &Path) -> Option<(PathBuf, usize)> {
+    lha_virtual_child_info(path)
 }
 
 fn resolve_navigation_leaf(path: PathBuf) -> Option<PathBuf> {
@@ -1261,12 +1410,33 @@ fn zip_virtual_child_info(path: &Path) -> Option<(PathBuf, usize)> {
     is_zip_file_path(&zip_root).then_some((zip_root, index))
 }
 
+fn lha_virtual_child_info(path: &Path) -> Option<(PathBuf, usize)> {
+    let file_name = path.file_name()?.to_string_lossy();
+    let index_text = file_name
+        .split_once("__")
+        .map(|(index, _)| index)
+        .unwrap_or(file_name.as_ref());
+    let index = index_text.parse::<usize>().ok()?;
+
+    let marker_dir = path.parent()?;
+    if marker_dir.file_name()?.to_str()? != LHA_VIRTUAL_MARKER {
+        return None;
+    }
+
+    let lha_root = marker_dir.parent()?.to_path_buf();
+    is_lha_file_path(&lha_root).then_some((lha_root, index))
+}
+
 fn is_virtual_listed_child(path: &Path) -> bool {
     listed_virtual_child_info(path).is_some()
 }
 
 fn is_virtual_zip_child(path: &Path) -> bool {
     zip_virtual_child_info(path).is_some()
+}
+
+fn is_virtual_lha_child(path: &Path) -> bool {
+    lha_virtual_child_info(path).is_some()
 }
 
 fn is_supported_image(path: &Path) -> bool {
@@ -1303,6 +1473,18 @@ fn is_zip_file_name(name: &OsStr) -> bool {
         .extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| ext.eq_ignore_ascii_case(ZIP_FILE_EXTENSION))
+        .unwrap_or(false)
+}
+
+fn is_lha_file_path(path: &Path) -> bool {
+    is_lha_file_name(path.file_name().unwrap_or_else(|| path.as_os_str()))
+}
+
+fn is_lha_file_name(name: &OsStr) -> bool {
+    Path::new(name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("lha") || ext.eq_ignore_ascii_case("lzh"))
         .unwrap_or(false)
 }
 

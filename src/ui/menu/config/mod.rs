@@ -7,8 +7,8 @@ use crate::dependent::{
 use crate::drawers::affine::InterpolationAlgorithm;
 use crate::filesystem::set_archive_zip_workaround;
 use crate::options::{
-    AppConfig, EndOfFolderOption, FileActionSlot, KeyBinding, NavigationOptions, PaneSide,
-    ViewerAction, default_key_mapping,
+    AppConfig, EndOfFolderOption, FileActionSlot, FolderRefreshMode, KeyBinding, NavigationOptions,
+    PaneSide, TransitionEffect, ViewerAction, default_key_mapping,
 };
 use crate::ui::i18n::UiTextKey;
 use crate::ui::input::dispatch::{
@@ -38,6 +38,16 @@ const INPUT_ACTION_FIELD_WIDTH: f32 = 220.0;
 const INPUT_KEY_FIELD_WIDTH: f32 = 180.0;
 const INPUT_MODIFIER_FIELD_WIDTH: f32 = 56.0;
 const INPUT_REMOVE_FIELD_WIDTH: f32 = 64.0;
+const TRANSITION_EFFECTS: &[TransitionEffect] = &[
+    TransitionEffect::None,
+    TransitionEffect::Fade,
+    TransitionEffect::SlideRightToLeft,
+    TransitionEffect::SlideLeftToRight,
+    TransitionEffect::SlideTopToBottom,
+    TransitionEffect::SlideBottomToTop,
+    TransitionEffect::SpiralWipeIn,
+    TransitionEffect::SpiralWipeOut,
+];
 const INPUT_COLUMN_SPACING: f32 = 8.0;
 
 impl ViewerApp {
@@ -181,6 +191,33 @@ impl ViewerApp {
                 &mut draft.viewer.manga_right_to_left,
                 self.text(UiTextKey::MangaRightToLeft),
             );
+            ui.separator();
+            ui.label(self.text(UiTextKey::Transition));
+            ui.horizontal(|ui| {
+                ui.label(self.text(UiTextKey::TransitionEffect));
+                egui::ComboBox::from_id_salt("transition_effect")
+                    .selected_text(transition_effect_label(
+                        self,
+                        draft.viewer.transition.effect,
+                    ))
+                    .show_ui(ui, |ui| {
+                        for &effect in TRANSITION_EFFECTS {
+                            ui.selectable_value(
+                                &mut draft.viewer.transition.effect,
+                                effect,
+                                transition_effect_label(self, effect),
+                            );
+                        }
+                    });
+            });
+            ui.horizontal(|ui| {
+                ui.label(self.text(UiTextKey::TransitionDurationMs));
+                ui.add(
+                    egui::DragValue::new(&mut draft.viewer.transition.duration_ms)
+                        .range(1..=2000)
+                        .speed(5.0),
+                );
+            });
             ui.separator();
             ui.label(self.text(UiTextKey::Separator));
             ui.horizontal(|ui| {
@@ -833,6 +870,23 @@ impl ViewerApp {
                         );
                     });
             });
+            ui.horizontal(|ui| {
+                ui.label(self.text(UiTextKey::FolderRefresh));
+                egui::ComboBox::from_id_salt("folder_refresh")
+                    .selected_text(folder_refresh_label(self, draft.filesystem.folder_refresh))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut draft.filesystem.folder_refresh,
+                            FolderRefreshMode::Manual,
+                            self.text(UiTextKey::Manual),
+                        );
+                        ui.selectable_value(
+                            &mut draft.filesystem.folder_refresh,
+                            FolderRefreshMode::Auto,
+                            self.text(UiTextKey::Auto),
+                        );
+                    });
+            });
             ui.separator();
             ui.label(self.text(UiTextKey::FileActionDefaults));
             ui.label(self.text(UiTextKey::MoveDestinationFolders));
@@ -1050,6 +1104,9 @@ impl ViewerApp {
             self.respawn_filesystem_worker();
             self.refresh_current_filer_directory();
         }
+        if self.filesystem_options.folder_refresh != previous.filesystem.folder_refresh {
+            self.last_auto_refresh_signature = None;
+        }
         if self.render_options.zoom_option != previous.render.zoom_option {
             self.pending_fit_recalc = true;
         }
@@ -1095,6 +1152,7 @@ impl ViewerApp {
         self.render_options = config.render;
         self.resources = config.resources;
         self.plugins = config.plugins;
+        self.filesystem_options = config.filesystem;
         self.storage = config.storage;
         self.runtime = config.runtime;
         self.file_action = config.file_action;
@@ -1147,6 +1205,7 @@ impl ViewerApp {
             window: self.window_options.clone(),
             render: self.render_options.clone(),
             plugins: self.plugins.clone(),
+            filesystem: self.filesystem_options.clone(),
             storage: self.storage.clone(),
             runtime: self.runtime.clone(),
             file_action: self.file_action.clone(),
@@ -1396,6 +1455,26 @@ fn end_of_folder_label(locale: &str, option: EndOfFolderOption) -> &'static str 
         EndOfFolderOption::Next => crate::ui::i18n::tr(locale, UiTextKey::Next),
         EndOfFolderOption::Loop => crate::ui::i18n::tr(locale, UiTextKey::Loop),
         EndOfFolderOption::Recursive => crate::ui::i18n::tr(locale, UiTextKey::Recursive),
+    }
+}
+
+fn folder_refresh_label(viewer: &ViewerApp, mode: FolderRefreshMode) -> &'static str {
+    match mode {
+        FolderRefreshMode::Manual => viewer.text(UiTextKey::Manual),
+        FolderRefreshMode::Auto => viewer.text(UiTextKey::Auto),
+    }
+}
+
+fn transition_effect_label(viewer: &ViewerApp, effect: TransitionEffect) -> &'static str {
+    match effect {
+        TransitionEffect::None => viewer.text(UiTextKey::None),
+        TransitionEffect::Fade => viewer.text(UiTextKey::Fade),
+        TransitionEffect::SlideRightToLeft => viewer.text(UiTextKey::SlideRightToLeft),
+        TransitionEffect::SlideLeftToRight => viewer.text(UiTextKey::SlideLeftToRight),
+        TransitionEffect::SlideTopToBottom => viewer.text(UiTextKey::SlideTopToBottom),
+        TransitionEffect::SlideBottomToTop => viewer.text(UiTextKey::SlideBottomToTop),
+        TransitionEffect::SpiralWipeIn => viewer.text(UiTextKey::SpiralWipeIn),
+        TransitionEffect::SpiralWipeOut => viewer.text(UiTextKey::SpiralWipeOut),
     }
 }
 

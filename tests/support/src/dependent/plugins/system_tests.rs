@@ -15,7 +15,17 @@ fn temp_png_path() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data");
+    let base = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::current_exe().ok().and_then(|path| {
+                path.parent()
+                    .and_then(|deps| deps.parent())
+                    .map(std::path::Path::to_path_buf)
+            })
+        })
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+        .join(".test_wml2viewer");
     std::fs::create_dir_all(&base).unwrap();
     let path = base.join(format!(".test_system_decoder_{unique}.png"));
     std::fs::write(&path, TINY_PNG).unwrap();
