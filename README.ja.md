@@ -7,6 +7,7 @@
 - プレビュー版なので仕様は今後変わります
 
 ## 主な機能
+
 - JPEG/Webp/BMP/Tiff/PNG/GIF/mag/maki/pi/picのネイティブ対応
 - アニメーションGIF/PNG/webpのネイティブ対応
 - マルチプラットフォーム対応
@@ -19,6 +20,7 @@
 - OS連携機能(Windows)
 
 ## 起動
+
 - 適当な実行用フォルダに投げ込んでから実行してください
 
 ```powershell
@@ -26,12 +28,14 @@ wml2viewer
 ```
 
 ## コマンドライン
+
 - `wml2viewer` 通常起動
 - `wml2viewer [path]` 画像を指定して起動
 - `wml2viewer --config <path> [path]` 設定ファイルを指定して起動
 - `wml2viewer --clean system`　設定を削除
 
 ## ヘルプ
+
 - https://mith-mmk.github.io/wml2/help.html
 
 ## 設定
@@ -40,7 +44,6 @@ wml2viewer
 
 - Windows: %USERAPP%\mith-mmk\wml2\config\config.toml
 - Linux: ~/.wml2/config/config.toml
-
 
 ### 大容量 / ネットワーク ZIP 向けワークアラウンド例:
 
@@ -57,6 +60,7 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 ```
 
 ## メモ
+
 - 大きい ZIP やネットワーク上の ZIP では low-I/O ワークアラウンドが有効になります。
 - Windows では `設定 -> システム` から拡張子の関連付けを操作できます。
 - `ffmpeg` は現状 `ffmpeg.exe` を起動してデコード。
@@ -65,6 +69,8 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - plugin を有効化すると、`avif` や `jp2` などの拡張子も filer / viewer の対象になります。
 
 # update log
+
 - 2026-04-17: 0.0.14 preview3 公開
 - 2026-04-25: 0.0.15 preview4 公開、右クリックメニュー追加、キー割り当て追加、いくつかのバグ修正
 - 2026-05-17: 0.0.16 preview5 UIの調整
+- 2026-05-31: 0.0.17 beta1 LZHサポート、画面エフェクトの追加
