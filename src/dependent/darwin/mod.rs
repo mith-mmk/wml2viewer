@@ -50,7 +50,7 @@ pub fn last_resort_font_candidates() -> Vec<PathBuf> {
 }
 
 pub fn pick_directory_dialog() -> Option<PathBuf> {
-    None
+    super::desktop::pick_directory_dialog()
 }
 
 pub fn available_roots() -> Vec<PathBuf> {
@@ -62,5 +62,5 @@ pub fn available_roots() -> Vec<PathBuf> {
 }
 
 pub fn download_url_to_temp(_url: &str) -> Option<PathBuf> {
-    None
+    super::desktop::download_url_to_temp(_url)
 }

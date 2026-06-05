@@ -193,6 +193,7 @@ impl ViewerApp {
         };
         let request_id = self.alloc_fs_request_id();
         self.active_fs_request_id = Some(request_id);
+        self.active_navigation_transition_direction = None;
         self.log_bench_state(
             "viewer.init_filesystem",
             serde_json::json!({
@@ -211,6 +212,7 @@ impl ViewerApp {
     pub(super) fn request_navigation(
         &mut self,
         mut command: FilesystemCommand,
+        transition_direction: Option<ImageTransitionDirection>,
     ) -> Result<(), Box<dyn Error>> {
         self.sync_navigation_sort_with_filer_sort();
         self.spawn_navigation_workers();
@@ -219,9 +221,10 @@ impl ViewerApp {
                 "viewer.request_navigation.queued_not_ready",
                 serde_json::json!({
                     "command": format!("{command:?}"),
+                    "transition_direction": transition_direction.map(|direction| format!("{direction:?}")),
                 }),
             );
-            queue_navigation_command(&mut self.queued_navigation, command);
+            queue_navigation_command(&mut self.queued_navigation, command, transition_direction);
             return Ok(());
         }
         if self.active_fs_request_id.is_some() {
@@ -229,9 +232,10 @@ impl ViewerApp {
                 "viewer.request_navigation.queued_busy",
                 serde_json::json!({
                     "command": format!("{command:?}"),
+                    "transition_direction": transition_direction.map(|direction| format!("{direction:?}")),
                 }),
             );
-            queue_navigation_command(&mut self.queued_navigation, command);
+            queue_navigation_command(&mut self.queued_navigation, command, transition_direction);
             return Ok(());
         }
         let Some(fs_tx) = self.fs_tx.clone() else {
@@ -239,13 +243,15 @@ impl ViewerApp {
                 "viewer.request_navigation.queued_no_worker",
                 serde_json::json!({
                     "command": format!("{command:?}"),
+                    "transition_direction": transition_direction.map(|direction| format!("{direction:?}")),
                 }),
             );
-            queue_navigation_command(&mut self.queued_navigation, command);
+            queue_navigation_command(&mut self.queued_navigation, command, transition_direction);
             return Ok(());
         };
         let request_id = self.alloc_fs_request_id();
         self.active_fs_request_id = Some(request_id);
+        self.active_navigation_transition_direction = transition_direction;
         command = match command {
             FilesystemCommand::Init { path, .. } => FilesystemCommand::Init { request_id, path },
             FilesystemCommand::SetCurrent { path, .. } => {
@@ -265,6 +271,7 @@ impl ViewerApp {
             serde_json::json!({
                 "request_id": request_id,
                 "command": format!("{command:?}"),
+                "transition_direction": transition_direction.map(|direction| format!("{direction:?}")),
             }),
         );
         self.overlay.set_loading_message("Scanning folder...");
@@ -598,6 +605,7 @@ impl ViewerApp {
         self.fs_rx = Some(rx);
         self.navigator_ready = false;
         self.active_fs_request_id = None;
+        self.active_navigation_transition_direction = None;
         let _ = self.init_filesystem(self.current_navigation_path.clone());
     }
 
@@ -943,12 +951,15 @@ impl ViewerApp {
                     load_path,
                 }) => {
                     if self.active_fs_request_id == Some(request_id) {
+                        let transition_direction =
+                            self.active_navigation_transition_direction.take();
                         self.log_bench_state(
                             "viewer.poll_filesystem.navigator_ready",
                             serde_json::json!({
                                 "request_id": request_id,
                                 "navigation_path": navigation_path.as_ref().map(|path| path.display().to_string()),
                                 "load_path": load_path.as_ref().map(|path| path.display().to_string()),
+                                "transition_direction": transition_direction.map(|direction| format!("{direction:?}")),
                             }),
                         );
                         self.navigator_ready = true;
@@ -961,7 +972,11 @@ impl ViewerApp {
                                 if self.current_navigation_path != navigation_path
                                     || self.current_path != load_path
                                 {
-                                    let _ = self.request_load_target(navigation_path, load_path);
+                                    let _ = self.request_load_target_with_transition_direction(
+                                        navigation_path,
+                                        load_path,
+                                        transition_direction,
+                                    );
                                 }
                             }
                             (Some(navigation_path), None) => {
@@ -986,12 +1001,15 @@ impl ViewerApp {
                     load_path,
                 }) => {
                     if self.active_fs_request_id == Some(request_id) {
+                        let transition_direction =
+                            self.active_navigation_transition_direction.take();
                         self.log_bench_state(
                             "viewer.poll_filesystem.path_resolved",
                             serde_json::json!({
                                 "request_id": request_id,
                                 "navigation_path": navigation_path.display().to_string(),
                                 "load_path": load_path.display().to_string(),
+                                "transition_direction": transition_direction.map(|direction| format!("{direction:?}")),
                             }),
                         );
                         self.empty_mode = false;
@@ -1000,13 +1018,18 @@ impl ViewerApp {
                         if self.current_navigation_path != navigation_path
                             || self.current_path != load_path
                         {
-                            let _ = self.request_load_target(navigation_path, load_path);
+                            let _ = self.request_load_target_with_transition_direction(
+                                navigation_path,
+                                load_path,
+                                transition_direction,
+                            );
                         }
                         self.active_fs_request_id = None;
                     }
                 }
                 Ok(FilesystemResult::NoPath { request_id }) => {
                     if self.active_fs_request_id == Some(request_id) {
+                        self.active_navigation_transition_direction = None;
                         self.log_bench_state(
                             "viewer.poll_filesystem.no_path",
                             serde_json::json!({
@@ -1042,8 +1065,8 @@ impl ViewerApp {
                 Some(PendingFilesystemWork::Init(path)) => {
                     let _ = self.init_filesystem(path);
                 }
-                Some(PendingFilesystemWork::Command(command)) => {
-                    let _ = self.request_navigation(command);
+                Some(PendingFilesystemWork::Command(queued)) => {
+                    let _ = self.request_navigation(queued.command, queued.transition_direction);
                 }
                 None => {}
             }

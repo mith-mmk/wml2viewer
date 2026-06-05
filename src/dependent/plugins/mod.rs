@@ -503,13 +503,13 @@ fn matches_provider(provider_name: &str, path: &Path) -> bool {
         .unwrap_or_default();
     match provider_name {
         "susie64" => {
-            #[cfg(all(target_os = "windows", target_pointer_width = "64"))]
+            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
             {
                 matches!(ext.as_str(), "sph" | "dll")
             }
-            #[cfg(not(all(target_os = "windows", target_pointer_width = "64")))]
+            #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
             {
-                matches!(ext.as_str(), "spi" | "dll")
+                false
             }
         }
         "ffmpeg" => {

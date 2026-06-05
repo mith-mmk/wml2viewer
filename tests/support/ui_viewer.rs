@@ -155,6 +155,53 @@ fn transition_progress_clamps_to_complete() {
 }
 
 #[test]
+fn slide_transition_effect_reverses_for_backward_navigation() {
+    assert_eq!(
+        transition_effect_for_direction(
+            TransitionEffect::SlideRightToLeft,
+            Some(ImageTransitionDirection::Backward),
+        ),
+        TransitionEffect::SlideLeftToRight,
+    );
+    assert_eq!(
+        transition_effect_for_direction(
+            TransitionEffect::SlideLeftToRight,
+            Some(ImageTransitionDirection::Backward),
+        ),
+        TransitionEffect::SlideRightToLeft,
+    );
+    assert_eq!(
+        transition_effect_for_direction(
+            TransitionEffect::SlideTopToBottom,
+            Some(ImageTransitionDirection::Backward),
+        ),
+        TransitionEffect::SlideBottomToTop,
+    );
+    assert_eq!(
+        transition_effect_for_direction(
+            TransitionEffect::SlideBottomToTop,
+            Some(ImageTransitionDirection::Backward),
+        ),
+        TransitionEffect::SlideTopToBottom,
+    );
+}
+
+#[test]
+fn non_slide_transition_effects_ignore_navigation_direction() {
+    for effect in [
+        TransitionEffect::None,
+        TransitionEffect::Fade,
+        TransitionEffect::SpiralWipeIn,
+        TransitionEffect::SpiralWipeOut,
+    ] {
+        assert_eq!(
+            transition_effect_for_direction(effect, Some(ImageTransitionDirection::Backward)),
+            effect,
+        );
+    }
+}
+
+#[test]
 fn folder_refresh_signature_changes_when_directory_changes() {
     let root = make_temp_dir();
     let before = folder_refresh_signature(&root).expect("initial signature");
@@ -541,6 +588,7 @@ fn queued_filesystem_init_is_not_overwritten_by_navigation_queue() {
             request_id: 0,
             policy: EndOfFolderOption::Recursive,
         },
+        Some(ImageTransitionDirection::Forward),
     );
     queue_navigation_command(
         &mut queued_navigation,
@@ -548,14 +596,18 @@ fn queued_filesystem_init_is_not_overwritten_by_navigation_queue() {
             request_id: 0,
             policy: EndOfFolderOption::Recursive,
         },
+        Some(ImageTransitionDirection::Backward),
     );
 
     assert_eq!(queued_init, Some(PathBuf::from("dir-a")));
     assert!(matches!(
         queued_navigation,
-        Some(FilesystemCommand::Prev {
-            policy: EndOfFolderOption::Recursive,
-            ..
+        Some(QueuedNavigation {
+            command: FilesystemCommand::Prev {
+                policy: EndOfFolderOption::Recursive,
+                ..
+            },
+            transition_direction: Some(ImageTransitionDirection::Backward),
         })
     ));
 }
@@ -563,9 +615,12 @@ fn queued_filesystem_init_is_not_overwritten_by_navigation_queue() {
 #[test]
 fn queued_filesystem_work_prioritizes_init_before_navigation() {
     let mut queued_init = Some(PathBuf::from("dir-a"));
-    let mut queued_navigation = Some(FilesystemCommand::Next {
-        request_id: 0,
-        policy: EndOfFolderOption::Recursive,
+    let mut queued_navigation = Some(QueuedNavigation {
+        command: FilesystemCommand::Next {
+            request_id: 0,
+            policy: EndOfFolderOption::Recursive,
+        },
+        transition_direction: Some(ImageTransitionDirection::Forward),
     });
 
     let first = take_next_queued_filesystem_work(&mut queued_init, &mut queued_navigation);
@@ -577,9 +632,12 @@ fn queued_filesystem_work_prioritizes_init_before_navigation() {
     ));
     assert!(matches!(
         second,
-        Some(PendingFilesystemWork::Command(FilesystemCommand::Next {
-            policy: EndOfFolderOption::Recursive,
-            ..
+        Some(PendingFilesystemWork::Command(QueuedNavigation {
+            command: FilesystemCommand::Next {
+                policy: EndOfFolderOption::Recursive,
+                ..
+            },
+            transition_direction: Some(ImageTransitionDirection::Forward),
         }))
     ));
     assert!(queued_init.is_none());

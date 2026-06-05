@@ -1,8 +1,6 @@
 use crate::dependent::normalize_locale_tag;
 use crate::wml2_formats::associated_file_extensions;
-use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
-use std::process::Command;
 use std::thread;
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance,
@@ -16,8 +14,6 @@ use winreg::RegKey;
 use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
 
 const LOCALE_NAME_MAX_LENGTH: i32 = 85;
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 #[link(name = "Kernel32")]
 unsafe extern "system" {
     fn GetUserDefaultLocaleName(locale_name: *mut u16, locale_name_count: i32) -> i32;
@@ -219,28 +215,6 @@ fn native_pick_directory_dialog() -> Option<PathBuf> {
     }
 }
 
-#[allow(dead_code)]
 pub fn download_url_to_temp(url: &str) -> Option<PathBuf> {
-    let temp_path = std::env::temp_dir().join(format!(
-        "wml2viewer_url_{}.bin",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()?
-            .as_nanos()
-    ));
-    let script = format!(
-        "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '{}' -OutFile '{}'; Write-Output '{}'",
-        url.replace('\'', "''"),
-        temp_path.display().to_string().replace('\'', "''"),
-        temp_path.display().to_string().replace('\'', "''")
-    );
-    let mut command = Command::new("powershell");
-    command
-        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
-        .creation_flags(CREATE_NO_WINDOW);
-    let output = command.output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(temp_path)
+    super::download_http_url(url)
 }

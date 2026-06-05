@@ -122,7 +122,7 @@ fn ffmpeg_decodes_avif_sample() {
     assert!(decoded.canvas.height() > 0);
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 #[test]
 fn susie64_decodes_jp2_sample() {
     let _guard = runtime_lock()

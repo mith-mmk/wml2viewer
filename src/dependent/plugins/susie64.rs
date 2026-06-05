@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) fn default_provider() -> PluginProviderConfig {
-    let search_path = if cfg!(target_os = "windows") {
+    let search_path = if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         vec![
             PathBuf::from("./susie64/plugins"),
             PathBuf::from("../susie64/plugins"),
@@ -24,7 +24,7 @@ pub(super) fn default_provider() -> PluginProviderConfig {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 pub(super) fn decode_from_file(
     path: &Path,
     _config: &PluginProviderConfig,
@@ -34,7 +34,7 @@ pub(super) fn decode_from_file(
     decode_with_susie_module(module_path, path)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 pub(super) fn decode_from_file(
     _path: &Path,
     _config: &PluginProviderConfig,
@@ -43,7 +43,7 @@ pub(super) fn decode_from_file(
     None
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 pub(super) fn decode_from_bytes(
     data: &[u8],
     path_hint: Option<&Path>,
@@ -57,7 +57,7 @@ pub(super) fn decode_from_bytes(
     decoded
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 pub(super) fn decode_from_bytes(
     _data: &[u8],
     _path_hint: Option<&Path>,
@@ -80,7 +80,7 @@ fn temp_input_path(path_hint: Option<&Path>) -> Option<PathBuf> {
     Some(root.join(format!("susie-input-{unique}.{ext}")))
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 fn decode_with_susie_module(module_path: &Path, image_path: &Path) -> Option<LoadedImage> {
     use std::ffi::c_void;
     use std::mem::MaybeUninit;

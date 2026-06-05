@@ -59,9 +59,9 @@ pub fn available_roots() -> Vec<PathBuf> {
 }
 
 pub fn pick_directory_dialog() -> Option<PathBuf> {
-    None
+    super::desktop::pick_directory_dialog()
 }
 
-pub fn download_url_to_temp(_url: &str) -> Option<PathBuf> {
-    None
+pub fn download_url_to_temp(url: &str) -> Option<PathBuf> {
+    super::desktop::download_url_to_temp(url)
 }

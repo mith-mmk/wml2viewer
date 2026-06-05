@@ -120,7 +120,8 @@ pub(crate) struct ViewerApp {
     pub(crate) next_fs_request_id: u64,
     pub(crate) active_fs_request_id: Option<u64>,
     pub(crate) queued_filesystem_init_path: Option<PathBuf>,
-    pub(crate) queued_navigation: Option<FilesystemCommand>,
+    pub(crate) queued_navigation: Option<QueuedNavigation>,
+    active_navigation_transition_direction: Option<ImageTransitionDirection>,
     pub(crate) deferred_filesystem_init_path: Option<PathBuf>,
     pub(crate) filer_tx: Option<Sender<FilerCommand>>,
     pub(crate) filer_rx: Option<Receiver<FilerResult>>,
@@ -212,7 +213,19 @@ enum PendingViewerNavigation {
 
 enum PendingFilesystemWork {
     Init(PathBuf),
-    Command(FilesystemCommand),
+    Command(QueuedNavigation),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct QueuedNavigation {
+    command: FilesystemCommand,
+    transition_direction: Option<ImageTransitionDirection>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ImageTransitionDirection {
+    Forward,
+    Backward,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -245,6 +258,7 @@ struct BenchAutomationState {
 struct TransitionPreviousState {
     texture: TextureHandle,
     draw_size: egui::Vec2,
+    direction: Option<ImageTransitionDirection>,
 }
 
 #[derive(Clone)]
@@ -372,13 +386,20 @@ fn should_reinitialize_filesystem_after_load(previous: &Path, current: &Path) ->
     navigation_branch_path(previous) != navigation_branch_path(current)
 }
 
-fn queue_navigation_command(slot: &mut Option<FilesystemCommand>, command: FilesystemCommand) {
-    *slot = Some(command);
+fn queue_navigation_command(
+    slot: &mut Option<QueuedNavigation>,
+    command: FilesystemCommand,
+    transition_direction: Option<ImageTransitionDirection>,
+) {
+    *slot = Some(QueuedNavigation {
+        command,
+        transition_direction,
+    });
 }
 
 fn take_next_queued_filesystem_work(
     queued_filesystem_init_path: &mut Option<PathBuf>,
-    queued_navigation: &mut Option<FilesystemCommand>,
+    queued_navigation: &mut Option<QueuedNavigation>,
 ) -> Option<PendingFilesystemWork> {
     if let Some(path) = queued_filesystem_init_path.take() {
         Some(PendingFilesystemWork::Init(path))
@@ -706,6 +727,7 @@ impl ViewerApp {
             active_fs_request_id: None,
             queued_filesystem_init_path: None,
             queued_navigation: None,
+            active_navigation_transition_direction: None,
             deferred_filesystem_init_path: None,
             filer_tx: None,
             filer_rx: None,
@@ -1148,7 +1170,12 @@ impl ViewerApp {
             && !self.current_texture_is_default
     }
 
-    fn prepare_image_transition(&mut self, switching_image: bool, branch_changed: bool) {
+    fn prepare_image_transition(
+        &mut self,
+        switching_image: bool,
+        branch_changed: bool,
+        direction: Option<ImageTransitionDirection>,
+    ) {
         self.pending_transition_previous = None;
         self.active_transition = None;
         if !switching_image || branch_changed || !self.transition_effect_enabled() {
@@ -1160,6 +1187,7 @@ impl ViewerApp {
                 self.current_canvas().width() as f32 * self.current_draw_scale(),
                 self.current_canvas().height() as f32 * self.current_draw_scale(),
             ),
+            direction,
         });
     }
 
@@ -1172,8 +1200,10 @@ impl ViewerApp {
         {
             return;
         }
+        let effect =
+            transition_effect_for_direction(self.options.transition.effect, previous.direction);
         self.active_transition = Some(ImageTransitionState {
-            effect: self.options.transition.effect,
+            effect,
             started_at: Instant::now(),
             duration: Duration::from_millis(self.options.transition.duration_ms.max(1)),
             previous,
@@ -2018,7 +2048,10 @@ impl ViewerApp {
         let result = match navigation {
             PendingViewerNavigation::Next => {
                 if let Some(target) = self.manga_navigation_target(true) {
-                    self.request_load_path(target)
+                    self.request_load_path_with_transition_direction(
+                        target,
+                        Some(ImageTransitionDirection::Forward),
+                    )
                 } else {
                     let command = if self.filer.ascending {
                         FilesystemCommand::Next {
@@ -2031,12 +2064,15 @@ impl ViewerApp {
                             policy: self.end_of_folder,
                         }
                     };
-                    self.request_navigation(command)
+                    self.request_navigation(command, Some(ImageTransitionDirection::Forward))
                 }
             }
             PendingViewerNavigation::Prev => {
                 if let Some(target) = self.manga_navigation_target(false) {
-                    self.request_load_path(target)
+                    self.request_load_path_with_transition_direction(
+                        target,
+                        Some(ImageTransitionDirection::Backward),
+                    )
                 } else {
                     let command = if self.filer.ascending {
                         FilesystemCommand::Prev {
@@ -2049,7 +2085,7 @@ impl ViewerApp {
                             policy: self.end_of_folder,
                         }
                     };
-                    self.request_navigation(command)
+                    self.request_navigation(command, Some(ImageTransitionDirection::Backward))
                 }
             }
             PendingViewerNavigation::First => {
@@ -2080,7 +2116,7 @@ impl ViewerApp {
                     } else {
                         FilesystemCommand::Last { request_id: 0 }
                     };
-                    self.request_navigation(command)
+                    self.request_navigation(command, None)
                 }
             }
             PendingViewerNavigation::Last => {
@@ -2111,7 +2147,7 @@ impl ViewerApp {
                     } else {
                         FilesystemCommand::First { request_id: 0 }
                     };
-                    self.request_navigation(command)
+                    self.request_navigation(command, None)
                 }
             }
         };
@@ -2499,6 +2535,15 @@ impl ViewerApp {
         navigation_path: PathBuf,
         load_request_path: PathBuf,
     ) -> Result<(), Box<dyn Error>> {
+        self.request_load_target_with_transition_direction(navigation_path, load_request_path, None)
+    }
+
+    pub(crate) fn request_load_target_with_transition_direction(
+        &mut self,
+        navigation_path: PathBuf,
+        load_request_path: PathBuf,
+        transition_direction: Option<ImageTransitionDirection>,
+    ) -> Result<(), Box<dyn Error>> {
         let branch_changed = navigation_branch_path(&self.current_navigation_path)
             != navigation_branch_path(&navigation_path);
         let switching_image = self.current_navigation_path != navigation_path;
@@ -2512,9 +2557,10 @@ impl ViewerApp {
                 "load_request_path": load_request_path.display().to_string(),
                 "branch_changed": branch_changed,
                 "switching_image": switching_image,
+                "transition_direction": transition_direction.map(|direction| format!("{direction:?}")),
             }),
         );
-        self.prepare_image_transition(switching_image, branch_changed);
+        self.prepare_image_transition(switching_image, branch_changed, transition_direction);
         if self.try_take_preloaded(&navigation_path) {
             self.start_image_transition();
             self.log_bench_state(
@@ -3160,6 +3206,26 @@ fn slide_transition_offset(
             previous: egui::Vec2::ZERO,
             current: egui::Vec2::ZERO,
         },
+    }
+}
+
+fn transition_effect_for_direction(
+    effect: TransitionEffect,
+    direction: Option<ImageTransitionDirection>,
+) -> TransitionEffect {
+    if !matches!(direction, Some(ImageTransitionDirection::Backward)) {
+        return effect;
+    }
+
+    match effect {
+        TransitionEffect::SlideRightToLeft => TransitionEffect::SlideLeftToRight,
+        TransitionEffect::SlideLeftToRight => TransitionEffect::SlideRightToLeft,
+        TransitionEffect::SlideTopToBottom => TransitionEffect::SlideBottomToTop,
+        TransitionEffect::SlideBottomToTop => TransitionEffect::SlideTopToBottom,
+        TransitionEffect::None
+        | TransitionEffect::Fade
+        | TransitionEffect::SpiralWipeIn
+        | TransitionEffect::SpiralWipeOut => effect,
     }
 }
 

@@ -41,7 +41,10 @@ impl ViewerApp {
         }
         self.handoff_filer_control_to_viewer_navigation();
         if let Some(target) = self.manga_navigation_target(true) {
-            self.request_load_path(target)?;
+            self.request_load_path_with_transition_direction(
+                target,
+                Some(ImageTransitionDirection::Forward),
+            )?;
             self.last_navigation_at = Some(Instant::now());
             return Ok(());
         }
@@ -56,7 +59,7 @@ impl ViewerApp {
                 policy: self.end_of_folder,
             }
         };
-        self.request_navigation(command)?;
+        self.request_navigation(command, Some(ImageTransitionDirection::Forward))?;
         self.last_navigation_at = Some(Instant::now());
         Ok(())
     }
@@ -72,7 +75,10 @@ impl ViewerApp {
         }
         self.handoff_filer_control_to_viewer_navigation();
         if let Some(target) = self.manga_navigation_target(false) {
-            self.request_load_path(target)?;
+            self.request_load_path_with_transition_direction(
+                target,
+                Some(ImageTransitionDirection::Backward),
+            )?;
             self.last_navigation_at = Some(Instant::now());
             return Ok(());
         }
@@ -87,7 +93,7 @@ impl ViewerApp {
                 policy: self.end_of_folder,
             }
         };
-        self.request_navigation(command)?;
+        self.request_navigation(command, Some(ImageTransitionDirection::Backward))?;
         self.last_navigation_at = Some(Instant::now());
         Ok(())
     }
@@ -144,7 +150,7 @@ impl ViewerApp {
         } else {
             FilesystemCommand::Last { request_id: 0 }
         };
-        self.request_navigation(command)?;
+        self.request_navigation(command, None)?;
         self.last_navigation_at = Some(Instant::now());
         Ok(())
     }
@@ -201,7 +207,7 @@ impl ViewerApp {
         } else {
             FilesystemCommand::First { request_id: 0 }
         };
-        self.request_navigation(command)?;
+        self.request_navigation(command, None)?;
         self.last_navigation_at = Some(Instant::now());
         Ok(())
     }
@@ -235,6 +241,14 @@ impl ViewerApp {
 
     pub(crate) fn request_load_path(&mut self, path: PathBuf) -> Result<(), Box<dyn Error>> {
         self.request_load_target(path.clone(), path)
+    }
+
+    pub(crate) fn request_load_path_with_transition_direction(
+        &mut self,
+        path: PathBuf,
+        transition_direction: Option<ImageTransitionDirection>,
+    ) -> Result<(), Box<dyn Error>> {
+        self.request_load_target_with_transition_direction(path.clone(), path, transition_direction)
     }
 
     pub(crate) fn set_show_filer(&mut self, show: bool) {
