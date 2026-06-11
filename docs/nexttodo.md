@@ -184,11 +184,11 @@
   - [+] directory scan / preview chunk / filter / metadata / sort を `filesystem.browser` へ寄せた
   - [+] `FilerCommand / FilerResult` 自体を filesystem 側の query/result モデルへ統合
   - [ ] source provider protocol の統合
-  - local fs / listed / zip / temp-http の source key / signature / open API は導入済み
-  - URL open / app startup input も filesystem 側の source resolver を通る
-  - URL open request は filesystem worker protocol に乗っている
-  - temp-http は session cache / persistent cache / etag revalidate / cancel まで導入済み
-  - zip / listed / local fs / smb / http / cloud drive を同じ key / metadata / open API へ寄せる
+    - local fs / listed / zip / temp-http の source key / signature / open API は導入済み
+    - URL open / app startup input も filesystem 側の source resolver を通る
+    - URL open request は filesystem worker protocol に乗っている
+    - temp-http は session cache / persistent cache / etag revalidate / cancel まで導入済み
+    - zip / listed / local fs / smb / http / cloud drive を同じ key / metadata / open API へ寄せる
   - [+] viewer の navigation cache と filer の browser scan cache を共有化
   - [+] filer のファイルリスト更新を viewer の current/pending navigation と同期
   - [+] filer の snapshot state (`directory / entries / selected / pending_request_id`) を `filesystem.browser` へ寄せた
@@ -199,7 +199,7 @@
   - [ ] 油断していると画像の最初に飛ばされる
   - [+] 大規模フォルダ向け lazy load / incremental snapshot を filesystem 側の共通実装へ寄せる
   - [ ] thumbnail の共通永続キャッシュ層を追加
-  - filesystem の共通 KVS / signature / eviction policy に乗せる
+    - filesystem の共通 KVS / signature / eviction policy に乗せる
 
 ### startup sequence
 
