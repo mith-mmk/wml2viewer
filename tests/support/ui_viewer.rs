@@ -277,13 +277,17 @@ fn snapshot_does_not_clear_browse_user_request_directly() {
 
 #[test]
 fn branch_change_requires_filesystem_reinit_after_load() {
+    let first_archive_entry = Path::new("a.zip").join("__zipv__").join("0001.jpg");
+    let second_archive_entry = Path::new("b.zip").join("__zipv__").join("0001.jpg");
+    let first_archive_next_entry = Path::new("a.zip").join("__zipv__").join("0002.jpg");
+
     assert!(should_reinitialize_filesystem_after_load(
-        Path::new("a.zip\\__zipv__\\0001.jpg"),
-        Path::new("b.zip\\__zipv__\\0001.jpg"),
+        &first_archive_entry,
+        &second_archive_entry,
     ));
     assert!(!should_reinitialize_filesystem_after_load(
-        Path::new("a.zip\\__zipv__\\0001.jpg"),
-        Path::new("a.zip\\__zipv__\\0002.jpg"),
+        &first_archive_entry,
+        &first_archive_next_entry,
     ));
 }
 
