@@ -34,3 +34,13 @@ pub fn pick_directory_dialog() -> Option<PathBuf> {
 pub fn download_url_to_temp(_url: &str) -> Option<PathBuf> {
     None
 }
+
+pub fn default_download_dir() -> Option<PathBuf> {
+    std::env::current_dir()
+        .ok()
+        .map(|dir| dir.join("downloads"))
+}
+
+pub fn default_temp_dir() -> Option<PathBuf> {
+    Some(std::env::temp_dir().join("wml2viewer"))
+}

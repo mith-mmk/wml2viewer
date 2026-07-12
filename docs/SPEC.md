@@ -90,6 +90,11 @@
 - `input`
   - `key_mapping`
   - `replace_default_keymap`（`true` のとき built-in default を使わず、`key_mapping` のみで解決）
+  - `touch.swipe_left` / `touch.swipe_right`
+  - `touch.double_tap` / `touch.long_press`
+  - `touch.pinch_zoom`
+  - タッチジェスチャーは既存の `ViewerAction` または無効へ割り当てる
+  - Android初期値は左スワイプ=次、右スワイプ=前、ダブルタップ=フィット切替、長押し=メニュー、ピンチズーム=有効
   - 既定値は `src/options.rs` の `default_key_mapping()`
   - 設定画面を開いた時点で、`Input` タブの編集行は「現在有効な割り当て（デフォルト+カスタム反映後）」を表示する
   - 設定画面 `Input` タブは初心者向けの行編集（`Function / Key / CTRL / ALT / SHIFT`）を提供する
@@ -100,6 +105,16 @@
   - 同一キー+修飾キーの重複は UI 上で警告表示し、適用時は後勝ちで解決する
   - `SetMoveFolder1` / `SetMoveFolder2` / `SetCopyFolder1` / `SetCopyFolder2` は、ファイル操作ダイアログを開かずに移動先・コピー先の active slot だけを切り替える
   - active slot の切り替えは即時に `config.toml` へ保存し、次回の `MoveFile` / `CopyFile` ダイアログ初期値へ反映する
+
+## Android MVP
+
+- Android 10以降、`arm64-v8a` を対象とする
+- `NativeActivity` と `eframe` のAndroidバックエンドで既存UIを起動する
+- 共有ファイルはStorage Access Frameworkのフォルダ選択で許可を得る
+- 選択ツリー内の対応画像・ZIP/LHA・listed fileをアプリ専用領域へ読取用スナップショットとして同期する
+- 再選択時はステージング領域への同期完了後にスナップショットを置き換える
+- 共有ストレージ上の元ファイルに対する移動・コピー・削除・名称変更は行わない
+- 外部プラグイン、Google Play用AAB、製品署名は初版の対象外とする
 
 ### ファンクション追加手順（実装者向け）
 

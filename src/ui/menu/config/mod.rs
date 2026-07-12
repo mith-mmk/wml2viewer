@@ -153,27 +153,33 @@ impl ViewerApp {
         let viewer_text = self.text(UiTextKey::Viewer);
         let input_text = self.text(UiTextKey::Input);
         let render_text = self.text(UiTextKey::Render);
+        #[cfg(not(target_os = "android"))]
         let window_text = self.text(UiTextKey::Window);
         let navigation_text = self.text(UiTextKey::Navigation);
+        #[cfg(not(target_os = "android"))]
         let plugins_text = self.text(UiTextKey::Plugins);
         let resources_text = self.text(UiTextKey::Resources);
+        #[cfg(not(target_os = "android"))]
         let system_text = self.text(UiTextKey::System);
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Viewer, viewer_text);
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Input, input_text);
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Render, render_text);
+            #[cfg(not(target_os = "android"))]
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Window, window_text);
             ui.selectable_value(
                 &mut self.settings_tab,
                 SettingsTab::Navigation,
                 navigation_text,
             );
+            #[cfg(not(target_os = "android"))]
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Plugins, plugins_text);
             ui.selectable_value(
                 &mut self.settings_tab,
                 SettingsTab::Resources,
                 resources_text,
             );
+            #[cfg(not(target_os = "android"))]
             ui.selectable_value(&mut self.settings_tab, SettingsTab::System, system_text);
         });
     }
@@ -394,6 +400,63 @@ impl ViewerApp {
     fn settings_input_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
         ui.set_min_width(input_settings_content_width());
+        ui.group(|ui| {
+            let japanese = self.applied_locale.starts_with("ja");
+            ui.heading(if japanese {
+                "タッチ操作"
+            } else {
+                "Touch controls"
+            });
+            touch_action_combo(
+                ui,
+                self,
+                if japanese {
+                    "左スワイプ"
+                } else {
+                    "Swipe left"
+                },
+                "touch_swipe_left",
+                &mut draft.input.touch.swipe_left,
+            );
+            touch_action_combo(
+                ui,
+                self,
+                if japanese {
+                    "右スワイプ"
+                } else {
+                    "Swipe right"
+                },
+                "touch_swipe_right",
+                &mut draft.input.touch.swipe_right,
+            );
+            touch_action_combo(
+                ui,
+                self,
+                if japanese {
+                    "ダブルタップ"
+                } else {
+                    "Double tap"
+                },
+                "touch_double_tap",
+                &mut draft.input.touch.double_tap,
+            );
+            touch_action_combo(
+                ui,
+                self,
+                if japanese { "長押し" } else { "Long press" },
+                "touch_long_press",
+                &mut draft.input.touch.long_press,
+            );
+            ui.checkbox(
+                &mut draft.input.touch.pinch_zoom,
+                if japanese {
+                    "ピンチで拡大・縮小"
+                } else {
+                    "Pinch to zoom"
+                },
+            );
+        });
+        ui.add_space(8.0);
         ui.group(|ui| {
             ui.set_min_width(input_settings_content_width());
             ui.checkbox(
@@ -1396,6 +1459,7 @@ fn viewer_action_label(viewer: &ViewerApp, action: ViewerAction) -> &'static str
         ViewerAction::ZoomOut => viewer.text(UiTextKey::ZoomOutAction),
         ViewerAction::ZoomReset => viewer.text(UiTextKey::ZoomResetAction),
         ViewerAction::ZoomToggle => viewer.text(UiTextKey::ZoomToggleAction),
+        ViewerAction::ToggleFitMode => viewer.text(UiTextKey::ZoomToggleAction),
         ViewerAction::ToggleFullscreen => viewer.text(UiTextKey::Fullscreen),
         ViewerAction::Reload => viewer.text(UiTextKey::ReloadAction),
         ViewerAction::NextImage => viewer.text(UiTextKey::NextImageAction),
@@ -1408,6 +1472,7 @@ fn viewer_action_label(viewer: &ViewerApp, action: ViewerAction) -> &'static str
         ViewerAction::ToggleSettings => viewer.text(UiTextKey::ToggleSettings),
         ViewerAction::ToggleFiler => viewer.text(UiTextKey::ToggleFiler),
         ViewerAction::ToggleSubfiler => viewer.text(UiTextKey::ToggleSubfilerAction),
+        ViewerAction::OpenContextMenu => viewer.text(UiTextKey::Menu),
         ViewerAction::SaveAs => viewer.text(UiTextKey::SaveAs),
         ViewerAction::MoveFile => viewer.text(UiTextKey::MoveFileAction),
         ViewerAction::CopyFile => viewer.text(UiTextKey::CopyFileAction),
@@ -1418,6 +1483,41 @@ fn viewer_action_label(viewer: &ViewerApp, action: ViewerAction) -> &'static str
         ViewerAction::SetCopyFolder1 => viewer.text(UiTextKey::SetCopyFolder1Action),
         ViewerAction::SetCopyFolder2 => viewer.text(UiTextKey::SetCopyFolder2Action),
     }
+}
+
+fn touch_action_combo(
+    ui: &mut egui::Ui,
+    viewer: &ViewerApp,
+    label: &str,
+    id: &'static str,
+    value: &mut Option<ViewerAction>,
+) {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        let selected = value
+            .map(|action| viewer_action_label(viewer, action))
+            .unwrap_or(if viewer.applied_locale.starts_with("ja") {
+                "無効"
+            } else {
+                "Disabled"
+            });
+        egui::ComboBox::from_id_salt(id)
+            .selected_text(selected)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    value,
+                    None,
+                    if viewer.applied_locale.starts_with("ja") {
+                        "無効"
+                    } else {
+                        "Disabled"
+                    },
+                );
+                for action in ViewerAction::all() {
+                    ui.selectable_value(value, Some(*action), viewer_action_label(viewer, *action));
+                }
+            });
+    });
 }
 
 fn capture_pressed_key_name(ctx: &egui::Context) -> Option<String> {

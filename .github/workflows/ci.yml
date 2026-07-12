@@ -77,3 +77,49 @@ jobs:
       - name: cross target check
         if: matrix.target != 'aarch64-pc-windows-msvc' && matrix.target != 'aarch64-unknown-linux-gnu'
         run: cargo check --target ${{ matrix.target }}
+
+  android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust and Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+          add-to-path: true
+
+      - name: install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: build Android debug APK
+        run: gradle -p android assembleDebug
+
+      - name: upload Android debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: wml2viewer-android-arm64-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk

@@ -31,6 +31,20 @@ wml2viewer --config <path> [path] Launch with custom config file
 wml2viewer --clean system Reset configuration
 ```
 
+### Android 10+ (arm64 preview)
+
+The Android build uses the Storage Access Framework. A selected folder is copied into a read-only app-private snapshot for image, ZIP/LZH, and manga browsing; source files in shared storage are never modified.
+
+Build prerequisites are JDK 17, Android SDK 35, NDK r27c, the Rust `aarch64-linux-android` target, `cargo-ndk`, and Gradle 8.9.
+
+```text
+rustup target add aarch64-linux-android
+cargo install cargo-ndk --locked
+gradle -p android assembleDebug
+```
+
+The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. The MVP supports Android 10+ arm64 devices only. File mutation, external plugins, Google Play packaging, and production signing are out of scope. Selecting another folder replaces the app-private browsing snapshot.
+
 ## Help
 
 https://mith-mmk.github.io/wml2/help.html

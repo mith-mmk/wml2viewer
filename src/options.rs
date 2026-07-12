@@ -54,6 +54,7 @@ pub enum ViewerAction {
     ZoomOut,
     ZoomReset,
     ZoomToggle,
+    ToggleFitMode,
     ToggleFullscreen,
     Reload,
     NextImage,
@@ -66,6 +67,7 @@ pub enum ViewerAction {
     ToggleSettings,
     ToggleFiler,
     ToggleSubfiler,
+    OpenContextMenu,
     SaveAs,
     MoveFile,
     CopyFile,
@@ -84,6 +86,7 @@ impl ViewerAction {
             ViewerAction::ZoomOut,
             ViewerAction::ZoomReset,
             ViewerAction::ZoomToggle,
+            ViewerAction::ToggleFitMode,
             ViewerAction::ToggleFullscreen,
             ViewerAction::Reload,
             ViewerAction::NextImage,
@@ -96,6 +99,7 @@ impl ViewerAction {
             ViewerAction::ToggleSettings,
             ViewerAction::ToggleFiler,
             ViewerAction::ToggleSubfiler,
+            ViewerAction::OpenContextMenu,
             ViewerAction::SaveAs,
             ViewerAction::MoveFile,
             ViewerAction::CopyFile,
@@ -114,6 +118,7 @@ impl ViewerAction {
             ViewerAction::ZoomOut => "ZoomOut",
             ViewerAction::ZoomReset => "ZoomReset",
             ViewerAction::ZoomToggle => "ZoomToggle",
+            ViewerAction::ToggleFitMode => "ToggleFitMode",
             ViewerAction::ToggleFullscreen => "ToggleFullscreen",
             ViewerAction::Reload => "Reload",
             ViewerAction::NextImage => "NextImage",
@@ -126,6 +131,7 @@ impl ViewerAction {
             ViewerAction::ToggleSettings => "ToggleSettings",
             ViewerAction::ToggleFiler => "ToggleFiler",
             ViewerAction::ToggleSubfiler => "ToggleSubfiler",
+            ViewerAction::OpenContextMenu => "OpenContextMenu",
             ViewerAction::SaveAs => "SaveAs",
             ViewerAction::MoveFile => "MoveFile",
             ViewerAction::CopyFile => "CopyFile",
@@ -170,10 +176,42 @@ impl KeyBinding {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct InputOptions {
     pub key_mapping: HashMap<KeyBinding, ViewerAction>,
     pub replace_default_keymap: bool,
+    pub touch: TouchOptions,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TouchOptions {
+    pub swipe_left: Option<ViewerAction>,
+    pub swipe_right: Option<ViewerAction>,
+    pub double_tap: Option<ViewerAction>,
+    pub long_press: Option<ViewerAction>,
+    pub pinch_zoom: bool,
+}
+
+impl Default for TouchOptions {
+    fn default() -> Self {
+        Self {
+            swipe_left: Some(ViewerAction::NextImage),
+            swipe_right: Some(ViewerAction::PrevImage),
+            double_tap: Some(ViewerAction::ToggleFitMode),
+            long_press: Some(ViewerAction::OpenContextMenu),
+            pinch_zoom: true,
+        }
+    }
+}
+
+impl Default for InputOptions {
+    fn default() -> Self {
+        Self {
+            key_mapping: HashMap::new(),
+            replace_default_keymap: false,
+            touch: TouchOptions::default(),
+        }
+    }
 }
 
 impl InputOptions {

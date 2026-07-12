@@ -2,6 +2,7 @@ pub(crate) mod dispatch;
 
 use crate::options::ViewerAction;
 use crate::ui::input::dispatch::collect_triggered_actions;
+#[cfg(not(target_os = "android"))]
 use crate::ui::viewer::FileActionDialogMode;
 use crate::ui::viewer::ViewerApp;
 use eframe::egui;
@@ -9,7 +10,7 @@ use std::time::Instant;
 
 #[derive(Debug)]
 enum PointerIntent {
-    ToggleFit,
+    Action(ViewerAction),
     NextImageAfterDelay,
     OpenContextMenu(egui::Pos2),
 }
@@ -94,6 +95,9 @@ impl ViewerApp {
             ViewerAction::ZoomToggle => {
                 let _ = self.toggle_zoom();
             }
+            ViewerAction::ToggleFitMode => {
+                let _ = self.toggle_fit_zoom_mode();
+            }
             ViewerAction::ToggleFullscreen => {
                 let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
                 self.window_options.fullscreen = !fullscreen;
@@ -147,13 +151,20 @@ impl ViewerApp {
             ViewerAction::ToggleSubfiler => {
                 self.set_show_subfiler(!self.show_subfiler);
             }
+            ViewerAction::OpenContextMenu => {
+                self.left_menu_pos = ctx.content_rect().center();
+                self.show_left_menu = true;
+            }
             ViewerAction::SaveAs => {
                 self.open_save_dialog();
             }
             ViewerAction::MoveFile
             | ViewerAction::CopyFile
             | ViewerAction::DeleteFile
-            | ViewerAction::RenameFile => self.open_file_action_dialog(action),
+            | ViewerAction::RenameFile => {
+                #[cfg(not(target_os = "android"))]
+                self.open_file_action_dialog(action);
+            }
             ViewerAction::SetMoveFolder1 => self.set_active_file_action_slot(action),
             ViewerAction::SetMoveFolder2 => self.set_active_file_action_slot(action),
             ViewerAction::SetCopyFolder1 => self.set_active_file_action_slot(action),
@@ -196,8 +207,28 @@ impl ViewerApp {
     }
 
     fn pointer_intent_from_response(&self, response: &egui::Response) -> Option<PointerIntent> {
+        if response.long_touched() {
+            return self
+                .input_options
+                .touch
+                .long_press
+                .map(PointerIntent::Action);
+        }
+
+        if cfg!(target_os = "android") && response.drag_stopped() {
+            if let Some(action) =
+                horizontal_swipe_action(response.drag_delta(), &self.input_options.touch)
+            {
+                return Some(PointerIntent::Action(action));
+            }
+        }
+
         if response.double_clicked_by(egui::PointerButton::Primary) {
-            return Some(PointerIntent::ToggleFit);
+            return self
+                .input_options
+                .touch
+                .double_tap
+                .map(PointerIntent::Action);
         }
 
         if response.secondary_clicked() {
@@ -217,9 +248,9 @@ impl ViewerApp {
 
     fn perform_pointer_intent(&mut self, _response: &egui::Response, intent: PointerIntent) {
         match intent {
-            PointerIntent::ToggleFit => {
+            PointerIntent::Action(action) => {
                 self.cancel_pending_single_click_navigation();
-                let _ = self.toggle_fit_zoom_mode();
+                self.apply_viewer_action(&_response.ctx, action);
             }
             PointerIntent::NextImageAfterDelay => {
                 self.schedule_single_click_navigation();
@@ -232,6 +263,7 @@ impl ViewerApp {
         }
     }
 
+    #[cfg(not(target_os = "android"))]
     fn open_file_action_dialog(&mut self, action: ViewerAction) {
         let mode = match action {
             ViewerAction::MoveFile => FileActionDialogMode::Move,
@@ -297,5 +329,43 @@ impl ViewerApp {
             _ => return,
         }
         self.persist_config_async();
+    }
+}
+
+fn horizontal_swipe_action(
+    delta: egui::Vec2,
+    touch: &crate::options::TouchOptions,
+) -> Option<ViewerAction> {
+    if delta.x.abs() < 64.0 || delta.x.abs() <= delta.y.abs() {
+        return None;
+    }
+    if delta.x < 0.0 {
+        touch.swipe_left
+    } else {
+        touch.swipe_right
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn horizontal_swipe_uses_directional_touch_mapping() {
+        let touch = crate::options::TouchOptions::default();
+
+        assert_eq!(
+            horizontal_swipe_action(egui::vec2(-80.0, 10.0), &touch),
+            Some(ViewerAction::NextImage)
+        );
+        assert_eq!(
+            horizontal_swipe_action(egui::vec2(80.0, 10.0), &touch),
+            Some(ViewerAction::PrevImage)
+        );
+        assert_eq!(horizontal_swipe_action(egui::vec2(40.0, 0.0), &touch), None);
+        assert_eq!(
+            horizontal_swipe_action(egui::vec2(80.0, 90.0), &touch),
+            None
+        );
     }
 }

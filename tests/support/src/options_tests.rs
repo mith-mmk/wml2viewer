@@ -28,6 +28,7 @@ fn replace_default_keymap_uses_only_custom_bindings() {
     let options = InputOptions {
         key_mapping,
         replace_default_keymap: true,
+        touch: Default::default(),
     };
 
     let merged = options.merged_with_defaults();
@@ -50,6 +51,17 @@ fn viewer_action_from_name_is_case_insensitive() {
         Some(ViewerAction::SetMoveFolder2)
     );
     assert!(ViewerAction::from_name("unknown").is_none());
+}
+
+#[test]
+fn default_touch_mapping_matches_android_viewer_controls() {
+    let touch = InputOptions::default().touch;
+
+    assert_eq!(touch.swipe_left, Some(ViewerAction::NextImage));
+    assert_eq!(touch.swipe_right, Some(ViewerAction::PrevImage));
+    assert_eq!(touch.double_tap, Some(ViewerAction::ToggleFitMode));
+    assert_eq!(touch.long_press, Some(ViewerAction::OpenContextMenu));
+    assert!(touch.pinch_zoom);
 }
 
 #[test]

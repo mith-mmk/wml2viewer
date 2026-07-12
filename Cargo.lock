@@ -5059,6 +5059,7 @@ dependencies = [
 name = "wml2viewer"
 version = "0.0.18-pre1"
 dependencies = [
+ "android-activity",
  "chrono",
  "delharc",
  "directories",

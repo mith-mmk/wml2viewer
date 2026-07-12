@@ -1,8 +1,11 @@
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 use crate::dependent::default_temp_dir;
 use crate::dependent::plugins::{PluginModuleConfig, PluginProviderConfig};
+#[cfg(target_os = "windows")]
 use crate::drawers::canvas::Canvas;
 use crate::drawers::image::LoadedImage;
 use std::path::{Path, PathBuf};
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) fn default_provider() -> PluginProviderConfig {
@@ -67,6 +70,7 @@ pub(super) fn decode_from_bytes(
     None
 }
 
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 fn temp_input_path(path_hint: Option<&Path>) -> Option<PathBuf> {
     let ext = path_hint
         .and_then(|path| path.extension().and_then(|ext| ext.to_str()))

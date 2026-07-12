@@ -1,4 +1,6 @@
-use std::path::{Component, Path, Prefix};
+use std::path::Path;
+#[cfg(windows)]
+use std::path::{Component, Prefix};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BenchPathMatch {

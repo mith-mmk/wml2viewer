@@ -65,6 +65,7 @@ impl Default for SaveDialogState {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub(crate) enum FileActionDialogMode {
     Move,
     Copy,

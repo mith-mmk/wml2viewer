@@ -12,8 +12,8 @@ use crate::options::{
     AppConfig, EndOfFolderOption, FileActionOptions, FileActionSlot, FilesystemOptions,
     FolderRefreshMode, FontSizePreset, InputOptions, KeyBinding, MangaSeparatorOptions,
     MangaSeparatorStyle, NavigationSortOption, PaneSide, RenderScaleMode, ResourceOptions,
-    RuntimeOptions, StorageOptions, TransitionEffect, TransitionOptions, ViewerAction,
-    WindowUiTheme,
+    RuntimeOptions, StorageOptions, TouchOptions, TransitionEffect, TransitionOptions,
+    ViewerAction, WindowUiTheme,
 };
 use crate::ui::viewer::options::{
     BackgroundStyle, RenderOptions, ViewerOptions, WindowOptions, WindowSize, WindowStartPosition,
@@ -309,6 +309,23 @@ struct StorageConfigFile {
 struct InputConfigFile {
     replace_default_keymap: bool,
     key_mapping: Vec<KeyMappingConfigFile>,
+    touch: TouchConfigFile,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+struct TouchConfigFile {
+    swipe_left: Option<ViewerAction>,
+    swipe_right: Option<ViewerAction>,
+    double_tap: Option<ViewerAction>,
+    long_press: Option<ViewerAction>,
+    pinch_zoom: bool,
+}
+
+impl Default for TouchConfigFile {
+    fn default() -> Self {
+        TouchOptions::default().into()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1034,6 +1051,7 @@ impl From<InputConfigFile> for InputOptions {
         Self {
             key_mapping,
             replace_default_keymap: value.replace_default_keymap,
+            touch: value.touch.into(),
         }
     }
 }
@@ -1054,6 +1072,31 @@ impl From<InputOptions> for InputConfigFile {
         Self {
             replace_default_keymap: value.replace_default_keymap,
             key_mapping,
+            touch: value.touch.into(),
+        }
+    }
+}
+
+impl From<TouchConfigFile> for TouchOptions {
+    fn from(value: TouchConfigFile) -> Self {
+        Self {
+            swipe_left: value.swipe_left,
+            swipe_right: value.swipe_right,
+            double_tap: value.double_tap,
+            long_press: value.long_press,
+            pinch_zoom: value.pinch_zoom,
+        }
+    }
+}
+
+impl From<TouchOptions> for TouchConfigFile {
+    fn from(value: TouchOptions) -> Self {
+        Self {
+            swipe_left: value.swipe_left,
+            swipe_right: value.swipe_right,
+            double_tap: value.double_tap,
+            long_press: value.long_press,
+            pinch_zoom: value.pinch_zoom,
         }
     }
 }
@@ -1160,6 +1203,9 @@ mod tests {
         config.viewer.transition.effect = TransitionEffect::Fade;
         config.viewer.transition.duration_ms = 320;
         config.filesystem.folder_refresh = FolderRefreshMode::Auto;
+        config.input.touch.swipe_left = Some(ViewerAction::FirstImage);
+        config.input.touch.long_press = None;
+        config.input.touch.pinch_zoom = false;
 
         let file = ConfigFile::from(config);
         let round_trip = AppConfig::from(file);
@@ -1170,6 +1216,12 @@ mod tests {
             round_trip.filesystem.folder_refresh,
             FolderRefreshMode::Auto
         );
+        assert_eq!(
+            round_trip.input.touch.swipe_left,
+            Some(ViewerAction::FirstImage)
+        );
+        assert_eq!(round_trip.input.touch.long_press, None);
+        assert!(!round_trip.input.touch.pinch_zoom);
     }
 }
 

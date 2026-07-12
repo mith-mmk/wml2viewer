@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:allowBackup="true" android:label="wml2viewer" android:theme="@style/AppTheme">
+        <activity
+            android:name=".Wml2ViewerActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density|uiMode"
+            android:exported="true"
+            android:screenOrientation="fullSensor">
+            <meta-data android:name="android.app.lib_name" android:value="wml2viewer" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

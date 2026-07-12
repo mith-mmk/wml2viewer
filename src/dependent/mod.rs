@@ -1,9 +1,8 @@
 pub mod plugins;
 mod thirdparty;
-pub use thirdparty::{
-    default_config_dir, default_download_dir, default_temp_dir, normalize_locale_tag,
-    resource_locale_fallbacks,
-};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub use thirdparty::{default_config_dir, default_download_dir, default_temp_dir};
+pub use thirdparty::{normalize_locale_tag, resource_locale_fallbacks};
 
 #[cfg(target_os = "android")]
 mod android;
@@ -54,6 +53,7 @@ pub fn pick_save_directory() -> Option<std::path::PathBuf> {
     pick_directory_dialog()
 }
 
+#[cfg(not(target_os = "android"))]
 pub fn download_http_url(url: &str) -> Option<std::path::PathBuf> {
     let url = url.trim();
     if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -90,6 +90,11 @@ pub fn download_http_url(url: &str) -> Option<std::path::PathBuf> {
     Some(path)
 }
 
+#[cfg(target_os = "android")]
+pub fn download_http_url(_url: &str) -> Option<std::path::PathBuf> {
+    None
+}
+
 pub fn register_system_file_associations(
     exe_path: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -100,6 +105,7 @@ pub fn clean_system_integration() -> Result<(), Box<dyn std::error::Error>> {
     clean_file_associations()
 }
 
+#[cfg(not(target_os = "android"))]
 fn infer_http_extension<'a>(url: &'a str, content_type: Option<&str>) -> Option<&'a str> {
     let from_url = url
         .rsplit_once('.')

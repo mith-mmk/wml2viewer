@@ -5,3 +5,7 @@ dist/
 Cargo.lock
 test_data/
 .env
+android/.gradle/
+android/**/build/
+android/app/src/main/jniLibs/
+android/local.properties

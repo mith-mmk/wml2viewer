@@ -34,6 +34,20 @@ wml2viewer
 - `wml2viewer --config <path> [path]` 設定ファイルを指定して起動
 - `wml2viewer --clean system`　設定を削除
 
+### Android 10以降（arm64、プレビュー）
+
+Android版はStorage Access Frameworkで選択したフォルダをアプリ専用領域へ読取専用で同期し、画像・ZIP/LZH・漫画モードを閲覧できます。共有ストレージ上の元ファイルは変更しません。
+
+必要環境はJDK 17、Android SDK 35、NDK r27c、Rustの`aarch64-linux-android`ターゲット、`cargo-ndk`、Gradle 8.9です。
+
+```powershell
+rustup target add aarch64-linux-android
+cargo install cargo-ndk --locked
+gradle -p android assembleDebug
+```
+
+生成物は`android/app/build/outputs/apk/debug/app-debug.apk`です。初版はAndroid 10以降のarm64端末のみを対象とし、ファイルの移動・コピー・削除・名称変更、外部プラグイン、Google Play配布は未対応です。フォルダを再選択すると、アプリ内の読取用スナップショットが置き換わります。
+
 ## ヘルプ
 
 - https://mith-mmk.github.io/wml2/help.html

@@ -1,8 +1,11 @@
+#[cfg(target_os = "windows")]
 use crate::dependent::default_temp_dir;
 use crate::dependent::plugins::{PluginModuleConfig, PluginProviderConfig};
+#[cfg(target_os = "windows")]
 use crate::drawers::canvas::Canvas;
 use crate::drawers::image::LoadedImage;
 use std::path::Path;
+#[cfg(target_os = "windows")]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) fn default_provider() -> PluginProviderConfig {

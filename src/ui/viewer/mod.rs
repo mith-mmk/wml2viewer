@@ -185,6 +185,7 @@ pub(crate) struct ViewerApp {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub(crate) enum SettingsTab {
     Viewer,
     Input,
@@ -1219,7 +1220,7 @@ impl ViewerApp {
             return ui.add(
                 egui::Image::from_texture(&self.current_texture)
                     .fit_to_exact_size(draw_size)
-                    .sense(egui::Sense::click()),
+                    .sense(egui::Sense::click_and_drag()),
             );
         };
         let progress = transition_progress(state.started_at, state.duration);
@@ -1228,11 +1229,11 @@ impl ViewerApp {
             return ui.add(
                 egui::Image::from_texture(&self.current_texture)
                     .fit_to_exact_size(draw_size)
-                    .sense(egui::Sense::click()),
+                    .sense(egui::Sense::click_and_drag()),
             );
         }
 
-        let (rect, response) = ui.allocate_exact_size(draw_size, egui::Sense::click());
+        let (rect, response) = ui.allocate_exact_size(draw_size, egui::Sense::click_and_drag());
         let previous_rect = centered_rect(rect, state.previous.draw_size);
         let current_rect = rect;
         match state.effect {
@@ -2666,6 +2667,15 @@ impl ViewerApp {
 
 impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(target_os = "android")]
+        if let Some(root) = crate::dependent::take_completed_import() {
+            self.current_navigation_path = root.clone();
+            self.current_path = root.clone();
+            self.empty_mode = true;
+            self.set_show_filer(true);
+            self.browse_filer_directory(root.clone());
+            self.respawn_filesystem_worker();
+        }
         self.sync_window_state(ctx);
         self.update_window_title(ctx);
         self.poll_worker();
@@ -2691,7 +2701,11 @@ impl eframe::App for ViewerApp {
         self.subfiler_ui(ctx);
         self.status_panel_ui(ctx);
 
-        let zoom_delta = ctx.input(|i| i.zoom_delta());
+        let zoom_delta = if self.input_options.touch.pinch_zoom {
+            ctx.input(|i| i.zoom_delta())
+        } else {
+            1.0
+        };
 
         if let Some(deadline) = self.pending_primary_click_deadline {
             let wait = deadline.saturating_duration_since(Instant::now());
@@ -2781,7 +2795,7 @@ impl eframe::App for ViewerApp {
                                     let first = ui.add(
                                         egui::Image::from_texture(companion_texture)
                                             .fit_to_exact_size(companion_draw_size)
-                                            .sense(egui::Sense::click()),
+                                            .sense(egui::Sense::click_and_drag()),
                                     );
                                     self.paint_manga_separator(
                                         ui,
@@ -2790,14 +2804,14 @@ impl eframe::App for ViewerApp {
                                     ui.add(
                                         egui::Image::from_texture(&self.current_texture)
                                             .fit_to_exact_size(draw_size)
-                                            .sense(egui::Sense::click()),
+                                            .sense(egui::Sense::click_and_drag()),
                                     );
                                     Some(first)
                                 } else {
                                     let first = ui.add(
                                         egui::Image::from_texture(&self.current_texture)
                                             .fit_to_exact_size(draw_size)
-                                            .sense(egui::Sense::click()),
+                                            .sense(egui::Sense::click_and_drag()),
                                     );
                                     self.paint_manga_separator(
                                         ui,
@@ -2806,7 +2820,7 @@ impl eframe::App for ViewerApp {
                                     ui.add(
                                         egui::Image::from_texture(companion_texture)
                                             .fit_to_exact_size(companion_draw_size)
-                                            .sense(egui::Sense::click()),
+                                            .sense(egui::Sense::click_and_drag()),
                                     );
                                     Some(first)
                                 }
@@ -2815,7 +2829,7 @@ impl eframe::App for ViewerApp {
                                     ui.add(
                                         egui::Image::from_texture(&self.current_texture)
                                             .fit_to_exact_size(draw_size)
-                                            .sense(egui::Sense::click()),
+                                            .sense(egui::Sense::click_and_drag()),
                                     ),
                                 )
                             }
@@ -2834,7 +2848,7 @@ impl eframe::App for ViewerApp {
                     let display_response = ui.interact(
                         display_rect,
                         ui.id().with("viewer_display_area"),
-                        egui::Sense::click(),
+                        egui::Sense::click_and_drag(),
                     );
                     if let Some(response) = response {
                         if !self.handle_pointer_input(&response)
