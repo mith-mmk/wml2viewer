@@ -57,6 +57,37 @@ fn make_temp_dir() -> PathBuf {
 }
 
 #[test]
+fn successful_load_clears_only_transient_load_status() {
+    for status in [
+        "Load failed: image.png: decode failed",
+        "Load timeout: request skipped",
+    ] {
+        let mut message = Some(status.to_string());
+        super::workers::clear_transient_load_message(&mut message);
+        assert_eq!(message, None);
+    }
+
+    let mut message = Some("Saved image.png".to_string());
+    super::workers::clear_transient_load_message(&mut message);
+    assert_eq!(message.as_deref(), Some("Saved image.png"));
+}
+
+#[test]
+fn failed_companion_is_suppressed_only_for_the_same_path() {
+    let desired = Path::new("next.png");
+
+    assert!(companion_load_is_suppressed_after_failure(
+        desired,
+        Some(desired)
+    ));
+    assert!(!companion_load_is_suppressed_after_failure(
+        desired,
+        Some(Path::new("other.png"))
+    ));
+    assert!(!companion_load_is_suppressed_after_failure(desired, None));
+}
+
+#[test]
 fn build_settings_draft_starts_from_effective_keymap() {
     let config = AppConfig::default();
     let draft = build_settings_draft(&config);

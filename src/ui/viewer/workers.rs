@@ -128,6 +128,7 @@ impl ViewerApp {
         }
 
         self.companion_display = Some(display);
+        self.companion_failed_navigation_path = None;
         if layout_changed {
             self.pending_fit_recalc |= !matches!(self.render_options.zoom_option, ZoomOption::None);
         }
@@ -286,6 +287,7 @@ impl ViewerApp {
         rendered: LoadedImage,
         companion: Option<LoadedRenderPage>,
     ) {
+        clear_transient_load_message(&mut self.save_dialog.message);
         self.log_bench_state(
             "viewer.apply_loaded_result.begin",
             serde_json::json!({
@@ -918,7 +920,9 @@ impl ViewerApp {
                                 "metrics": Self::bench_metrics_payload(&metrics),
                             }),
                         );
+                        let failed_path = self.companion_navigation_path.clone();
                         self.clear_manga_companion();
+                        self.companion_failed_navigation_path = failed_path;
                     }
                 }
                 Err(TryRecvError::Empty) => break,
@@ -1346,5 +1350,13 @@ impl ViewerApp {
         if should_advance {
             let _ = self.next_image();
         }
+    }
+}
+
+pub(super) fn clear_transient_load_message(message: &mut Option<String>) {
+    if message.as_deref().is_some_and(|message| {
+        message.starts_with("Load failed:") || message.starts_with("Load timeout:")
+    }) {
+        *message = None;
     }
 }
