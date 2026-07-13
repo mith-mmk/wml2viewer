@@ -168,6 +168,7 @@ pub(crate) struct ViewerApp {
     pub(crate) companion_join: Option<JoinHandle<()>>,
     pub(crate) companion_active_request: Option<ActiveRenderRequest>,
     pub(crate) companion_navigation_path: Option<PathBuf>,
+    pub(crate) companion_failed_navigation_path: Option<PathBuf>,
     companion_display: Option<DisplayedPageState>,
     pub(crate) preload_tx: Sender<RenderCommand>,
     pub(crate) preload_rx: Receiver<RenderResult>,
@@ -778,6 +779,7 @@ impl ViewerApp {
             companion_join: Some(companion_join),
             companion_active_request: None,
             companion_navigation_path: None,
+            companion_failed_navigation_path: None,
             companion_display: None,
             preload_tx,
             preload_rx,
@@ -1824,7 +1826,7 @@ impl ViewerApp {
         )
     }
 
-    fn clear_manga_companion(&mut self) {
+    pub(crate) fn clear_manga_companion(&mut self) {
         self.companion_navigation_path = None;
         self.companion_display = None;
         self.companion_active_request = None;
@@ -1921,6 +1923,12 @@ impl ViewerApp {
         }
 
         let desired = desired.unwrap();
+        if companion_load_is_suppressed_after_failure(
+            &desired,
+            self.companion_failed_navigation_path.as_deref(),
+        ) {
+            return;
+        }
         if let Some(entry) = self.cached_preloaded_entry(&desired) {
             self.companion_navigation_path = Some(desired);
             self.apply_companion_loaded(entry.load_path, entry.display);
@@ -2548,6 +2556,9 @@ impl ViewerApp {
         let branch_changed = navigation_branch_path(&self.current_navigation_path)
             != navigation_branch_path(&navigation_path);
         let switching_image = self.current_navigation_path != navigation_path;
+        if switching_image {
+            self.companion_failed_navigation_path = None;
+        }
         if branch_changed {
             self.clear_manga_companion();
         }
@@ -3056,6 +3067,13 @@ fn should_defer_companion_sync_during_primary_load(
     active_request: Option<ActiveRenderRequest>,
 ) -> bool {
     matches!(active_request, Some(ActiveRenderRequest::Load(_)))
+}
+
+fn companion_load_is_suppressed_after_failure(
+    desired: &Path,
+    failed_navigation_path: Option<&Path>,
+) -> bool {
+    failed_navigation_path == Some(desired)
 }
 
 fn spread_companion_path_for_navigation(

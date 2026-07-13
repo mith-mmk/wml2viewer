@@ -1211,7 +1211,7 @@ fn last_supported_path_for_entry(path: &Path, sort: NavigationSortOption) -> Opt
 pub(crate) fn browser_entry_path_from_dir_entry(entry: &fs::DirEntry) -> Option<PathBuf> {
     let file_name = entry.file_name();
     let path = entry.path();
-    if is_supported_image_name(&file_name)
+    if is_supported_image(&path)
         || is_listed_file_name(&file_name)
         || is_lha_file_name(&file_name)
         || is_zip_file_name(&file_name)
@@ -1230,9 +1230,8 @@ fn dir_entry_is_directory(entry: &fs::DirEntry) -> bool {
         .unwrap_or(false)
 }
 
-fn dir_entry_is_browser_file(entry: &fs::DirEntry, path: &Path) -> bool {
-    let file_name = entry.file_name();
-    is_supported_image_name(&file_name)
+fn dir_entry_is_browser_file(_entry: &fs::DirEntry, path: &Path) -> bool {
+    is_supported_image(path)
         || is_listed_file_path(path)
         || is_zip_file_path(path)
         || is_lha_file_path(path)

@@ -701,7 +701,17 @@ fn plugin_enabled_extensions_are_visible_to_filer() {
         ..PluginConfig::default()
     });
 
-    assert!(is_supported_image(Path::new("sample.avif")));
+    let dir = make_temp_dir();
+    let avif = dir.join("sample.avif");
+    fs::write(&avif, []).unwrap();
+    let entry = fs::read_dir(&dir)
+        .unwrap()
+        .find_map(Result::ok)
+        .expect("plugin image entry");
+
+    assert_eq!(browser_entry_path_from_dir_entry(&entry), Some(avif));
+    set_runtime_plugin_config(PluginConfig::default());
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]

@@ -1181,6 +1181,10 @@ impl ViewerApp {
         if self.options.grayscale != previous.viewer.grayscale {
             self.upload_current_frame();
         }
+        if self.options.manga_mode != previous.viewer.manga_mode {
+            self.companion_failed_navigation_path = None;
+            self.clear_manga_companion();
+        }
         if self.resources.locale != previous.resources.locale
             || self.resources.font_size != previous.resources.font_size
             || self.resources.font_paths != previous.resources.font_paths

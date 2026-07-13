@@ -32,6 +32,11 @@ windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Im
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 rfd = "0.15"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFData", "CFDictionary", "CFNumber", "CFString", "CFURL"] }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["CGBitmapContext", "CGColorSpace", "CGContext", "CGDataProvider", "CGGeometry", "CGImage"] }
+objc2-image-io = { version = "0.3.2", default-features = false, features = ["std", "CGImageSource", "objc2-core-graphics"] }
+
 [target.'cfg(not(target_os = "android"))'.dependencies]
 eframe = "0.33"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
@@ -48,3 +53,4 @@ winres = "0.1"
 
 [dev-dependencies]
 filetime = "0.2"
+png = "0.18"
