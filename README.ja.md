@@ -34,19 +34,22 @@ wml2viewer
 - `wml2viewer --config <path> [path]` 設定ファイルを指定して起動
 - `wml2viewer --clean system`　設定を削除
 
-### Android 10以降（arm64、プレビュー）
+### Android 10以降（プレビュー）
 
 Android版はStorage Access Frameworkで選択したフォルダをアプリ専用領域へ読取専用で同期し、画像・ZIP/LZH・漫画モードを閲覧できます。共有ストレージ上の元ファイルは変更しません。
 
-必要環境はJDK 17、Android SDK 35、NDK r27c、Rustの`aarch64-linux-android`ターゲット、`cargo-ndk`、Gradle 8.9です。
+必要環境はJDK 17、Android SDK 35、NDK r27c、RustのAndroidターゲット、`cargo-ndk`です。Gradle 8.9 Wrapperはリポジトリに同梱します。
 
 ```powershell
-rustup target add aarch64-linux-android
+rustup target add aarch64-linux-android x86_64-linux-android
 cargo install cargo-ndk --locked
-gradle -p android assembleDebug
+.\android\gradlew.bat assembleDebug
+.\android\gradlew.bat installDebug
 ```
 
-生成物は`android/app/build/outputs/apk/debug/app-debug.apk`です。初版はAndroid 10以降のarm64端末のみを対象とし、ファイルの移動・コピー・削除・名称変更、外部プラグイン、Google Play配布は未対応です。フォルダを再選択すると、アプリ内の読取用スナップショットが置き換わります。
+Linux/macOSでは`gradlew.bat`の代わりに`bash ./android/gradlew`を使います。Android Studioから実行する場合は`android`フォルダをプロジェクトとして開き、端末を選択して`app`構成を実行します。
+
+生成物は`android/app/build/outputs/apk/debug/app-debug.apk`です。Debug版はAndroid Emulator用`x86_64`と実機用`arm64-v8a`を収録し、Release版は従来どおりarm64専用です。対象OSはAndroid 10以降で、ファイルの移動・コピー・削除・名称変更、外部プラグイン、Google Play配布は未対応です。フォルダを再選択すると、アプリ内の読取用スナップショットが置き換わります。
 
 ## ヘルプ
 
