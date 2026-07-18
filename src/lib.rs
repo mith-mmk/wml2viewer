@@ -10,6 +10,10 @@ pub mod path_classification;
 pub mod ui;
 pub mod wml2_formats;
 
+#[cfg(test)]
+#[path = "../tests/support/src/test_support.rs"]
+pub(crate) mod test_support;
+
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 pub fn android_main(android_app: android_activity::AndroidApp) {

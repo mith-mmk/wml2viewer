@@ -1,33 +1,9 @@
 use super::load_listed_file_entries;
 use std::fs;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-fn make_temp_dir() -> PathBuf {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let base = std::env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::current_exe().ok().and_then(|path| {
-                path.parent()
-                    .and_then(|deps| deps.parent())
-                    .map(std::path::Path::to_path_buf)
-            })
-        })
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
-        .join(".test_wml2viewer");
-    fs::create_dir_all(&base).unwrap();
-    let dir = base.join(format!(".test_listed_file_{unique}"));
-    fs::create_dir_all(&dir).unwrap();
-    dir
-}
 
 #[test]
 fn listed_file_requires_magic_header() {
-    let dir = make_temp_dir();
+    let dir = crate::test_support::make_test_dir("listed_file");
     let path = dir.join("sample.wml");
     fs::write(&path, "plain text\nfoo.png\n").unwrap();
 
@@ -39,7 +15,7 @@ fn listed_file_requires_magic_header() {
 
 #[test]
 fn listed_file_resolves_relative_paths_from_parent_dir() {
-    let dir = make_temp_dir();
+    let dir = crate::test_support::make_test_dir("listed_file");
     let list_dir = dir.join("lists");
     fs::create_dir_all(&list_dir).unwrap();
     let path = list_dir.join("sample.wmltxt");

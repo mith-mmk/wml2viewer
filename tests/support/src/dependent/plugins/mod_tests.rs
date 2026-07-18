@@ -2,7 +2,6 @@ use super::*;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 fn test_data_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data")
@@ -19,28 +18,6 @@ fn sample_path(name: &str) -> PathBuf {
 
 fn plugin_path(provider: &str) -> PathBuf {
     test_data_root().join("plugins").join(provider)
-}
-
-fn make_temp_dir() -> PathBuf {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let base = std::env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::current_exe().ok().and_then(|path| {
-                path.parent()
-                    .and_then(|deps| deps.parent())
-                    .map(std::path::Path::to_path_buf)
-            })
-        })
-        .unwrap_or_else(test_data_root)
-        .join(".test_wml2viewer");
-    fs::create_dir_all(&base).unwrap();
-    let dir = base.join(format!(".test_plugins_{unique}"));
-    fs::create_dir_all(&dir).unwrap();
-    dir
 }
 
 #[test]
@@ -73,7 +50,7 @@ fn candidate_order_prefers_high_priority_plugin_over_internal() {
 
 #[test]
 fn discovers_ffmpeg_modules_from_test_plugins() {
-    let dir = make_temp_dir();
+    let dir = crate::test_support::make_test_dir("plugins");
     let ffmpeg_exe = dir.join("ffmpeg-test.exe");
     fs::write(&ffmpeg_exe, b"").unwrap();
     fs::write(dir.join("readme.txt"), b"").unwrap();
