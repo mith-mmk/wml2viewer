@@ -3,7 +3,8 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
-def androidNdkVersion = '27.2.12479018'
+// r27c installed by nttld/setup-ndk resolves to 27.3.13750724.
+def androidNdkVersion = '27.3.13750724'
 
 android {
     namespace 'io.github.mith_mmk.wml2viewer'
