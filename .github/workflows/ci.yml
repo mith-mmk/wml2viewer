@@ -87,7 +87,7 @@ jobs:
       - name: install rust and Android target
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: aarch64-linux-android,x86_64-linux-android
 
       - name: cache cargo
         uses: Swatinem/rust-cache@v2
@@ -112,14 +112,12 @@ jobs:
 
       - name: set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
 
       - name: build Android debug APK
-        run: gradle -p android assembleDebug
+        run: bash ./android/gradlew assembleDebug
 
       - name: upload Android debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: wml2viewer-android-arm64-debug
+          name: wml2viewer-android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk

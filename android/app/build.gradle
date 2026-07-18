@@ -3,20 +3,29 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+def androidNdkVersion = '27.2.12479018'
+
 android {
     namespace 'io.github.mith_mmk.wml2viewer'
     compileSdk 35
+    ndkVersion androidNdkVersion
     defaultConfig {
         applicationId 'io.github.mith_mmk.wml2viewer'
         minSdk 29
         targetSdk 35
         versionCode 18
         versionName '0.0.18-pre1'
-        ndk { abiFilters 'arm64-v8a' }
     }
     buildTypes {
-        debug { debuggable true }
-        release { minifyEnabled false; signingConfig null }
+        debug {
+            debuggable true
+            ndk { abiFilters 'arm64-v8a', 'x86_64' }
+        }
+        release {
+            minifyEnabled false
+            signingConfig null
+            ndk { abiFilters 'arm64-v8a' }
+        }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -26,14 +35,51 @@ android {
 }
 
 def repositoryRoot = rootProject.projectDir.parentFile
-def nativeOutput = file('src/main/jniLibs')
-tasks.register('buildRustArm64', Exec) {
-    workingDir repositoryRoot
-    commandLine 'cargo', 'ndk', '-t', 'arm64-v8a', '-o', nativeOutput.absolutePath,
-        'build', '--release', '--lib'
-    inputs.files(fileTree(repositoryRoot) {
-        include 'Cargo.toml', 'Cargo.lock', 'build.rs', 'src/**/*.rs', 'resources/**'
-    })
-    outputs.file(file('src/main/jniLibs/arm64-v8a/libwml2viewer.so'))
+def rustInputs = fileTree(repositoryRoot) {
+    include 'Cargo.toml', 'Cargo.lock', 'build.rs', 'src/**/*.rs', 'resources/**'
 }
-tasks.named('preBuild').configure { dependsOn tasks.named('buildRustArm64') }
+def debugNativeOutput = layout.buildDirectory.dir('generated/jniLibs/debug')
+def releaseNativeOutput = layout.buildDirectory.dir('generated/jniLibs/release')
+def sdkDirectory = androidComponents.sdkComponents.sdkDirectory
+
+android.sourceSets.debug.jniLibs.srcDir(debugNativeOutput)
+android.sourceSets.release.jniLibs.srcDir(releaseNativeOutput)
+
+def registerRustBuild = { taskName, targets, nativeOutput, release ->
+    tasks.register(taskName, Exec) {
+        def cargoArguments = ['cargo', 'ndk']
+        targets.each { target -> cargoArguments.addAll(['-t', target]) }
+        cargoArguments.addAll(['-o', nativeOutput.get().asFile.absolutePath, 'build'])
+        if (release) cargoArguments.add('--release')
+        cargoArguments.add('--lib')
+
+        workingDir repositoryRoot
+        commandLine cargoArguments
+        inputs.files(rustInputs)
+        outputs.dir(nativeOutput)
+        doFirst {
+            def ndkDirectory = new File(sdkDirectory.get().asFile, "ndk/${androidNdkVersion}")
+            environment 'ANDROID_NDK_HOME', ndkDirectory.absolutePath
+        }
+    }
+}
+
+def buildRustDebug = registerRustBuild(
+    'buildRustDebug',
+    ['arm64-v8a', 'x86_64'],
+    debugNativeOutput,
+    false,
+)
+def buildRustRelease = registerRustBuild(
+    'buildRustRelease',
+    ['arm64-v8a'],
+    releaseNativeOutput,
+    true,
+)
+
+tasks.matching { it.name == 'preDebugBuild' }.configureEach {
+    dependsOn buildRustDebug
+}
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach {
+    dependsOn buildRustRelease
+}
