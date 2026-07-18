@@ -31,19 +31,22 @@ wml2viewer --config <path> [path] Launch with custom config file
 wml2viewer --clean system Reset configuration
 ```
 
-### Android 10+ (arm64 preview)
+### Android 10+ (preview)
 
 The Android build uses the Storage Access Framework. A selected folder is copied into a read-only app-private snapshot for image, ZIP/LZH, and manga browsing; source files in shared storage are never modified.
 
-Build prerequisites are JDK 17, Android SDK 35, NDK r27c, the Rust `aarch64-linux-android` target, `cargo-ndk`, and Gradle 8.9.
+Build prerequisites are JDK 17, Android SDK 35, NDK r27c, the Rust Android targets, and `cargo-ndk`. The repository includes the Gradle 8.9 Wrapper.
 
-```text
-rustup target add aarch64-linux-android
+```powershell
+rustup target add aarch64-linux-android x86_64-linux-android
 cargo install cargo-ndk --locked
-gradle -p android assembleDebug
+.\android\gradlew.bat assembleDebug
+.\android\gradlew.bat installDebug
 ```
 
-The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. The MVP supports Android 10+ arm64 devices only. File mutation, external plugins, Google Play packaging, and production signing are out of scope. Selecting another folder replaces the app-private browsing snapshot.
+On Linux and macOS, use `bash ./android/gradlew` in place of `gradlew.bat`. To run from Android Studio, open the `android` directory as a project, select a device, and run the `app` configuration.
+
+The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. Debug builds include `x86_64` for the Android Emulator and `arm64-v8a` for physical devices; release builds remain arm64-only. The MVP supports Android 10+. File mutation, external plugins, Google Play packaging, and production signing are out of scope. Selecting another folder replaces the app-private browsing snapshot.
 
 ## Help
 
@@ -87,3 +90,4 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 2026-04-25 0.0.15 preview4 released, right click menu added, key bidings added, and some bugs fixed.
 - 2026-05-17 0.0.16 preview4 released, adjusted the UI.
 - 2026-05-31 0.0.17 beta1 released, add LZH support, images draw effects
+- 2026-07-18 0.0.18 Windows beta1, apreview 1 add MAC build, add Androoid build
