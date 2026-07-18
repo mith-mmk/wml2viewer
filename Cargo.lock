@@ -5057,7 +5057,7 @@ dependencies = [
 
 [[package]]
 name = "wml2viewer"
-version = "0.0.18-pre1"
+version = "0.0.18"
 dependencies = [
  "android-activity",
  "chrono",
