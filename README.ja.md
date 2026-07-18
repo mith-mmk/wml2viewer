@@ -1,9 +1,9 @@
-# wml2viewer 0.0.15 preview4
+# wml2viewer 0.0.18
 
 - `egui` と `wml2` を使った軽量ネイティブ画像ビューアです。
 
 - WML21のメジャーアップデートになります（完全に別物）
-- 現在、Windows 11(64bit) と Ubuntu 24.04(64bit)で動作確認してます
+- 現在、Windows 11(64bit)、Ubuntu 24.04(64bit)、Android 10以降（Pixel 6a x86_64エミュレータ）で動作確認しています
 - プレビュー版なので仕様は今後変わります
 
 ## 主な機能
@@ -16,6 +16,7 @@
 - リステッドファイル(.wmltxt)によるブラウジング
 - マンガモード
 - 英語/日本語両対応(要フォント)
+- Android版は日本語・中国語・韓国語の名前表示にシステムCJKフォントを使用
 - マルチワーカーによる快適な画像ブラウジング
 - OS連携機能(Windows)
 
@@ -34,11 +35,11 @@ wml2viewer
 - `wml2viewer --config <path> [path]` 設定ファイルを指定して起動
 - `wml2viewer --clean system`　設定を削除
 
-### Android 10以降（プレビュー）
+### Android 10以降（MVP）
 
 Android版はStorage Access Frameworkで選択したフォルダをアプリ専用領域へ読取専用で同期し、画像・ZIP/LZH・漫画モードを閲覧できます。共有ストレージ上の元ファイルは変更しません。
 
-必要環境はJDK 17、Android SDK 35、NDK r27c、RustのAndroidターゲット、`cargo-ndk`です。Gradle 8.9 Wrapperはリポジトリに同梱します。
+必要環境はJDK 17、Android SDK 35、NDK r27c（`27.2.12479018`）、RustのAndroidターゲット、`cargo-ndk`です。Gradle 8.9 Wrapperをリポジトリに同梱しています。
 
 ```powershell
 rustup target add aarch64-linux-android x86_64-linux-android
@@ -49,7 +50,7 @@ cargo install cargo-ndk --locked
 
 Linux/macOSでは`gradlew.bat`の代わりに`bash ./android/gradlew`を使います。Android Studioから実行する場合は`android`フォルダをプロジェクトとして開き、端末を選択して`app`構成を実行します。
 
-生成物は`android/app/build/outputs/apk/debug/app-debug.apk`です。Debug版はAndroid Emulator用`x86_64`と実機用`arm64-v8a`を収録し、Release版は従来どおりarm64専用です。対象OSはAndroid 10以降で、ファイルの移動・コピー・削除・名称変更、外部プラグイン、Google Play配布は未対応です。フォルダを再選択すると、アプリ内の読取用スナップショットが置き換わります。
+生成物は`android/app/build/outputs/apk/debug/app-debug.apk`です。Debug版はAndroid Emulator用`x86_64`と実機用`arm64-v8a`を収録し、Release版は従来どおりarm64専用です。対象OSはAndroid 10以降で、SAFによるフォルダ選択、読取専用スナップショット、スワイプ、ピンチズーム、再起動後のスナップショット復元に対応します。ファイルの移動・コピー・削除・名称変更、外部プラグイン、Google Play配布は未対応です。フォルダを再選択すると、アプリ内の読取用スナップショットが置き換わります。
 
 ## ヘルプ
 
@@ -91,3 +92,4 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 2026-04-25: 0.0.15 preview4 公開、右クリックメニュー追加、キー割り当て追加、いくつかのバグ修正
 - 2026-05-17: 0.0.16 preview5 UIの調整
 - 2026-05-31: 0.0.17 beta1 LZHサポート、画面エフェクトの追加
+- 2026-07-18: 0.0.18 公開、macOSビルドとAndroidビルドを追加
