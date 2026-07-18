@@ -51,7 +51,13 @@ pub fn system_locale() -> Option<String> {
         .or_else(|| std::env::var("LANG").ok())
 }
 
-pub fn locale_font_candidates(_locale: &str) -> Vec<PathBuf> {
+const SYSTEM_FONT_DIR: &str = "/system/fonts";
+const CJK_FONT: &str = "NotoSansCJK-Regular.ttc";
+
+pub fn locale_font_candidates(locale: &str) -> Vec<PathBuf> {
+    if locale.starts_with("ja") || locale.starts_with("zh") || locale.starts_with("ko") {
+        return vec![PathBuf::from(SYSTEM_FONT_DIR).join(CJK_FONT)];
+    }
     Vec::new()
 }
 
@@ -60,7 +66,7 @@ pub fn emoji_font_candidates() -> Vec<PathBuf> {
 }
 
 pub fn last_resort_font_candidates() -> Vec<PathBuf> {
-    Vec::new()
+    vec![PathBuf::from(SYSTEM_FONT_DIR).join(CJK_FONT)]
 }
 
 pub fn pick_directory_dialog() -> Option<PathBuf> {
@@ -77,4 +83,26 @@ pub fn default_download_dir() -> Option<PathBuf> {
 
 pub fn default_temp_dir() -> Option<PathBuf> {
     files_dir().map(|dir| dir.join("cache"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{last_resort_font_candidates, locale_font_candidates};
+    use std::path::Path;
+
+    #[test]
+    fn android_cjk_locales_use_system_cjk_font() {
+        let expected = Path::new("/system/fonts/NotoSansCJK-Regular.ttc");
+        for locale in ["ja", "ja-jp", "zh-cn", "ko-kr"] {
+            assert_eq!(locale_font_candidates(locale), vec![expected.to_path_buf()]);
+        }
+    }
+
+    #[test]
+    fn android_fallback_keeps_cjk_font_available() {
+        assert_eq!(
+            last_resort_font_candidates(),
+            vec![Path::new("/system/fonts/NotoSansCJK-Regular.ttc").to_path_buf()]
+        );
+    }
 }

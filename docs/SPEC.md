@@ -108,7 +108,7 @@
 
 ## Android MVP
 
-- Android 10以降、`arm64-v8a` を対象とする
+- Android 10以降を対象とし、Debug版はエミュレータ用`x86_64`と実機用`arm64-v8a`、Release版は`arm64-v8a`を収録する
 - `NativeActivity` と `eframe` のAndroidバックエンドで既存UIを起動する
 - 共有ファイルはStorage Access Frameworkのフォルダ選択で許可を得る
 - 選択ツリー内の対応画像・ZIP/LHA・listed fileをアプリ専用領域へ読取用スナップショットとして同期する
