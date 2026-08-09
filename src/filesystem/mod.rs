@@ -1,7 +1,11 @@
 pub mod function;
 mod lha_file;
 mod listed_file;
+pub mod provider;
+#[cfg(target_os = "ios")]
+pub mod smb;
 mod sort;
+pub mod source;
 mod zip_file;
 
 use std::collections::HashMap;

@@ -984,7 +984,7 @@ impl ViewerApp {
                             }
                             _ => {
                                 self.empty_mode = true;
-                                self.show_filer = true;
+                                self.set_show_filer(false);
                                 self.overlay
                                     .set_loading_message("No displayable file found");
                             }
@@ -1040,7 +1040,8 @@ impl ViewerApp {
                         self.log_bench_startup_sync_once("no_path");
                         self.overlay
                             .set_loading_message("No displayable file found");
-                        self.show_filer = true;
+                        self.empty_mode = true;
+                        self.set_show_filer(false);
                         self.active_fs_request_id = None;
                     }
                 }

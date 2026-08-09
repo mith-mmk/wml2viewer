@@ -166,6 +166,11 @@ impl ViewerApp {
                     close_requested = true;
                 }
 
+                if ui.button(self.text(UiTextKey::ToggleFiler)).clicked() {
+                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleFiler);
+                    close_requested = true;
+                }
+
                 if ui.button(self.text(UiTextKey::MenuAboutSection)).clicked() {
                     self.open_dialog_with_title_key(UiTextKey::MenuAboutSection, self.about_text());
                     close_requested = true;
@@ -270,6 +275,7 @@ impl ViewerApp {
             .max_width(width_range.max)
             .show(ctx, |ui| {
                 let mut refresh_requested = false;
+                let mut close_requested = false;
                 let list_text = self.text(UiTextKey::List);
                 let thumb_small_text = self.text(UiTextKey::ThumbnailSmall);
                 let thumb_medium_text = self.text(UiTextKey::ThumbnailMedium);
@@ -292,10 +298,30 @@ impl ViewerApp {
                 let open_url_text = self.text(UiTextKey::OpenUrl);
                 let up_text = self.text(UiTextKey::Up);
                 let icon_color = ui.visuals().text_color();
-                ui.heading(self.text(UiTextKey::Filer));
-                #[cfg(target_os = "android")]
-                if ui.button("フォルダを選択 / Choose folder").clicked() {
-                    let _ = crate::dependent::request_folder_import();
+                ui.horizontal(|ui| {
+                    ui.heading(self.text(UiTextKey::Filer));
+                    if ui.button(self.text(UiTextKey::Close)).clicked() {
+                        close_requested = true;
+                    }
+                });
+                #[cfg(any(target_os = "android", target_os = "ios"))]
+                {
+                    ui.label("アプリ内ファイラー");
+                    ui.small("読み込んだフォルダやファイルを、読み取り専用のスナップショットとして表示します。");
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("Filesからフォルダを取り込む").clicked() {
+                            let _ = crate::dependent::request_folder_import();
+                        }
+                        #[cfg(target_os = "ios")]
+                        if ui.button("Filesからファイルを開く").clicked() {
+                            let _ = crate::dependent::request_file_import();
+                        }
+                    });
+                    if self.filer.entries.is_empty() {
+                        ui.weak("フォルダまたはファイルを取り込むと、ここに一覧が表示されます。");
+                    }
+                    #[cfg(target_os = "ios")]
+                    self.smb_browser_ui(ui);
                 }
                 ui.horizontal_wrapped(|ui| {
                     if icon_toolbar_button(
@@ -485,15 +511,28 @@ impl ViewerApp {
                     .selected_text(
                         current_root
                             .as_ref()
-                            .map(|path| path.display().to_string())
+                            .map(|path| {
+                                #[cfg(target_os = "ios")]
+                                {
+                                    crate::dependent::display_path(path)
+                                }
+                                #[cfg(not(target_os = "ios"))]
+                                {
+                                    path.display().to_string()
+                                }
+                            })
                             .unwrap_or_else(|| "(root)".to_string()),
                     )
                     .show_ui(ui, |ui| {
                         for root in self.filer.roots.clone() {
+                            #[cfg(target_os = "ios")]
+                            let root_label = crate::dependent::display_path(&root);
+                            #[cfg(not(target_os = "ios"))]
+                            let root_label = root.display().to_string();
                             if ui
                                 .selectable_label(
                                     current_root.as_ref() == Some(&root),
-                                    root.display().to_string(),
+                                    root_label,
                                 )
                                 .clicked()
                             {
@@ -502,7 +541,11 @@ impl ViewerApp {
                         }
                     });
                 if let Some(dir) = &self.filer.directory {
-                    ui.label(dir.display().to_string());
+                    #[cfg(target_os = "ios")]
+                    let directory_label = crate::dependent::display_path(dir);
+                    #[cfg(not(target_os = "ios"))]
+                    let directory_label = dir.display().to_string();
+                    ui.label(directory_label);
                     if let Some(parent) = dir.parent() {
                         if icon_toolbar_button(ui, SvgIcon::Up, false, up_text, icon_color) {
                             self.browse_filer_directory(parent.to_path_buf());
@@ -552,6 +595,10 @@ impl ViewerApp {
                     });
                 if focus_consumed {
                     self.pending_filer_focus_path = None;
+                }
+                if close_requested {
+                    self.set_show_filer(false);
+                    self.pending_fit_recalc = true;
                 }
             });
     }

@@ -39,6 +39,19 @@ pub fn run(
     )
 }
 
+#[cfg(target_os = "ios")]
+pub fn run_ios(
+    app_support_dir: PathBuf,
+    documents_dir: PathBuf,
+    caches_dir: PathBuf,
+) -> Result<(), Box<dyn Error>> {
+    crate::dependent::initialize(app_support_dir, documents_dir, caches_dir);
+    let imported_root = crate::dependent::imported_root()
+        .ok_or_else(|| std::io::Error::other("iOS import root is unavailable"))?;
+    std::fs::create_dir_all(&imported_root)?;
+    run_platform(Some(imported_root), None, false, false, None)
+}
+
 #[cfg(target_os = "android")]
 pub fn run_android(android_app: android_activity::AndroidApp) -> Result<(), Box<dyn Error>> {
     let files_dir = android_app
@@ -77,6 +90,12 @@ fn run_platform(
     let can_load_directly = resolve_start_path(&image_path).is_some();
     let (navigation_path, start_path, startup_load_path, show_filer_on_start) =
         determine_startup_paths(&image_path, path_exists, is_container, can_load_directly);
+    let start_empty = cfg!(target_os = "ios")
+        && image_path.is_dir()
+        && image_path
+            .read_dir()
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false);
     let bench_logger = if bench_enabled || log_enabled {
         let logger = BenchLogger::create()?;
         let bench_context = bench_path_context(&image_path);
@@ -131,27 +150,34 @@ fn run_platform(
             .with_fullscreen(true);
     }
 
+    #[cfg(target_os = "ios")]
+    {
+        native_options.viewport = egui::ViewportBuilder::default()
+            .with_title("wml2viewer")
+            .with_fullscreen(true);
+    }
+
     eframe::run_native(
         "wml2viewer",
         native_options,
         Box::new(move |cc| {
             apply_window_theme(&cc.egui_ctx, config.window.ui_theme);
             let _ = apply_resources(&cc.egui_ctx, &config.resources);
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             let screen = cc.egui_ctx.input(|i| {
                 i.viewport()
                     .monitor_size
                     .unwrap_or(egui::vec2(1280.0, 720.0))
             });
 
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             let window_size = configured_window_size(&config.window.size, screen);
 
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             cc.egui_ctx
                 .send_viewport_cmd(egui::ViewportCommand::InnerSize(window_size));
 
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             match &config.window.start_position {
                 WindowStartPosition::Center => {
                     let centered = egui::pos2(
@@ -170,7 +196,7 @@ fn run_platform(
             }
 
             // Work around broken first-frame layout when the app starts in fullscreen.
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             cc.egui_ctx
                 .send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
 
@@ -186,6 +212,7 @@ fn run_platform(
                 bench_enabled,
                 bench_scenario.clone(),
                 show_filer_on_start,
+                start_empty,
                 startup_load_path.clone(),
             )))
         }),

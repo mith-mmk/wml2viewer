@@ -9,7 +9,10 @@ authors = ["MITH@mmk"]
 publish = false
 
 [lib]
-crate-type = ["rlib", "cdylib"]
+# The iOS app embeds the static archive.  Keeping the crate types explicit
+# prevents Cargo's cdylib build from trying to resolve Swift-provided C ABI
+# symbols before Xcode links the application.
+crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -32,7 +35,7 @@ windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Im
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 rfd = "0.15"
 
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 eframe = "0.33"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 
@@ -42,6 +45,14 @@ winres = "0.1"
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = { version = "0.6", features = ["native-activity"] }
 eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "android-native-activity"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "wgpu"] }
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+smb = { version = "0.11.2", default-features = false, features = ["async", "sign", "encrypt", "compress", "netbios-transport"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync"] }
+wgpu = { version = "27.0.1", default-features = false, features = ["std", "metal", "wgsl"] }
 
 [build-dependencies]
 winres = "0.1"

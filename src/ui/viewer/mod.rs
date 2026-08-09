@@ -5,6 +5,8 @@ use crate::dependent::{default_download_dir, default_temp_dir, pick_save_directo
 use crate::drawers::canvas::Canvas;
 use crate::drawers::image::{LoadedImage, SaveFormat, save_loaded_image};
 use crate::filesystem::function::{FunctionParams, call_fanction_for_action};
+#[cfg(target_os = "ios")]
+use crate::filesystem::source::{SourceCommand, SourceResult};
 use crate::filesystem::{
     FilesystemCommand, FilesystemResult, adjacent_entry, archive_prefers_low_io,
     is_browser_container, navigation_branch_path, resolve_end_path, resolve_navigation_entry_path,
@@ -12,8 +14,8 @@ use crate::filesystem::{
 };
 use crate::options::{
     AppConfig, EndOfFolderOption, FileActionOptions, FilesystemOptions, FolderRefreshMode,
-    InputOptions, KeyBinding, NavigationSortOption, PluginConfig, ResourceOptions, RuntimeOptions,
-    TransitionEffect, ViewerAction,
+    InputOptions, KeyBinding, NavigationSortOption, NetworkOptions, PluginConfig, ResourceOptions,
+    RuntimeOptions, TransitionEffect, ViewerAction,
 };
 use crate::ui::i18n::{UiTextKey, tr};
 use crate::ui::input::dispatch::canonical_key_binding_name;
@@ -40,9 +42,16 @@ use std::collections::VecDeque;
 use std::error::Error;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "ios")]
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+#[cfg(target_os = "ios")]
+mod smb;
+#[cfg(target_os = "ios")]
+use smb::SmbBrowserState;
 mod dialogs;
 mod navigation;
 pub mod options;
@@ -107,6 +116,7 @@ pub(crate) struct ViewerApp {
     pub(crate) input_options: InputOptions,
     pub(crate) end_of_folder: EndOfFolderOption,
     pub(crate) navigation_sort: NavigationSortOption,
+    pub(crate) network: NetworkOptions,
     pub(crate) worker_tx: Sender<RenderCommand>,
     pub(crate) worker_rx: Receiver<RenderResult>,
     pub(crate) worker_join: Option<JoinHandle<()>>,
@@ -123,6 +133,18 @@ pub(crate) struct ViewerApp {
     pub(crate) queued_navigation: Option<QueuedNavigation>,
     active_navigation_transition_direction: Option<ImageTransitionDirection>,
     pub(crate) deferred_filesystem_init_path: Option<PathBuf>,
+    #[cfg(target_os = "ios")]
+    pub(crate) remote_tx: Option<mpsc::SyncSender<SourceCommand>>,
+    #[cfg(target_os = "ios")]
+    pub(crate) remote_rx: Option<Receiver<SourceResult>>,
+    #[cfg(target_os = "ios")]
+    pub(crate) remote_active_request_id: Option<u64>,
+    #[cfg(target_os = "ios")]
+    pub(crate) next_remote_request_id: u64,
+    #[cfg(target_os = "ios")]
+    pub(crate) remote_mode: bool,
+    #[cfg(target_os = "ios")]
+    pub(crate) smb_browser: SmbBrowserState,
     pub(crate) filer_tx: Option<Sender<FilerCommand>>,
     pub(crate) filer_rx: Option<Receiver<FilerResult>>,
     pub(crate) next_filer_request_id: u64,
@@ -148,6 +170,7 @@ pub(crate) struct ViewerApp {
     pub(crate) bench_logger: Option<BenchLogger>,
     pub(crate) show_left_menu: bool,
     pub(crate) suppress_next_pointer_intent: bool,
+    pub(crate) suppress_next_gesture_release: bool,
     pub(crate) left_menu_pos: Pos2,
     pub(crate) save_dialog: SaveDialogState,
     pub(crate) file_action_dialog: FileActionDialogState,
@@ -185,7 +208,7 @@ pub(crate) struct ViewerApp {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(target_os = "android", allow(dead_code))]
+#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
 pub(crate) enum SettingsTab {
     Viewer,
     Input,
@@ -609,6 +632,17 @@ fn canonical_key_binding(binding: &KeyBinding) -> KeyBinding {
 }
 
 impl ViewerApp {
+    fn shutdown_on_exit(&mut self) {
+        Self::shutdown_render_worker(&self.worker_tx, &mut self.worker_join);
+        Self::shutdown_render_worker(&self.companion_tx, &mut self.companion_join);
+        Self::shutdown_render_worker(&self.preload_tx, &mut self.preload_join);
+        let _ = save_app_config(
+            &self.current_config(),
+            Some(&self.current_path),
+            self.config_path.as_deref(),
+        );
+    }
+
     fn bench_metrics_payload(metrics: &RenderLoadMetrics) -> serde_json::Value {
         serde_json::json!({
             "resolved_path": metrics.resolved_path.as_ref().map(|path| path.display().to_string()),
@@ -634,6 +668,7 @@ impl ViewerApp {
         bench_enabled: bool,
         bench_scenario: Option<String>,
         show_filer_on_start: bool,
+        start_empty: bool,
         startup_load_path: Option<PathBuf>,
     ) -> Self {
         let color_image = canvas_to_color_image(rendered.frame_canvas(0));
@@ -662,7 +697,7 @@ impl ViewerApp {
         let (preload_tx, preload_rx, preload_join) = spawn_render_worker(source.clone());
         let resource_locale_input = config.resources.locale.clone().unwrap_or_default();
         let resource_font_paths_input = join_search_paths(&config.resources.font_paths);
-        let defer_navigation_workers = !show_filer_on_start;
+        let defer_navigation_workers = !show_filer_on_start && !start_empty;
         let startup_phase = if defer_navigation_workers {
             StartupPhase::SingleViewer
         } else {
@@ -714,6 +749,7 @@ impl ViewerApp {
             input_options,
             end_of_folder: config.navigation.end_of_folder,
             navigation_sort: config.navigation.sort,
+            network: config.network,
             worker_tx,
             worker_rx,
             worker_join: Some(worker_join),
@@ -730,6 +766,18 @@ impl ViewerApp {
             queued_navigation: None,
             active_navigation_transition_direction: None,
             deferred_filesystem_init_path: None,
+            #[cfg(target_os = "ios")]
+            remote_tx: None,
+            #[cfg(target_os = "ios")]
+            remote_rx: None,
+            #[cfg(target_os = "ios")]
+            remote_active_request_id: None,
+            #[cfg(target_os = "ios")]
+            next_remote_request_id: 0,
+            #[cfg(target_os = "ios")]
+            remote_mode: false,
+            #[cfg(target_os = "ios")]
+            smb_browser: SmbBrowserState::default(),
             filer_tx: None,
             filer_rx: None,
             next_filer_request_id: 0,
@@ -755,6 +803,7 @@ impl ViewerApp {
             bench_logger,
             show_left_menu: false,
             suppress_next_pointer_intent: false,
+            suppress_next_gesture_release: false,
             left_menu_pos: Pos2::ZERO,
             save_dialog: SaveDialogState {
                 file_name: default_save_file_name(&path),
@@ -772,7 +821,7 @@ impl ViewerApp {
             ffmpeg_search_paths_input: String::new(),
             startup_window_sync_frames: 0,
             deferred_filesystem_sync_frame: None,
-            empty_mode: show_filer_on_start,
+            empty_mode: show_filer_on_start || start_empty,
             companion_tx,
             companion_rx,
             companion_join: Some(companion_join),
@@ -816,7 +865,9 @@ impl ViewerApp {
             this.spawn_navigation_workers();
         }
 
-        if let Some(path) = startup_load_path {
+        if start_empty {
+            this.set_show_filer(false);
+        } else if let Some(path) = startup_load_path {
             this.deferred_filesystem_init_path = Some(navigation_path.clone());
             let _ = this.request_load_path(path);
         } else if !show_filer_on_start {
@@ -2445,7 +2496,7 @@ impl ViewerApp {
                 let load_path = resolve_start_path(&path).unwrap_or_else(|| path.clone());
                 self.filer.selected = Some(path.clone());
                 self.empty_mode = false;
-                self.show_filer = false;
+                self.set_show_filer(false);
                 self.pending_fit_recalc = true;
                 if self.show_subfiler {
                     self.pending_subfiler_focus_path = Some(path.clone());
@@ -2667,14 +2718,59 @@ impl ViewerApp {
 
 impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        #[cfg(target_os = "ios")]
+        if let Some(status) = crate::dependent::take_import_status() {
+            match status {
+                crate::dependent::ImportStatus::Presenting => {
+                    self.overlay.set_loading_message("Opening Files...");
+                }
+                crate::dependent::ImportStatus::Importing => {
+                    self.empty_mode = true;
+                    self.set_show_filer(false);
+                    self.overlay.set_loading_message("Importing...");
+                }
+                crate::dependent::ImportStatus::Cancelled => {
+                    self.empty_mode = true;
+                    self.set_show_filer(false);
+                    self.overlay.clear_loading_message();
+                }
+                crate::dependent::ImportStatus::Failed => {
+                    self.empty_mode = true;
+                    self.set_show_filer(false);
+                    self.overlay.set_loading_message("Import failed");
+                }
+            }
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         if let Some(root) = crate::dependent::take_completed_import() {
-            self.current_navigation_path = root.clone();
-            self.current_path = root.clone();
-            self.empty_mode = true;
-            self.set_show_filer(true);
-            self.browse_filer_directory(root.clone());
+            let selected = {
+                #[cfg(target_os = "ios")]
+                {
+                    crate::dependent::imported_selected_path()
+                }
+                #[cfg(target_os = "android")]
+                {
+                    None
+                }
+            };
+            let initial_path = selected
+                .filter(|path| path.exists())
+                .unwrap_or(root.clone());
+            self.current_navigation_path = initial_path.clone();
+            self.current_path = initial_path.clone();
+            self.empty_mode = initial_path.is_dir();
             self.respawn_filesystem_worker();
+            if initial_path.is_file() {
+                self.set_show_filer(false);
+                self.pending_fit_recalc = true;
+                let load_path = resolve_start_path(&initial_path).unwrap_or(initial_path.clone());
+                let _ = self.request_load_target(initial_path, load_path);
+            } else {
+                self.empty_mode = true;
+                self.set_show_filer(false);
+                let _ = self.init_filesystem(initial_path);
+            }
         }
         self.sync_window_state(ctx);
         self.update_window_title(ctx);
@@ -2682,6 +2778,8 @@ impl eframe::App for ViewerApp {
         self.poll_render_request_timeout();
         self.poll_companion_worker();
         self.poll_preload_worker();
+        #[cfg(target_os = "ios")]
+        self.poll_remote_source();
         self.poll_filesystem();
         self.poll_filer_worker();
         self.poll_auto_folder_refresh();
@@ -2712,18 +2810,21 @@ impl eframe::App for ViewerApp {
             ctx.request_repaint_after(wait.min(POINTER_SINGLE_CLICK_DELAY));
         }
 
-        if zoom_delta != 1.0 && !self.show_settings {
-            let _ = self.set_zoom(self.zoom * zoom_delta);
-        }
-
         self.frame_counter += 1;
         self.poll_deferred_filesystem_sync();
         self.update_animation(ctx);
 
+        let mut viewer_pointer_inside = false;
         let panel = egui::CentralPanel::default().frame(egui::Frame::NONE);
         panel.show(ctx, |ui| {
             self.paint_background(ui, ui.max_rect());
             let display_rect = ui.max_rect();
+            viewer_pointer_inside = ctx.input(|input| {
+                input
+                    .pointer
+                    .interact_pos()
+                    .is_some_and(|position| display_rect.contains(position))
+            });
             if self.active_request.is_some() || self.active_fs_request_id.is_some() {
                 ctx.request_repaint_after(Duration::from_millis(16));
             }
@@ -2860,6 +2961,7 @@ impl eframe::App for ViewerApp {
                         let _ = self.handle_pointer_input(&display_response);
                     }
 
+                    #[cfg(not(target_os = "ios"))]
                     if self.empty_mode {
                         ui.add_space(8.0);
                         ui.label(format!(
@@ -2867,22 +2969,82 @@ impl eframe::App for ViewerApp {
                             self.text(UiTextKey::NoDisplayableFileFound),
                             self.text(UiTextKey::OpenDirectoryOrFileFromFiler)
                         ));
+                        #[cfg(target_os = "ios")]
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button("Filesからフォルダを取り込む").clicked() {
+                                let _ = crate::dependent::request_folder_import();
+                            }
+                            if ui.button("Filesからファイルを開く").clicked() {
+                                let _ = crate::dependent::request_file_import();
+                            }
+                            if ui.button("取り込み済みを閲覧").clicked() {
+                                self.set_show_filer(true);
+                                if let Some(directory) = self.current_directory() {
+                                    self.browse_filer_directory(directory);
+                                }
+                            }
+                        });
                     }
                 });
+
+                #[cfg(target_os = "ios")]
+                if self.empty_mode {
+                    let card_size = egui::vec2(440.0, 190.0);
+                    let card_pos = egui::pos2(
+                        (display_rect.center().x - card_size.x / 2.0).max(16.0),
+                        (display_rect.center().y - card_size.y / 2.0).max(16.0),
+                    );
+                    egui::Area::new(egui::Id::new("ios_empty_state"))
+                        .order(egui::Order::Foreground)
+                        .fixed_pos(card_pos)
+                        .show(ctx, |ui| {
+                            egui::Frame::popup(ui.style())
+                                .inner_margin(egui::Margin::same(20))
+                                .show(ui, |ui| {
+                                    ui.set_min_size(card_size);
+                                    ui.vertical_centered(|ui| {
+                                        ui.heading("WML2Viewer");
+                                        ui.label("Filesから閲覧するフォルダまたはファイルを選択してください。");
+                                        ui.add_space(12.0);
+                                        ui.horizontal_wrapped(|ui| {
+                                            if ui.button("Filesからフォルダを取り込む").clicked() {
+                                                let _ = crate::dependent::request_folder_import();
+                                            }
+                                            if ui.button("Filesからファイルを開く").clicked() {
+                                                let _ = crate::dependent::request_file_import();
+                                            }
+                                            if ui.button("取り込み済みを閲覧").clicked() {
+                                                self.set_show_filer(true);
+                                                if let Some(directory) = self.current_directory() {
+                                                    self.browse_filer_directory(directory);
+                                                }
+                                            }
+                                        });
+                                    });
+                                });
+                        });
+                }
         });
+
+        if zoom_delta != 1.0
+            && viewer_pointer_inside
+            && !self.pointer_input_blocked()
+            && !self.empty_mode
+        {
+            let _ = self.set_zoom(self.zoom * zoom_delta);
+        }
         self.loading_overlay_ui(ctx);
         self.loading_card_ui(ctx);
     }
 
+    #[cfg(target_os = "ios")]
+    fn on_exit(&mut self) {
+        self.shutdown_on_exit();
+    }
+
+    #[cfg(not(target_os = "ios"))]
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        Self::shutdown_render_worker(&self.worker_tx, &mut self.worker_join);
-        Self::shutdown_render_worker(&self.companion_tx, &mut self.companion_join);
-        Self::shutdown_render_worker(&self.preload_tx, &mut self.preload_join);
-        let _ = save_app_config(
-            &self.current_config(),
-            Some(&self.current_path),
-            self.config_path.as_deref(),
-        );
+        self.shutdown_on_exit();
     }
 }
 

@@ -1,0 +1,311 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 71;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* main.m */; };
+		A10000000000000000000002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* AppDelegate.swift */; };
+		A10000000000000000000003 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* LaunchScreen.storyboard */; };
+		A10000000000000000000004 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* UIKit.framework */; };
+		A10000000000000000000005 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* Foundation.framework */; };
+		A10000000000000000000006 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* QuartzCore.framework */; };
+		A10000000000000000000007 /* OpenGLES.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* OpenGLES.framework */; };
+		A10000000000000000000008 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* Metal.framework */; };
+		A10000000000000000000009 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* CoreGraphics.framework */; };
+		A1000000000000000000000A /* CoreText.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B /* CoreText.framework */; };
+		A1000000000000000000000B /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* Security.framework */; };
+		A1000000000000000000000C /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D /* SystemConfiguration.framework */; };
+		A1000000000000000000000D /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000F /* KeychainStore.swift */; };
+		A1000000000000000000000F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
+		A20000000000000000000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A20000000000000000000004 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		A20000000000000000000005 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		A20000000000000000000006 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
+		A20000000000000000000007 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		A20000000000000000000008 /* OpenGLES.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = OpenGLES.framework; path = System/Library/Frameworks/OpenGLES.framework; sourceTree = SDKROOT; };
+		A20000000000000000000009 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		A2000000000000000000000A /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		A2000000000000000000000B /* CoreText.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreText.framework; path = System/Library/Frameworks/CoreText.framework; sourceTree = SDKROOT; };
+		A2000000000000000000000C /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		A2000000000000000000000D /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
+		A2000000000000000000000E /* Wml2Viewer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Wml2Viewer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A2000000000000000000000F /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000004 /* UIKit.framework in Frameworks */,
+				A10000000000000000000005 /* Foundation.framework in Frameworks */,
+				A10000000000000000000006 /* QuartzCore.framework in Frameworks */,
+				A10000000000000000000007 /* OpenGLES.framework in Frameworks */,
+				A10000000000000000000008 /* Metal.framework in Frameworks */,
+				A10000000000000000000009 /* CoreGraphics.framework in Frameworks */,
+				A1000000000000000000000A /* CoreText.framework in Frameworks */,
+				A1000000000000000000000B /* Security.framework in Frameworks */,
+				A1000000000000000000000C /* SystemConfiguration.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000002 /* Wml2Viewer */,
+				A40000000000000000000003 /* Frameworks */,
+				A40000000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A40000000000000000000002 /* Wml2Viewer */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000001 /* main.m */,
+				A20000000000000000000002 /* AppDelegate.swift */,
+				A2000000000000000000000F /* KeychainStore.swift */,
+				A20000000000000000000003 /* Info.plist */,
+				A20000000000000000000004 /* LaunchScreen.storyboard */,
+				A20000000000000000000011 /* Assets.xcassets */,
+			);
+			path = Wml2Viewer;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000003 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000005 /* UIKit.framework */,
+				A20000000000000000000006 /* Foundation.framework */,
+				A20000000000000000000007 /* QuartzCore.framework */,
+				A20000000000000000000008 /* OpenGLES.framework */,
+				A20000000000000000000009 /* Metal.framework */,
+				A2000000000000000000000A /* CoreGraphics.framework */,
+				A2000000000000000000000B /* CoreText.framework */,
+				A2000000000000000000000C /* Security.framework */,
+				A2000000000000000000000D /* SystemConfiguration.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A2000000000000000000000E /* Wml2Viewer.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A50000000000000000000001 /* Wml2Viewer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A70000000000000000000002 /* Build configuration list for PBXNativeTarget "Wml2Viewer" */;
+			buildPhases = (
+				A30000000000000000000002 /* Build Rust */,
+				A30000000000000000000003 /* Sources */,
+				A30000000000000000000001 /* Frameworks */,
+				A30000000000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Wml2Viewer;
+			productName = Wml2Viewer;
+			productReference = A2000000000000000000000E /* Wml2Viewer.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A60000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					A50000000000000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = A70000000000000000000001 /* Build configuration list for PBXProject "Wml2Viewer" */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A40000000000000000000001;
+			productRefGroup = A40000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A50000000000000000000001 /* Wml2Viewer */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A30000000000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000003 /* LaunchScreen.storyboard in Resources */,
+				A1000000000000000000000F /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A30000000000000000000002 /* Build Rust */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../Cargo.toml",
+				"$(SRCROOT)/../Cargo.lock",
+				"$(SRCROOT)/../src/configs/resourses/mod.rs",
+				"$(SRCROOT)/Wml2Viewer/Resources/NotoSansCJKjp-Regular.otf",
+				"$(SRCROOT)/build-rust.sh",
+			);
+			name = "Build Rust";
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/libwml2viewer.a",
+			);
+			basedOnDependencyAnalysis = 0;
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "/bin/sh \"$SRCROOT/build-rust.sh\" \"$PLATFORM_NAME\" \"$ARCHS\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A30000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* main.m in Sources */,
+				A10000000000000000000002 /* AppDelegate.swift in Sources */,
+				A1000000000000000000000D /* KeychainStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A80000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+			};
+			name = Debug;
+		};
+		A80000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+			};
+			name = Release;
+		};
+		A80000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 18;
+				DEFINES_MODULE = YES;
+				DEVELOPMENT_TEAM = YR527W4764;
+				INFOPLIST_FILE = Wml2Viewer/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = "$(BUILT_PRODUCTS_DIR)";
+				OTHER_LDFLAGS = (
+					"-force_load",
+					"$(BUILT_PRODUCTS_DIR)/libwml2viewer.a",
+					"-lc++",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.mith-mmk.wml2viewer";
+				PRODUCT_NAME = Wml2Viewer;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A80000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 18;
+				DEFINES_MODULE = YES;
+				DEVELOPMENT_TEAM = YR527W4764;
+				INFOPLIST_FILE = Wml2Viewer/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = "$(BUILT_PRODUCTS_DIR)";
+				OTHER_LDFLAGS = (
+					"-force_load",
+					"$(BUILT_PRODUCTS_DIR)/libwml2viewer.a",
+					"-lc++",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.mith-mmk.wml2viewer";
+				PRODUCT_NAME = Wml2Viewer;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A70000000000000000000001 /* Build configuration list for PBXProject "Wml2Viewer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A80000000000000000000001 /* Debug */,
+				A80000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A70000000000000000000002 /* Build configuration list for PBXNativeTarget "Wml2Viewer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A80000000000000000000003 /* Debug */,
+				A80000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A60000000000000000000001 /* Project object */;
+}

@@ -51,6 +51,20 @@ pub fn apply_resources(ctx: &egui::Context, options: &ResourceOptions) -> Applie
     let mut fonts = egui::FontDefinitions::default();
     let mut loaded_fonts = Vec::new();
 
+    #[cfg(target_os = "ios")]
+    {
+        const IOS_CJK_FONT: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/ios/Wml2Viewer/Resources/NotoSansCJKjp-Regular.otf"
+        ));
+        let name = "NotoSansCJKjp-Regular".to_string();
+        fonts.font_data.insert(
+            name.clone(),
+            egui::FontData::from_static(IOS_CJK_FONT).into(),
+        );
+        loaded_fonts.push(name);
+    }
+
     for (name, data) in load_font_data(candidate_font_paths(&locale, &options.font_paths)) {
         fonts.font_data.insert(name.clone(), data.into());
         loaded_fonts.push(name);

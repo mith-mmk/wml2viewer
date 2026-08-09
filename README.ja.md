@@ -52,6 +52,14 @@ Linux/macOSでは`gradlew.bat`の代わりに`bash ./android/gradlew`を使い�
 
 生成物は`android/app/build/outputs/apk/debug/app-debug.apk`です。Debug版はAndroid Emulator用`x86_64`と実機用`arm64-v8a`を収録し、Release版は従来どおりarm64専用です。対象OSはAndroid 10以降で、SAFによるフォルダ選択、読取専用スナップショット、スワイプ、ピンチズーム、再起動後のスナップショット復元に対応します。ファイルの移動・コピー・削除・名称変更、外部プラグイン、Google Play配布は未対応です。フォルダを再選択すると、アプリ内の読取用スナップショットが置き換わります。
 
+### iOS 17以降（MVP）
+
+`ios/Wml2Viewer.xcodeproj` はRust staticlibをXcodeからビルドし、`aarch64-apple-ios-sim`または実機向けtargetへリンクします。iOS版は標準Filesを主導線とし、Document Pickerで選択したフォルダまたはファイルをアプリ内の世代付き読取専用snapshotへコピーして閲覧します。フォルダ取込後は最初の対応ファイルを開き、補助のアプリ内ファイラーは閉じます。元ファイルは変更しません。
+
+アプリ内ファイラーは取込済みsnapshotを閲覧する補助機能として残しており、常時表示の閉じるボタンから閉じられます。iPhone/iPadのSafe Area・回転に対応し、Androidと同じく左スワイプ=次、右スワイプ=前、ダブルタップ=Fit切替、長押し=メニュー、ピンチ=ズームです。拡大中はページスワイプを抑制します。
+
+SMB2/3向けのread-only provider、source navigation、アプリ内共有ブラウザ、512MiB上限のストリーミングキャッシュを追加しています。SMBの資格情報は設定ファイルやログへ書かず、iOS Keychainを使用します。切断時は現在ページを保持して再接続待ちにし、勝手に次ページへ進みません。クラウドOAuth連携とファイル変更操作は未対応です。詳細は`docs/ios.md`を参照してください。
+
 ## ヘルプ
 
 - https://mith-mmk.github.io/wml2/help.html

@@ -2,7 +2,7 @@ pub(crate) mod dispatch;
 
 use crate::options::ViewerAction;
 use crate::ui::input::dispatch::collect_triggered_actions;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::ui::viewer::FileActionDialogMode;
 use crate::ui::viewer::ViewerApp;
 use eframe::egui;
@@ -162,7 +162,7 @@ impl ViewerApp {
             | ViewerAction::CopyFile
             | ViewerAction::DeleteFile
             | ViewerAction::RenameFile => {
-                #[cfg(not(target_os = "android"))]
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 self.open_file_action_dialog(action);
             }
             ViewerAction::SetMoveFolder1 => self.set_active_file_action_slot(action),
@@ -179,12 +179,23 @@ impl ViewerApp {
             return true;
         }
 
+        if self.suppress_next_gesture_release {
+            if response.drag_stopped() {
+                self.suppress_next_gesture_release = false;
+                self.cancel_pending_single_click_navigation();
+                return true;
+            }
+        }
+
         if self.pointer_input_blocked() {
             self.cancel_pending_single_click_navigation();
             return false;
         }
 
         if let Some(intent) = self.pointer_intent_from_response(response) {
+            if response.long_touched() || response.double_clicked_by(egui::PointerButton::Primary) {
+                self.suppress_next_gesture_release = true;
+            }
             self.log_bench_state(
                 "viewer.pointer_action",
                 serde_json::json!({
@@ -199,7 +210,11 @@ impl ViewerApp {
     }
 
     pub(crate) fn pointer_input_blocked(&self) -> bool {
-        self.save_dialog.open || self.file_action_dialog.open || self.overlay.dialog.is_some()
+        self.show_left_menu
+            || self.show_settings
+            || self.save_dialog.open
+            || self.file_action_dialog.open
+            || self.overlay.dialog.is_some()
     }
 
     pub(crate) fn response_has_pointer_intent(&self, response: &egui::Response) -> bool {
@@ -215,7 +230,10 @@ impl ViewerApp {
                 .map(PointerIntent::Action);
         }
 
-        if cfg!(target_os = "android") && response.drag_stopped() {
+        if cfg!(any(target_os = "android", target_os = "ios"))
+            && response.drag_stopped()
+            && self.zoom_allows_page_swipe()
+        {
             if let Some(action) =
                 horizontal_swipe_action(response.drag_delta(), &self.input_options.touch)
             {
@@ -246,6 +264,10 @@ impl ViewerApp {
         None
     }
 
+    fn zoom_allows_page_swipe(&self) -> bool {
+        zoom_allows_page_swipe(self.zoom, self.fit_zoom)
+    }
+
     fn perform_pointer_intent(&mut self, _response: &egui::Response, intent: PointerIntent) {
         match intent {
             PointerIntent::Action(action) => {
@@ -263,7 +285,7 @@ impl ViewerApp {
         }
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn open_file_action_dialog(&mut self, action: ViewerAction) {
         let mode = match action {
             ViewerAction::MoveFile => FileActionDialogMode::Move,
@@ -346,6 +368,10 @@ fn horizontal_swipe_action(
     }
 }
 
+fn zoom_allows_page_swipe(zoom: f32, fit_zoom: f32) -> bool {
+    zoom <= fit_zoom * 1.01
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,5 +393,13 @@ mod tests {
             horizontal_swipe_action(egui::vec2(80.0, 90.0), &touch),
             None
         );
+    }
+
+    #[test]
+    fn page_swipe_is_disabled_when_the_image_is_zoomed_beyond_fit() {
+        assert!(zoom_allows_page_swipe(1.0, 1.0));
+        assert!(zoom_allows_page_swipe(1.009, 1.0));
+        assert!(!zoom_allows_page_swipe(1.1, 1.0));
+        assert!(!zoom_allows_page_swipe(2.0, 0.75));
     }
 }

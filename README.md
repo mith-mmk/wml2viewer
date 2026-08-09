@@ -49,6 +49,14 @@ On Linux and macOS, use `bash ./android/gradlew` in place of `gradlew.bat`. To r
 
 The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. Debug builds include `x86_64` for the Android Emulator and `arm64-v8a` for physical devices; release builds remain arm64-only. The MVP supports Android 10+, SAF folder selection, read-only snapshot browsing, touch swipe, pinch zoom, and snapshot restoration after restart. File mutation, external plugins, Google Play packaging, and production signing are out of scope. Selecting another folder replaces the app-private browsing snapshot.
 
+### iOS 17+ (MVP)
+
+`ios/Wml2Viewer.xcodeproj` builds the Rust static library and links it for `aarch64-apple-ios-sim` or a physical iOS device. Files is the primary iOS entry point: Document Picker copies a selected folder or file into a generation-based, read-only app snapshot. A folder import opens the first supported item and closes the auxiliary in-app filer. Source files are never modified.
+
+The in-app filer remains available for browsing imported snapshots and has an always-visible close action. iPhone/iPad Safe Area and rotation are supported, with Android-compatible touch defaults: left swipe next, right swipe previous, double tap Fit toggle, long press menu, and pinch zoom. Page swipes are suppressed while zoomed.
+
+The branch includes an in-app, read-only SMB2/3 browser connected to provider-independent source navigation. Selected remote pages are streamed into a versioned 512 MiB cache for the existing renderer; credentials stay out of configuration, logs, and cache metadata and are kept in the iOS Keychain. A disconnected share keeps the current page visible while reconnecting. Cloud OAuth integrations and file mutation are not included. See `docs/ios.md` for setup and verification.
+
 ## Help
 
 https://mith-mmk.github.io/wml2/help.html

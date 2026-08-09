@@ -35,6 +35,16 @@ impl ViewerApp {
         if !self.can_trigger_navigation() {
             return Ok(());
         }
+        #[cfg(target_os = "ios")]
+        if self.remote_mode {
+            return self.request_remote_navigation(
+                crate::filesystem::source::SourceCommand::Next {
+                    request_id: 0,
+                    policy: self.end_of_folder,
+                },
+                Some(ImageTransitionDirection::Forward),
+            );
+        }
         if self.navigation_blocked_by_active_load() {
             self.queue_viewer_navigation(PendingViewerNavigation::Next);
             return Ok(());
@@ -69,6 +79,16 @@ impl ViewerApp {
         if !self.can_trigger_navigation() {
             return Ok(());
         }
+        #[cfg(target_os = "ios")]
+        if self.remote_mode {
+            return self.request_remote_navigation(
+                crate::filesystem::source::SourceCommand::Prev {
+                    request_id: 0,
+                    policy: self.end_of_folder,
+                },
+                Some(ImageTransitionDirection::Backward),
+            );
+        }
         if self.navigation_blocked_by_active_load() {
             self.queue_viewer_navigation(PendingViewerNavigation::Prev);
             return Ok(());
@@ -102,6 +122,13 @@ impl ViewerApp {
         self.cancel_pending_single_click_navigation();
         if !self.can_trigger_navigation() {
             return Ok(());
+        }
+        #[cfg(target_os = "ios")]
+        if self.remote_mode {
+            return self.request_remote_navigation(
+                crate::filesystem::source::SourceCommand::First { request_id: 0 },
+                None,
+            );
         }
         if self.navigation_blocked_by_active_load() {
             self.queue_viewer_navigation(PendingViewerNavigation::First);
@@ -159,6 +186,13 @@ impl ViewerApp {
         self.cancel_pending_single_click_navigation();
         if !self.can_trigger_navigation() {
             return Ok(());
+        }
+        #[cfg(target_os = "ios")]
+        if self.remote_mode {
+            return self.request_remote_navigation(
+                crate::filesystem::source::SourceCommand::Last { request_id: 0 },
+                None,
+            );
         }
         if self.navigation_blocked_by_active_load() {
             self.queue_viewer_navigation(PendingViewerNavigation::Last);

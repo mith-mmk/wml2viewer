@@ -107,7 +107,7 @@
     - temp-http は URL hash ベースの persistent cache file と sidecar metadata(etag/last-modified) を持つ
     - stale な temp-http cache は conditional request で再検証し、304 なら再利用する
     - zip / listed / local fs / smb / http / cloud drive を同じ source key / metadata / open API で扱う
-    - 現在は zip/listed/local fs/http まで統合が進行。smb は OS path 任せ、cloud drive は未対応
+    - 現在は zip/listed/local fs/http まで統合が進行。iOS SMB providerの境界は追加済みだがworker接続は未対応、cloud driveは未対応
   - [*] 先読み（漫画モード加味すると最大2枚）
     - next preload と manga companion load はある
     - filesystem cache policy と統合された source-level prefetch queue にはなっていない

@@ -11,9 +11,9 @@ use crate::drawers::affine::InterpolationAlgorithm;
 use crate::options::{
     AppConfig, EndOfFolderOption, FileActionOptions, FileActionSlot, FilesystemOptions,
     FolderRefreshMode, FontSizePreset, InputOptions, KeyBinding, MangaSeparatorOptions,
-    MangaSeparatorStyle, NavigationSortOption, PaneSide, RenderScaleMode, ResourceOptions,
-    RuntimeOptions, StorageOptions, TouchOptions, TransitionEffect, TransitionOptions,
-    ViewerAction, WindowUiTheme,
+    MangaSeparatorStyle, NavigationSortOption, NetworkOptions, PaneSide, RenderScaleMode,
+    ResourceOptions, RuntimeOptions, StorageOptions, TouchOptions, TransitionEffect,
+    TransitionOptions, ViewerAction, WindowUiTheme,
 };
 use crate::ui::viewer::options::{
     BackgroundStyle, RenderOptions, ViewerOptions, WindowOptions, WindowSize, WindowStartPosition,
@@ -34,6 +34,7 @@ struct ConfigFile {
     storage: StorageConfigFile,
     input: InputConfigFile,
     navigation: NavigationConfigFile,
+    network: NetworkConfigFile,
     runtime: RuntimeConfigFile,
 }
 
@@ -371,6 +372,27 @@ struct FilesystemConfigFile {
     file_action: FileActionConfigFile,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+struct NetworkConfigFile {
+    cache_capacity_bytes: u64,
+    max_materialization_bytes: u64,
+    prefetch_forward: usize,
+    prefetch_backward: usize,
+}
+
+impl Default for NetworkConfigFile {
+    fn default() -> Self {
+        let options = NetworkOptions::default();
+        Self {
+            cache_capacity_bytes: options.cache_capacity_bytes,
+            max_materialization_bytes: options.max_materialization_bytes,
+            prefetch_forward: options.prefetch_forward,
+            prefetch_backward: options.prefetch_backward,
+        }
+    }
+}
+
 impl Default for FilesystemConfigFile {
     fn default() -> Self {
         Self {
@@ -568,6 +590,7 @@ impl From<ConfigFile> for AppConfig {
         config.input = value.input.into();
         config.navigation.end_of_folder = value.navigation.end_of_folder.into();
         config.navigation.sort = value.navigation.sort.into();
+        config.network = value.network.into();
         config.runtime = value.runtime.into();
         config.runtime.workaround.thumbnail = value.filesystem.thumbnail.into();
         config.file_action = value.filesystem.file_action.into();
@@ -609,10 +632,33 @@ impl ConfigFile {
                 end_of_folder: value.navigation.end_of_folder.into(),
                 sort: value.navigation.sort.into(),
             },
+            network: value.network.into(),
             runtime: RuntimeConfigFile {
                 current_file: current_path.map(|path| path.to_path_buf()),
                 workaround: value.runtime.into(),
             },
+        }
+    }
+}
+
+impl From<NetworkConfigFile> for NetworkOptions {
+    fn from(value: NetworkConfigFile) -> Self {
+        Self {
+            cache_capacity_bytes: value.cache_capacity_bytes,
+            max_materialization_bytes: value.max_materialization_bytes,
+            prefetch_forward: value.prefetch_forward,
+            prefetch_backward: value.prefetch_backward,
+        }
+    }
+}
+
+impl From<NetworkOptions> for NetworkConfigFile {
+    fn from(value: NetworkOptions) -> Self {
+        Self {
+            cache_capacity_bytes: value.cache_capacity_bytes,
+            max_materialization_bytes: value.max_materialization_bytes,
+            prefetch_forward: value.prefetch_forward,
+            prefetch_backward: value.prefetch_backward,
         }
     }
 }

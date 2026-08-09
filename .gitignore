@@ -10,3 +10,8 @@ android/.gradle/
 android/**/build/
 android/app/src/main/jniLibs/
 android/local.properties
+ios/build/
+ios/DerivedData/
+ios/**/xcuserdata/
+*.xcuserstate
+.DS_Store

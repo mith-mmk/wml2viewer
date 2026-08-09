@@ -14,6 +14,14 @@
 
 # 0.0.18
 
+### iOS 17+
+
+- [+] `codex/ios-mvp`: Files主導のcold/warm import、世代付き読取専用snapshot、Rust起動ブリッジ、タッチ操作、補助ファイラー、SMB2/3 provider境界
+- [*] Xcode 17+ SDK/Simulatorでのビルド確認済み。CoreSimulatorService復旧後にiPad acceptanceを再実行
+- [+] providerをremote source workerへ接続し、iOS UIからSMB共有を一覧・選択
+- [ ] HTTP/WebDAV providerとKeychain credential referenceのRustブリッジ
+- [ ] Google Drive等のOAuthクラウドprovider
+
 - [x] エフェクトの修正　次に進むと前に戻るで向きを逆にする（「右から左」なら前に戻るは「左から右」）
 - [*] MAC対応
 - [*] ARM Windows対応

@@ -87,6 +87,17 @@
   - `system`
   - `ffmpeg`
 
+- iOS
+  - 対応下限はiOS 17
+  - 標準Filesを主導線とし、cold launch・warm launch・Document Picker結果を単一Import Coordinatorで順序処理する
+  - 選択したフォルダまたはファイルを世代付きread-only snapshotへ取り込み、フォルダ取込後は最初の対応ファイルを開く
+  - snapshotの切り替えはatomicなcurrent referenceで行う
+  - Rust/workerはcanonicalなsnapshot実パス、UIはsnapshot metadata由来の表示名を使う
+  - アプリ内ファイラーはsnapshot閲覧用の補助機能として残し、常時表示の閉じる操作を提供する
+  - 移動・コピー・削除・名称変更は無効化する
+  - ネットワークproviderは`list` / `stat` / `materialize`のread-only境界を使う
+  - SMB2/3を優先し、資格情報は設定・ログ・キャッシュへ保存しない
+
 - `input`
   - `key_mapping`
   - `replace_default_keymap`（`true` のとき built-in default を使わず、`key_mapping` のみで解決）

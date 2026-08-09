@@ -25,8 +25,28 @@ pub struct AppConfig {
     pub storage: StorageOptions,
     pub input: InputOptions,
     pub navigation: NavigationOptions,
+    pub network: NetworkOptions,
     pub file_action: FileActionOptions,
     pub runtime: RuntimeOptions,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NetworkOptions {
+    pub cache_capacity_bytes: u64,
+    pub max_materialization_bytes: u64,
+    pub prefetch_forward: usize,
+    pub prefetch_backward: usize,
+}
+
+impl Default for NetworkOptions {
+    fn default() -> Self {
+        Self {
+            cache_capacity_bytes: 512 * 1024 * 1024,
+            max_materialization_bytes: 512 * 1024 * 1024,
+            prefetch_forward: 2,
+            prefetch_backward: 1,
+        }
+    }
 }
 
 #[derive(Clone)]
