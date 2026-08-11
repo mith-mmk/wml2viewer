@@ -1,11 +1,9 @@
 pub mod plugins;
 mod thirdparty;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(target_os = "ios"))]
 pub use thirdparty::{default_config_dir, default_download_dir, default_temp_dir};
 pub use thirdparty::{normalize_locale_tag, resource_locale_fallbacks};
 
-#[cfg(target_os = "android")]
-mod android;
 #[cfg(target_os = "macos")]
 mod darwin;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -18,7 +16,6 @@ mod linux;
     target_os = "windows",
     target_os = "linux",
     target_os = "macos",
-    target_os = "android",
     target_os = "ios"
 )))]
 mod other;
@@ -26,8 +23,6 @@ mod other;
 mod windows;
 
 //use eframe::egui::Direction;
-#[cfg(target_os = "android")]
-pub use android::*;
 #[cfg(target_os = "macos")]
 pub use darwin::*;
 #[cfg(target_os = "ios")]
@@ -38,7 +33,6 @@ pub use linux::*;
     target_os = "windows",
     target_os = "linux",
     target_os = "macos",
-    target_os = "android",
     target_os = "ios"
 )))]
 pub use other::*;
@@ -53,7 +47,6 @@ pub fn pick_save_directory() -> Option<std::path::PathBuf> {
     pick_directory_dialog()
 }
 
-#[cfg(not(target_os = "android"))]
 pub fn download_http_url(url: &str) -> Option<std::path::PathBuf> {
     let url = url.trim();
     if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -90,11 +83,6 @@ pub fn download_http_url(url: &str) -> Option<std::path::PathBuf> {
     Some(path)
 }
 
-#[cfg(target_os = "android")]
-pub fn download_http_url(_url: &str) -> Option<std::path::PathBuf> {
-    None
-}
-
 pub fn register_system_file_associations(
     exe_path: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -105,7 +93,6 @@ pub fn clean_system_integration() -> Result<(), Box<dyn std::error::Error>> {
     clean_file_associations()
 }
 
-#[cfg(not(target_os = "android"))]
 fn infer_http_extension<'a>(url: &'a str, content_type: Option<&str>) -> Option<&'a str> {
     let from_url = url
         .rsplit_once('.')

@@ -3,7 +3,6 @@ use crate::dependent::resource_locale_fallbacks;
 use super::resource_text_override;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(target_os = "android", allow(dead_code))]
 pub(crate) enum UiTextKey {
     Menu,
     Settings,

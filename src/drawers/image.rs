@@ -7,10 +7,9 @@ use crate::dependent::plugins::{
     decode_image_from_bytes_with_plugins, decode_image_from_file_with_plugins,
 };
 use crate::wml2_formats::available_save_formats;
-use wml2::color::RGBA;
-use wml2::draw::{
-    AnimationLayer as WmlAnimationLayer, ImageBuffer, NextBlend, NextDispose, image_from,
-    image_from_file,
+use wml2viewer_core::image::{
+    AnimationFrame as CoreAnimationFrame, DecodeRequest, DecodedImage, EncodeFormat, EncodeRequest,
+    RgbaImage, decode, encode,
 };
 
 use super::affine::{Affine, InterpolationAlgorithm};
@@ -142,13 +141,20 @@ pub fn load_canvas_from_bytes_with_hint(
 }
 
 pub(crate) fn load_canvas_from_file_internal(path: &Path) -> Result<LoadedImage> {
-    let image = image_from_file(path.to_string_lossy().into_owned())?;
-    convert_image(image, Some(path))
+    let data = std::fs::read(path)?;
+    let image = decode(DecodeRequest {
+        bytes: &data,
+        format_hint: path.extension().and_then(|extension| extension.to_str()),
+    })?;
+    convert_image(image)
 }
 
 pub(crate) fn load_canvas_from_bytes_internal(data: &[u8]) -> Result<LoadedImage> {
-    let image = image_from(data)?;
-    convert_image(image, None)
+    let image = decode(DecodeRequest {
+        bytes: data,
+        format_hint: None,
+    })?;
+    convert_image(image)
 }
 
 pub(crate) fn load_canvas_from_path_or_bytes_internal(
@@ -196,42 +202,22 @@ pub fn resize_loaded_image(
 }
 
 pub fn save_loaded_image(path: &Path, image: &LoadedImage, format: SaveFormat) -> Result<()> {
-    let mut buffer = image_to_buffer(image);
-    let encoded = wml2::draw::image_to(&mut buffer, save_format_to_image_format(format), None)?;
+    let image = image_to_core(image)?;
+    let encoded = encode(EncodeRequest {
+        image: &image,
+        format: save_format_to_core_format(format),
+    })?;
     std::fs::write(path, encoded)?;
     Ok(())
 }
 
-fn image_to_buffer(image: &LoadedImage) -> ImageBuffer {
-    let mut buffer = ImageBuffer::from_buffer(
-        image.canvas.width() as usize,
-        image.canvas.height() as usize,
-        image.canvas.buffer().to_vec(),
-    );
-    if !image.animation.is_empty() {
-        buffer.set_animation(true);
-        buffer.loop_count = image.loop_count;
-        for frame in &image.animation {
-            buffer.animation.as_mut().unwrap().push(WmlAnimationLayer {
-                width: frame.canvas.width() as usize,
-                height: frame.canvas.height() as usize,
-                start_x: 0,
-                start_y: 0,
-                buffer: frame.canvas.buffer().to_vec(),
-                control: wml2::draw::NextOptions::wait(frame.delay_ms),
-            });
-        }
-    }
-    buffer
-}
-
-fn save_format_to_image_format(format: SaveFormat) -> wml2::util::ImageFormat {
+fn save_format_to_core_format(format: SaveFormat) -> EncodeFormat {
     match format {
-        SaveFormat::Png => wml2::util::ImageFormat::Png,
-        SaveFormat::Jpeg => wml2::util::ImageFormat::Jpeg,
-        SaveFormat::Bmp => wml2::util::ImageFormat::Bmp,
-        SaveFormat::Gif => wml2::util::ImageFormat::Gif,
-        SaveFormat::Webp => wml2::util::ImageFormat::Webp,
+        SaveFormat::Png => EncodeFormat::Png,
+        SaveFormat::Jpeg => EncodeFormat::Jpeg,
+        SaveFormat::Bmp => EncodeFormat::Bmp,
+        SaveFormat::Gif => EncodeFormat::Gif,
+        SaveFormat::Webp => EncodeFormat::Webp,
     }
 }
 
@@ -243,35 +229,26 @@ fn normalized_scale(scale: f32) -> f32 {
     }
 }
 
-fn convert_image(image: ImageBuffer, path: Option<&Path>) -> Result<LoadedImage> {
-    if image.width == 0 || image.height == 0 {
-        let label = path
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "<memory>".to_string());
-        return Err(Box::new(io::Error::other(format!(
-            "decoded image has invalid size: {label}"
-        ))));
-    }
-
-    let rgba = image.buffer.as_ref().ok_or_else(|| {
-        let label = path
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "<memory>".to_string());
-        Box::new(io::Error::other(format!(
-            "decoded image buffer is missing: {label}"
-        ))) as Box<dyn std::error::Error>
-    })?;
-
-    let base = Canvas::from_rgba(image.width as u32, image.height as u32, rgba.clone())?;
-    let animation = compose_animation_frames(
-        &base,
-        image.animation.as_deref().unwrap_or(&[]),
-        image.background_color.as_ref(),
+fn convert_image(image: DecodedImage) -> Result<LoadedImage> {
+    let canvas = Canvas::from_rgba(
+        image.poster.width(),
+        image.poster.height(),
+        image.poster.pixels().to_vec(),
     )?;
-    let canvas = animation
-        .first()
-        .map(|frame| frame.canvas.clone())
-        .unwrap_or_else(|| base.clone());
+    let animation = image
+        .animation
+        .into_iter()
+        .map(|frame| {
+            Ok(AnimationFrame {
+                canvas: Canvas::from_rgba(
+                    frame.image.width(),
+                    frame.image.height(),
+                    frame.image.into_pixels(),
+                )?,
+                delay_ms: frame.duration_ms,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     Ok(LoadedImage {
         canvas,
@@ -280,153 +257,31 @@ fn convert_image(image: ImageBuffer, path: Option<&Path>) -> Result<LoadedImage>
     })
 }
 
-fn compose_animation_frames(
-    base: &Canvas,
-    layers: &[WmlAnimationLayer],
-    background: Option<&RGBA>,
-) -> Result<Vec<AnimationFrame>> {
-    if layers.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let background = background_rgba(background);
-    let mut frames = Vec::with_capacity(layers.len());
-    let mut composited = base.clone();
-
-    for layer in layers {
-        let previous = composited.clone();
-        let mut frame_canvas = composited.clone();
-        apply_layer(&mut frame_canvas, layer);
-
-        frames.push(AnimationFrame {
-            canvas: frame_canvas.clone(),
-            delay_ms: layer.control.await_time,
-        });
-
-        composited = frame_canvas;
-        match layer.control.dispose_option {
-            Some(NextDispose::Background) => {
-                clear_rect(&mut composited, layer, background);
-            }
-            Some(NextDispose::Previous) => {
-                composited = previous;
-            }
-            _ => {}
-        }
-    }
-
-    Ok(frames)
-}
-
-fn apply_layer(canvas: &mut Canvas, layer: &WmlAnimationLayer) {
-    let dest_width = canvas.width() as usize;
-    let dest_height = canvas.height() as usize;
-    let frame_width = layer.width;
-    let frame_height = layer.height;
-    let dest = canvas.buffer_mut();
-    let source = &layer.buffer;
-    let alpha_blend = matches!(layer.control.blend, Some(NextBlend::Source));
-
-    for y in 0..frame_height {
-        let dest_y = layer.start_y + y as i32;
-        if dest_y < 0 || dest_y >= dest_height as i32 {
-            continue;
-        }
-
-        for x in 0..frame_width {
-            let dest_x = layer.start_x + x as i32;
-            if dest_x < 0 || dest_x >= dest_width as i32 {
-                continue;
-            }
-
-            let src_offset = (y * frame_width + x) * 4;
-            let dst_offset = ((dest_y as usize * dest_width) + dest_x as usize) * 4;
-            let src = [
-                source[src_offset],
-                source[src_offset + 1],
-                source[src_offset + 2],
-                source[src_offset + 3],
-            ];
-
-            if alpha_blend {
-                let dst = [
-                    dest[dst_offset],
-                    dest[dst_offset + 1],
-                    dest[dst_offset + 2],
-                    dest[dst_offset + 3],
-                ];
-                let out = blend_rgba(src, dst);
-                dest[dst_offset] = out[0];
-                dest[dst_offset + 1] = out[1];
-                dest[dst_offset + 2] = out[2];
-                dest[dst_offset + 3] = out[3];
-            } else {
-                dest[dst_offset] = src[0];
-                dest[dst_offset + 1] = src[1];
-                dest[dst_offset + 2] = src[2];
-                dest[dst_offset + 3] = src[3];
-            }
-        }
-    }
-}
-
-fn clear_rect(canvas: &mut Canvas, layer: &WmlAnimationLayer, background: [u8; 4]) {
-    let dest_width = canvas.width() as usize;
-    let dest_height = canvas.height() as usize;
-    let dest = canvas.buffer_mut();
-
-    for y in 0..layer.height {
-        let dest_y = layer.start_y + y as i32;
-        if dest_y < 0 || dest_y >= dest_height as i32 {
-            continue;
-        }
-
-        for x in 0..layer.width {
-            let dest_x = layer.start_x + x as i32;
-            if dest_x < 0 || dest_x >= dest_width as i32 {
-                continue;
-            }
-
-            let dst_offset = ((dest_y as usize * dest_width) + dest_x as usize) * 4;
-            dest[dst_offset] = background[0];
-            dest[dst_offset + 1] = background[1];
-            dest[dst_offset + 2] = background[2];
-            dest[dst_offset + 3] = background[3];
-        }
-    }
-}
-
-fn background_rgba(background: Option<&RGBA>) -> [u8; 4] {
-    if let Some(background) = background {
-        [
-            background.red,
-            background.green,
-            background.blue,
-            background.alpha,
-        ]
-    } else {
-        [0, 0, 0, 0]
-    }
-}
-
-fn blend_rgba(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
-    let src_alpha = src[3] as f32 / 255.0;
-    let dst_alpha = dst[3] as f32 / 255.0;
-    let out_alpha = src_alpha + dst_alpha * (1.0 - src_alpha);
-    if out_alpha <= f32::EPSILON {
-        return [0, 0, 0, 0];
-    }
-
-    let mut out = [0_u8; 4];
-    for channel in 0..3 {
-        let src_value = src[channel] as f32 / 255.0;
-        let dst_value = dst[channel] as f32 / 255.0;
-        let blended =
-            (src_value * src_alpha + dst_value * dst_alpha * (1.0 - src_alpha)) / out_alpha;
-        out[channel] = (blended * 255.0).round().clamp(0.0, 255.0) as u8;
-    }
-    out[3] = (out_alpha * 255.0).round().clamp(0.0, 255.0) as u8;
-    out
+fn image_to_core(image: &LoadedImage) -> Result<DecodedImage> {
+    let poster = RgbaImage::new(
+        image.canvas.width(),
+        image.canvas.height(),
+        image.canvas.buffer().to_vec(),
+    )?;
+    let animation = image
+        .animation
+        .iter()
+        .map(|frame| {
+            Ok(CoreAnimationFrame {
+                image: RgbaImage::new(
+                    frame.canvas.width(),
+                    frame.canvas.height(),
+                    frame.canvas.buffer().to_vec(),
+                )?,
+                duration_ms: frame.delay_ms,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(DecodedImage {
+        poster,
+        animation,
+        loop_count: image.loop_count,
+    })
 }
 
 #[cfg(test)]

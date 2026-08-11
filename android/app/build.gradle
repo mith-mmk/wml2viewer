@@ -1,25 +1,33 @@
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
+    id 'com.google.devtools.ksp'
+    id 'com.google.protobuf'
+    id 'androidx.room'
 }
 
-// r27c installed by nttld/setup-ndk resolves to 27.3.13750724.
-def androidNdkVersion = '27.3.13750724'
+// Android NDK r27c.
+def androidNdkVersion = '27.2.12479018'
 
 android {
     namespace 'io.github.mith_mmk.wml2viewer'
-    compileSdk 35
+    compileSdk 36
     ndkVersion androidNdkVersion
+
     defaultConfig {
         applicationId 'io.github.mith_mmk.wml2viewer'
         minSdk 29
-        targetSdk 35
-        versionCode 18
-        versionName '0.0.18-pre1'
+        targetSdk 36
+        versionCode 19
+        versionName '0.0.19'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        vectorDrawables.useSupportLibrary = true
     }
+
     buildTypes {
         debug {
             debuggable true
+            pseudoLocalesEnabled true
             ndk { abiFilters 'arm64-v8a', 'x86_64' }
         }
         release {
@@ -28,23 +36,68 @@ android {
             ndk { abiFilters 'arm64-v8a' }
         }
     }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = '17' }
+
+    buildFeatures {
+        buildConfig true
+        compose true
+    }
+
+    testOptions {
+        unitTests.includeAndroidResources = true
+    }
+
+    packaging {
+        resources {
+            excludes += [
+                'META-INF/DEPENDENCIES',
+                'META-INF/LICENSE',
+                'META-INF/LICENSE.txt',
+                'META-INF/NOTICE',
+                'META-INF/NOTICE.txt',
+            ]
+        }
+    }
+
+    // App-selected locales must remain in every split on API 29-32.
+    bundle {
+        language {
+            enableSplit = false
+        }
+    }
+}
+
+room {
+    schemaDirectory "$projectDir/schemas"
+}
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:4.32.1'
+    }
+    generateProtoTasks {
+        all().configureEach { task ->
+            task.builtins {
+                java { option 'lite' }
+            }
+        }
+    }
 }
 
 def repositoryRoot = rootProject.projectDir.parentFile
 def rustInputs = fileTree(repositoryRoot) {
-    include 'Cargo.toml', 'Cargo.lock', 'build.rs', 'src/**/*.rs', 'resources/**'
+    include 'Cargo.toml', 'Cargo.lock', 'build.rs', 'src/**/*.rs', 'crates/**/*.rs', 'crates/**/Cargo.toml', 'resources/**'
 }
 def debugNativeOutput = layout.buildDirectory.dir('generated/jniLibs/debug')
 def releaseNativeOutput = layout.buildDirectory.dir('generated/jniLibs/release')
 def sdkDirectory = androidComponents.sdkComponents.sdkDirectory
 
-android.sourceSets.debug.jniLibs.srcDir(debugNativeOutput)
-android.sourceSets.release.jniLibs.srcDir(releaseNativeOutput)
+android.sourceSets.debug.jniLibs.srcDir(debugNativeOutput.get().asFile)
+android.sourceSets.release.jniLibs.srcDir(releaseNativeOutput.get().asFile)
 
 def registerRustBuild = { taskName, targets, nativeOutput, release ->
     tasks.register(taskName, Exec) {
@@ -52,7 +105,7 @@ def registerRustBuild = { taskName, targets, nativeOutput, release ->
         targets.each { target -> cargoArguments.addAll(['-t', target]) }
         cargoArguments.addAll(['-o', nativeOutput.get().asFile.absolutePath, 'build'])
         if (release) cargoArguments.add('--release')
-        cargoArguments.add('--lib')
+        cargoArguments.addAll(['--package', 'wml2viewer-android', '--lib'])
 
         workingDir repositoryRoot
         commandLine cargoArguments
@@ -60,7 +113,11 @@ def registerRustBuild = { taskName, targets, nativeOutput, release ->
         outputs.dir(nativeOutput)
         doFirst {
             def ndkDirectory = new File(sdkDirectory.get().asFile, "ndk/${androidNdkVersion}")
+            def cargoTargetDirectory = providers.environmentVariable('WML2VIEWER_CARGO_TARGET_DIR')
+                .map { file(it) }
+                .getOrElse(new File(System.getProperty('java.io.tmpdir'), 'wml2viewer/cargo-target'))
             environment 'ANDROID_NDK_HOME', ndkDirectory.absolutePath
+            environment 'CARGO_TARGET_DIR', cargoTargetDirectory.absolutePath
         }
     }
 }
@@ -83,4 +140,97 @@ tasks.matching { it.name == 'preDebugBuild' }.configureEach {
 }
 tasks.matching { it.name == 'preReleaseBuild' }.configureEach {
     dependsOn buildRustRelease
+}
+
+dependencies {
+    def composeBom = platform('androidx.compose:compose-bom:2026.06.00')
+    implementation composeBom
+    androidTestImplementation composeBom
+
+    implementation 'androidx.activity:activity-compose:1.13.0'
+    implementation 'androidx.core:core-ktx:1.17.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.10.0'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0'
+    implementation 'androidx.compose.foundation:foundation'
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.material3.adaptive:adaptive'
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+
+    implementation 'androidx.datastore:datastore:1.2.1'
+    implementation 'com.google.protobuf:protobuf-javalite:4.32.1'
+
+    implementation 'androidx.room:room-runtime:2.8.4'
+    implementation 'androidx.room:room-ktx:2.8.4'
+    ksp 'androidx.room:room-compiler:2.8.4'
+
+    implementation 'androidx.work:work-runtime-ktx:2.11.2'
+    implementation 'androidx.documentfile:documentfile:1.1.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
+    implementation 'com.hierynomus:smbj:0.14.0'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'com.google.truth:truth:1.4.5'
+    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2'
+    testImplementation 'androidx.test:core:1.7.0'
+    testImplementation 'org.robolectric:robolectric:4.16.1'
+    testImplementation 'androidx.room:room-testing:2.8.4'
+    testImplementation 'androidx.work:work-testing:2.11.2'
+
+    androidTestImplementation 'androidx.test.ext:junit:1.3.0'
+    androidTestImplementation 'androidx.test:runner:1.7.0'
+    androidTestImplementation 'androidx.test:rules:1.7.0'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.7.0'
+    androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
+    debugImplementation 'androidx.compose.ui:ui-test-manifest'
+}
+
+tasks.register('verifyMobileTranslations') {
+        def defaultCatalog = file('src/main/res/values/strings.xml')
+        def japaneseCatalog = file('src/main/res/values-ja/strings.xml')
+    inputs.files(defaultCatalog, japaneseCatalog)
+    doLast {
+        def keys = { catalog ->
+            def factory = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+            factory.setFeature('http://apache.org/xml/features/disallow-doctype-decl', true)
+            def document = factory.newDocumentBuilder().parse(catalog)
+            ['string', 'plurals', 'string-array'].collectMany { resourceType ->
+                def nodes = document.getElementsByTagName(resourceType)
+                (0..<nodes.length).collect {
+                    "${resourceType}:${nodes.item(it).getAttribute('name')}"
+                }
+            }.toSet()
+        }
+        def defaultKeys = keys(defaultCatalog)
+        def japaneseKeys = keys(japaneseCatalog)
+        if (defaultKeys != japaneseKeys) {
+            throw new GradleException(
+                "Android translation keys differ. Missing in ja=${defaultKeys - japaneseKeys}; " +
+                    "missing in default=${japaneseKeys - defaultKeys}",
+            )
+        }
+    }
+}
+
+tasks.register('verifyMobileConfigContainsNoSecretFields') {
+    def schema = file('src/main/proto/mobile_config.proto')
+    def roomSchemas = fileTree('schemas') { include '**/*.json' }
+    inputs.files(schema, roomSchemas)
+    doLast {
+        def forbiddenField = ~/(?im)^\s*(?:string|bytes)\s+(?:password|passwd|secret|token)\s*=/
+        if ((schema.getText('UTF-8') =~ forbiddenField).find()) {
+            throw new GradleException('MobileConfigV1 must contain credential IDs, never secret fields')
+        }
+        def forbiddenRoomField = ~/(?i)"(?:fieldPath|columnName)"\s*:\s*"(?:password|passwd|secret|token)"/
+        roomSchemas.each { roomSchema ->
+            if ((roomSchema.getText('UTF-8') =~ forbiddenRoomField).find()) {
+                throw new GradleException("Room schema must not persist a secret field: ${roomSchema.name}")
+            }
+        }
+    }
+}
+
+tasks.named('check').configure {
+    dependsOn 'verifyMobileTranslations', 'verifyMobileConfigContainsNoSecretFields'
 }

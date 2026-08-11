@@ -1,4 +1,4 @@
-# wml2viewer 0.0.18
+# wml2viewer 0.0.19
 
 - `egui` と `wml2` を使った軽量ネイティブ画像ビューアです。
 
@@ -35,22 +35,28 @@ wml2viewer
 - `wml2viewer --config <path> [path]` 設定ファイルを指定して起動
 - `wml2viewer --clean system`　設定を削除
 
-### Android 10以降（MVP）
+### Android 10以降
 
-Android版はStorage Access Frameworkで選択したフォルダをアプリ専用領域へ読取専用で同期し、画像・ZIP/LZH・漫画モードを閲覧できます。共有ストレージ上の元ファイルは変更しません。
+Android 0.0.19はJetpack Composeで全面再実装したモバイル専用アプリです。Storage Access Frameworkで選択ツリーを直接参照し、SMB2/3、3×3位置タッチ、スマホ/タブレット別UIに対応します。デスクトップUIと`config.toml`は変更しません。SMBパスワードはAndroid Keystore鍵で暗号化し、Rustへ渡しません。
 
-必要環境はJDK 17、Android SDK 35、NDK r27c（`27.2.12479018`）、RustのAndroidターゲット、`cargo-ndk`です。Gradle 8.9 Wrapperをリポジトリに同梱しています。
+必要環境はJDK 17、Android SDK 36、NDK r27c（`27.2.12479018`）、RustのAndroidターゲット、`cargo-ndk`です。Gradle 9.1.0 WrapperとAGP 9.0.1を使用します。
 
 ```powershell
 rustup target add aarch64-linux-android x86_64-linux-android
-cargo install cargo-ndk --locked
-.\android\gradlew.bat assembleDebug
-.\android\gradlew.bat installDebug
+cargo install cargo-ndk --version 4.1.2 --locked
+Push-Location android
+.\gradlew.bat assembleDebug
+.\gradlew.bat installDebug
+Pop-Location
 ```
 
-Linux/macOSでは`gradlew.bat`の代わりに`bash ./android/gradlew`を使います。Android Studioから実行する場合は`android`フォルダをプロジェクトとして開き、端末を選択して`app`構成を実行します。
+Linux/macOSではrepository rootから`cd android && bash ./gradlew assembleDebug`を実行します。Android Studioから実行する場合は`android`フォルダをプロジェクトとして開き、端末を選択して`app`構成を実行します。
 
-生成物は`android/app/build/outputs/apk/debug/app-debug.apk`です。Debug版はAndroid Emulator用`x86_64`と実機用`arm64-v8a`を収録し、Release版は従来どおりarm64専用です。対象OSはAndroid 10以降で、SAFによるフォルダ選択、読取専用スナップショット、スワイプ、ピンチズーム、再起動後のスナップショット復元に対応します。ファイルの移動・コピー・削除・名称変更、外部プラグイン、Google Play配布は未対応です。フォルダを再選択すると、アプリ内の読取用スナップショットが置き換わります。
+Debug APKは`android/app/build/outputs/apk/debug/app-debug.apk`に生成され、`x86_64`と`arm64-v8a`を収録します。未署名arm64 Releaseは`android/app/build/outputs/apk/release/app-release-unsigned.apk`と`android/app/build/outputs/bundle/release/app-release.aab`です。製品署名と公開は別途承認が必要です。
+
+Android設定はデスクトップ`config.toml`ではなくProto DataStoreの`MobileConfigV1`へ保存します。長時間転送はRoomへjournal化し、Foreground WorkManagerで継続します。SAF/SMBの項目はRust codecや書庫coreがseek可能なローカル項目を必要とするときだけ、一時LRUへオンデマンド展開します。詳細は[Android設計](docs/android-v2.md)と[将来のiOS/iPadOS契約](docs/ios-platform-contract.md)を参照してください。
+
+Rust JNI bridgeは画像・書庫・encoded bytesを明示的に所有するhandleとして返します。アニメーションGIF/APNG/WebPは合成済みframe数、loop回数、表示時間、独立してrelease可能なframe bufferを公開し、Compose側がRustのborrowを保持せずに再生できます。Androidが内蔵codecへRGBA encodeをroutingした場合も、size limit付きPNG/JPEG/WebP出力を同じbytes handleで返します。Androidの見開き・前後anchor・先読み計画もstatelessなversioned JNI結果をtyped Kotlin `NativeReadingPlanner`が解釈し、計算の所有元を`wml2viewer-core`へ統一します。
 
 ## ヘルプ
 
@@ -93,3 +99,4 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 2026-05-17: 0.0.16 preview5 UIの調整
 - 2026-05-31: 0.0.17 beta1 LZHサポート、画面エフェクトの追加
 - 2026-07-18: 0.0.18 公開、macOSビルドとAndroidビルドを追加
+- 2026-08-11: 0.0.19準備、ComposeによるAndroid全面再実装、SAF/SMB、資格情報保護、モバイルUI/設定、OS codec routingを追加

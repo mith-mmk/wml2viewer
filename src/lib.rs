@@ -14,14 +14,6 @@ pub mod wml2_formats;
 #[path = "../tests/support/src/test_support.rs"]
 pub(crate) mod test_support;
 
-#[cfg(target_os = "android")]
-#[unsafe(no_mangle)]
-pub fn android_main(android_app: android_activity::AndroidApp) {
-    if let Err(error) = app::run_android(android_app) {
-        eprintln!("wml2viewer Android startup failed: {error}");
-    }
-}
-
 pub fn get_version() -> String {
     format!("{}-lib{}", env!("CARGO_PKG_VERSION"), wml2::get_version())
 }

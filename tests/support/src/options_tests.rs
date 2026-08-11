@@ -54,7 +54,7 @@ fn viewer_action_from_name_is_case_insensitive() {
 }
 
 #[test]
-fn default_touch_mapping_matches_android_viewer_controls() {
+fn default_touch_mapping_matches_viewer_navigation_controls() {
     let touch = InputOptions::default().touch;
 
     assert_eq!(touch.swipe_left, Some(ViewerAction::NextImage));

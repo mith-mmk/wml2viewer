@@ -1,0 +1,185 @@
+syntax = "proto3";
+
+package wml2viewer.mobile.v1;
+
+option java_package = "io.github.mith_mmk.wml2viewer.data.config.proto";
+option java_multiple_files = true;
+
+message MobileConfigV1 {
+  uint32 schema_version = 1;
+  DisplayConfigV1 display = 2;
+  MangaConfigV1 manga = 3;
+  TouchConfigV1 touch = 4;
+  FilerConfigV1 filer = 5;
+  CodecConfigV1 codec = 6;
+  LocaleAppearanceConfigV1 locale_appearance = 7;
+  CacheConfigV1 cache = 8;
+  repeated SourceProfileV1 sources = 9;
+  LastLocationV1 last_location = 10;
+}
+
+message DisplayConfigV1 {
+  bool edge_to_edge = 1;
+  bool keep_screen_on = 2;
+  DisplayFitV1 fit = 3;
+  bool show_top_chrome = 4;
+  bool show_filmstrip = 5;
+}
+
+enum DisplayFitV1 {
+  DISPLAY_FIT_UNSPECIFIED = 0;
+  DISPLAY_FIT_CONTAIN = 1;
+  DISPLAY_FIT_WIDTH = 2;
+  DISPLAY_FIT_HEIGHT = 3;
+  DISPLAY_FIT_ORIGINAL = 4;
+}
+
+message MangaConfigV1 {
+  MangaLayoutV1 layout = 1;
+  ReadingDirectionV1 reading_direction = 2;
+  bool cover_alone = 3;
+  bool divider = 4;
+  bool landscape_spread = 5;
+  uint32 prefetch_spreads = 6;
+}
+
+enum MangaLayoutV1 {
+  MANGA_LAYOUT_UNSPECIFIED = 0;
+  MANGA_LAYOUT_AUTO = 1;
+  MANGA_LAYOUT_SINGLE = 2;
+  MANGA_LAYOUT_SPREAD = 3;
+}
+
+enum ReadingDirectionV1 {
+  READING_DIRECTION_UNSPECIFIED = 0;
+  READING_DIRECTION_RTL = 1;
+  READING_DIRECTION_LTR = 2;
+}
+
+message TouchConfigV1 {
+  repeated TouchBindingV1 bindings = 1;
+  bool swipe_enabled = 2;
+  bool pinch_zoom_enabled = 3;
+  ViewerActionV1 double_tap_action = 4;
+  ViewerActionV1 long_press_action = 5;
+  bool pan_enabled = 6;
+}
+
+message TouchBindingV1 {
+  uint32 cell = 1;
+  ViewerActionV1 action = 2;
+}
+
+enum ViewerActionV1 {
+  VIEWER_ACTION_UNSPECIFIED = 0;
+  VIEWER_ACTION_DISABLED = 1;
+  VIEWER_ACTION_PREVIOUS = 2;
+  VIEWER_ACTION_NEXT = 3;
+  VIEWER_ACTION_OPEN_FILER = 4;
+  VIEWER_ACTION_OPEN_SETTINGS = 5;
+  VIEWER_ACTION_OPEN_SUB_FILER = 6;
+  VIEWER_ACTION_TOGGLE_FIT = 7;
+  VIEWER_ACTION_QUICK_MENU = 8;
+  VIEWER_ACTION_FIRST = 9;
+  VIEWER_ACTION_LAST = 10;
+  VIEWER_ACTION_ZOOM_IN = 11;
+  VIEWER_ACTION_ZOOM_OUT = 12;
+  VIEWER_ACTION_ZOOM_RESET = 13;
+  VIEWER_ACTION_TOGGLE_ANIMATION = 14;
+  VIEWER_ACTION_TOGGLE_GRAYSCALE = 15;
+  VIEWER_ACTION_TOGGLE_MANGA = 16;
+  VIEWER_ACTION_RELOAD = 17;
+  VIEWER_ACTION_EXPORT = 18;
+}
+
+message FilerConfigV1 {
+  bool tablet_filmstrip_pinned = 1;
+  bool show_hidden = 2;
+  SortOrderV1 sort_order = 3;
+  repeated string persisted_saf_tree_uris = 4;
+  bool remember_last_location = 5;
+}
+
+message LastLocationV1 {
+  string source_id = 1;
+  string directory_opaque_entry_id = 2;
+  string opened_entry_opaque_entry_id = 3;
+  uint32 logical_page_index = 4;
+  bool opened_archive = 5;
+}
+
+enum SortOrderV1 {
+  SORT_ORDER_UNSPECIFIED = 0;
+  SORT_ORDER_NAME_ASCENDING = 1;
+  SORT_ORDER_NAME_DESCENDING = 2;
+  SORT_ORDER_MODIFIED_DESCENDING = 3;
+}
+
+message CodecConfigV1 {
+  CodecPolicyV1 default_policy = 1;
+  repeated CodecOverrideV1 overrides = 2;
+}
+
+message CodecOverrideV1 {
+  string format = 1;
+  CodecPolicyV1 policy = 2;
+}
+
+enum CodecPolicyV1 {
+  CODEC_POLICY_UNSPECIFIED = 0;
+  CODEC_POLICY_DEFAULT = 1;
+  CODEC_POLICY_INTERNAL_FIRST = 2;
+  CODEC_POLICY_OS_FIRST = 3;
+  CODEC_POLICY_INTERNAL_ONLY = 4;
+  CODEC_POLICY_OS_ONLY = 5;
+}
+
+message LocaleAppearanceConfigV1 {
+  string language_tag = 1;
+  ThemeModeV1 theme = 2;
+  bool dynamic_color = 3;
+  TextScaleV1 text_scale = 4;
+}
+
+enum TextScaleV1 {
+  TEXT_SCALE_UNSPECIFIED = 0;
+  TEXT_SCALE_SMALL = 1;
+  TEXT_SCALE_MEDIUM = 2;
+  TEXT_SCALE_LARGE = 3;
+}
+
+enum ThemeModeV1 {
+  THEME_MODE_UNSPECIFIED = 0;
+  THEME_MODE_CINEMATIC_DARK = 1;
+  THEME_MODE_LIGHT = 2;
+  THEME_MODE_SYSTEM = 3;
+}
+
+message CacheConfigV1 {
+  bool automatic_limit = 1;
+  uint64 manual_limit_bytes = 2;
+}
+
+message SourceProfileV1 {
+  string source_id = 1;
+  string display_name = 2;
+  oneof source {
+    SafProfileV1 saf = 3;
+    SmbProfileV1 smb = 4;
+  }
+}
+
+message SafProfileV1 {
+  string tree_uri = 1;
+}
+
+message SmbProfileV1 {
+  string server = 1;
+  uint32 port = 2;
+  string share = 3;
+  string username = 4;
+  string domain = 5;
+  bool guest = 6;
+  bool require_encryption = 7;
+  string credential_id = 8;
+}

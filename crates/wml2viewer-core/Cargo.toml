@@ -1,0 +1,12 @@
+[package]
+name = "wml2viewer-core"
+version = "0.0.19"
+edition = "2024"
+license = "MIT"
+description = "Platform-independent image and reading-session core for wml2viewer"
+publish = false
+
+[dependencies]
+oxiarc-archive = "0.2"
+wml2 = { path = "../wml2", features = ["multithread"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }

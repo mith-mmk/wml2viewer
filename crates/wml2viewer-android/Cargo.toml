@@ -1,0 +1,15 @@
+[package]
+name = "wml2viewer-android"
+version = "0.0.19"
+edition = "2024"
+license = "MIT"
+description = "JNI bridge between the Android Compose application and wml2viewer-core"
+publish = false
+
+[lib]
+name = "wml2viewer_android"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jni = "0.22.4"
+wml2viewer-core = { path = "../wml2viewer-core" }

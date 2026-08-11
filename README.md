@@ -1,4 +1,4 @@
-# wml2viewer 0.0.18
+# wml2viewer 0.0.19
 
 A lightweight native image viewer built with `egui` and `wml2`.
 
@@ -32,22 +32,28 @@ wml2viewer --config <path> [path] Launch with custom config file
 wml2viewer --clean system Reset configuration
 ```
 
-### Android 10+ (MVP)
+### Android 10+
 
-The Android build uses the Storage Access Framework. A selected folder is copied into a read-only app-private snapshot for image, ZIP/LZH, and manga browsing; source files in shared storage are never modified.
+Android 0.0.19 is a mobile-first Jetpack Compose application. It accesses selected folders directly through the Storage Access Framework, supports SMB2/3 sources, uses a dedicated 3×3 touch map and phone/tablet layouts, and keeps the desktop UI and `config.toml` unchanged. Passwords are encrypted with an Android Keystore key and are never passed to Rust.
 
-Build prerequisites are JDK 17, Android SDK 35, NDK r27c (`27.2.12479018`), the Rust Android targets, and `cargo-ndk`. The repository includes the Gradle 8.9 Wrapper.
+Build prerequisites are JDK 17, Android SDK 36, NDK r27c (`27.2.12479018`), the Rust Android targets, and `cargo-ndk`. The repository includes the Gradle 9.1.0 Wrapper and uses AGP 9.0.1.
 
 ```powershell
 rustup target add aarch64-linux-android x86_64-linux-android
-cargo install cargo-ndk --locked
-.\android\gradlew.bat assembleDebug
-.\android\gradlew.bat installDebug
+cargo install cargo-ndk --version 4.1.2 --locked
+Push-Location android
+.\gradlew.bat assembleDebug
+.\gradlew.bat installDebug
+Pop-Location
 ```
 
-On Linux and macOS, use `bash ./android/gradlew` in place of `gradlew.bat`. To run from Android Studio, open the `android` directory as a project, select a device, and run the `app` configuration.
+On Linux and macOS, run `cd android && bash ./gradlew assembleDebug` from the repository root. To run from Android Studio, open the `android` directory as a project, select a device, and run the `app` configuration.
 
-The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. Debug builds include `x86_64` for the Android Emulator and `arm64-v8a` for physical devices; release builds remain arm64-only. The MVP supports Android 10+, SAF folder selection, read-only snapshot browsing, touch swipe, pinch zoom, and snapshot restoration after restart. File mutation, external plugins, Google Play packaging, and production signing are out of scope. Selecting another folder replaces the app-private browsing snapshot.
+The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk` and includes `x86_64` plus `arm64-v8a`. Unsigned arm64 release outputs are `android/app/build/outputs/apk/release/app-release-unsigned.apk` and `android/app/build/outputs/bundle/release/app-release.aab`. Production signing and publication remain separate approval-gated work.
+
+The Android app uses `MobileConfigV1` Proto DataStore rather than desktop `config.toml`. Long transfers are journaled in Room and run through foreground WorkManager. Files selected from SAF or SMB are materialized on demand into a temporary bounded LRU only when the Rust codec/archive core needs a local seekable item. See [Android architecture](docs/android-v2.md) and the [future iOS/iPadOS contract](docs/ios-platform-contract.md).
+
+The Rust JNI bridge returns explicitly owned image, archive, and encoded-byte handles. Animated GIF/APNG/WebP decoding exposes composited frame count, loop count, duration, and independently releasable frame buffers so Compose can schedule playback without retaining a Rust borrow. The same byte-handle contract returns bounded PNG/JPEG/WebP output when Android routes RGBA encoding through the internal codec. Android spread, navigation-anchor, and prefetch planning is also delegated to `wml2viewer-core` through a stateless, versioned JNI result parsed by the typed Kotlin `NativeReadingPlanner`.
 
 ## Help
 
@@ -92,3 +98,4 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 2026-05-17 0.0.16 preview4 released, adjusted the UI.
 - 2026-05-31 0.0.17 beta1 released, add LZH support, images draw effects
 - 2026-07-18 0.0.18 released, macOS build and Android build added
+- 2026-08-11 0.0.19 prepared, Android rebuilt with Compose, direct SAF/SMB providers, secure credentials, mobile UI/config, and OS codec routing

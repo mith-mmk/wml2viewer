@@ -1,0 +1,55 @@
+[package]
+name = "wml2"
+version = "0.0.23"
+repository = "https://github.com/mith-mmk/wml2-on-rust"
+homepage = "https://mith-mmk.github.io/"
+authors = ["mith-mmk <47620686+mith-mmk@users.noreply.github.com>"]
+description = "Pure Rust multi-format image decoding and encoding library supporting JPEG, PNG, GIF, WebP, TIFF and PC-98 legacy formats (MAG, MAKI, PI, PIC)"
+edition = "2024"
+rust-version = "1.91"
+license = "MIT"
+keywords = ["image", "codec", "jpeg", "webp", "png"]
+categories = ["multimedia::images", "encoding"]
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = [
+    "bmp", "gif", "ico", "jpeg", "png", "tiff", "webp", "mag", "maki",
+    "pcd", "pi", "pic", "vsp", "exif", "bmp-jpeg", "bmp-png", "tiff-jpeg",
+    "ico-bmp", "ico-png", "idct_llm", "c2pa",
+]
+c2pa = []
+exif = []
+bmp = []
+gif = []
+ico = []
+jpeg = ["exif"]
+png = ["exif"]
+tiff = ["exif"]
+webp = ["exif", "dep:webp_codec"]
+mag = []
+maki = []
+pcd = []
+pi = []
+pic = []
+vsp = []
+bmp-jpeg = ["bmp", "jpeg"]
+bmp-png = ["bmp", "png"]
+tiff-jpeg = ["tiff", "jpeg"]
+ico-bmp = ["ico", "bmp"]
+ico-png = ["ico", "png"]
+idct_llm = []
+idct_aan = []
+idct_slower = []
+fdct_slower = []
+multithread = []
+SJIS = []
+noretoro = []
+
+[dependencies]
+bin-rs = { version = "0.0.10", features = ["util"] }
+webp_codec = { package = "webp-rust", version = "0.2.1", optional = true }
+miniz_oxide = "0.7.1"
+

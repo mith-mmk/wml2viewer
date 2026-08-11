@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.0.19] - 2026-08-11
+
+### Changed
+
+- Androidを`NativeActivity + eframe`から`ComponentActivity + Jetpack Compose`のモバイル専用UIへ全面置換
+- Rust処理をplatform非依存`wml2viewer-core`とhandle管理専用`wml2viewer-android` JNI bridgeへ分離
+- Android設定をデスクトップ`config.toml`から分離し、versioned Proto DataStore `MobileConfigV1`へ移行
+- 位置ベースの3×3タッチ、スマホ/タブレット別レイアウト、横向き漫画の表紙単独+見開き、日英resourceを追加
+- SAFを選択ツリーの直接参照へ変更し、旧全ツリーsnapshotとmarker pollingを廃止
+
+### Added
+
+- `EntryRef`/`SourceCapabilities` provider契約とSAF/SMB2/3 provider
+- Room `TransferJobV1` journal、Foreground WorkManager転送、衝突処理、provider跨ぎSHA-256検証
+- Android Keystore AES-256-GCMによるSMB資格情報保護とtemporary LRU cache
+- 内蔵/Android OS codec router、形式別優先設定、実行時capability probe
+- GIF/APNG/WebP向けのframe数・loop・duration・独立所有frame handleを持つJNI animation ABI
+- ZIP/LHA/`.wmltxt` entryの内部decodeと、OS codecへ渡すsize limit付きowned encoded-byte handle
+- direct RGBA bufferからPNG/JPEG/WebPを生成するrequest-aware JNI encoderと専用encode error code
+- metadata先行検査、fallible allocation、`limit + 1`読込によるdirect encoded/archive/entry各64MiB上限と、poster 4096×4096・animation 4096 frames・RGBA総量128MiBのJNI公開前検査。Kotlin側は128MiB byte-weighted Bitmap LRUとtile変換を使い、必要frameのみをcopy/releaseするbounded streaming再生
+- `wml2viewer-core`の見開き・前後anchor・先読みをAndroidへ公開するstateless `planReading` JNIと、wire v1を検証してABI整数を隠すtyped Kotlin planner
+- source/profile復元後にopaque entry identityとlogical archive pageを再構成するモバイル専用last-location保存
+- 新規SAF grantの登録失敗時rollbackと、一時system-tree exportで原本保護のため`REPLACE`を無効化するcollision policy
+- 将来のSwiftUI/Files/ImageIO接続を定義するiOS/iPadOS platform contract
+- Android API 29/36向けのunit/Compose/instrumentation/SMB/security検証基盤
+- `am force-stop`を挟む二段階last-location復元、実Keystore alias失効、StrictMode/ANR/secret scanのCI gate
+
+### Removed
+
+- Android向け`android_main`、Android eframe backend、旧SAF snapshot、marker file監視、デスクトップUI/設定のAndroid流用
+
 ## [0.0.16] - 2026-05-17:
 ### Changed
 - UIの調整

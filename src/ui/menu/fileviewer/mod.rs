@@ -293,10 +293,6 @@ impl ViewerApp {
                 let up_text = self.text(UiTextKey::Up);
                 let icon_color = ui.visuals().text_color();
                 ui.heading(self.text(UiTextKey::Filer));
-                #[cfg(target_os = "android")]
-                if ui.button("フォルダを選択 / Choose folder").clicked() {
-                    let _ = crate::dependent::request_folder_import();
-                }
                 ui.horizontal_wrapped(|ui| {
                     if icon_toolbar_button(
                         ui,

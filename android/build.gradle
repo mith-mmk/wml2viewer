@@ -1,4 +1,16 @@
 plugins {
-    id 'com.android.application' version '8.7.3' apply false
-    id 'org.jetbrains.kotlin.android' version '2.0.21' apply false
+    id 'com.android.application' version '9.0.1' apply false
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.2.10' apply false
+    id 'com.google.devtools.ksp' version '2.3.10' apply false
+    id 'com.google.protobuf' version '0.9.5' apply false
+    id 'androidx.room' version '2.8.4' apply false
+}
+
+// Local validation can keep every generated output away from OneDrive.
+def externalBuildRoot = providers.environmentVariable('WML2VIEWER_GRADLE_BUILD_DIR').orNull
+if (externalBuildRoot != null) {
+    layout.buildDirectory.set(file("${externalBuildRoot}/root"))
+    subprojects { child ->
+        child.layout.buildDirectory.set(file("${externalBuildRoot}/${child.name}"))
+    }
 }
