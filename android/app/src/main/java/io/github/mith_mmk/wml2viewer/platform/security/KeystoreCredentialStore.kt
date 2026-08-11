@@ -174,7 +174,11 @@ class KeystoreCredentialStore(
                     .setKeySize(KEY_BITS)
                     .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                     .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setRandomizedEncryptionRequired(true)
+                    // The nonce is generated with SecureRandom above and stored in
+                    // the envelope. Android Keystore rejects caller-provided IVs
+                    // when this flag is true (API 37), so explicitly allow the
+                    // securely generated nonce here.
+                    .setRandomizedEncryptionRequired(false)
                     .build(),
             )
             generateKey()

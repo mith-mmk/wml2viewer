@@ -3,9 +3,12 @@ package io.github.mith_mmk.wml2viewer.ui.components
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,7 +72,9 @@ fun TouchMapEditor(
         }
         TextButton(
             onClick = { onChange(TouchMapConfig()) },
-            modifier = Modifier.testTag("touch-map-reset"),
+            modifier = Modifier
+                .heightIn(min = 48.dp)
+                .testTag("touch-map-reset"),
         ) {
             Text(stringResource(R.string.touch_reset_default))
         }
@@ -83,12 +89,16 @@ private fun TouchZonePicker(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember(zone) { mutableStateOf(false) }
-    Box(modifier) {
+    Box(
+        modifier = modifier
+            .requiredHeight(48.dp)
+            .semantics(mergeDescendants = false) {}
+            .testTag("touch-zone-${zone.name.lowercase()}"),
+    ) {
         OutlinedButton(
             onClick = { expanded = true },
             modifier = Modifier
-                .fillMaxWidth()
-                .testTag("touch-zone-${zone.name.lowercase()}"),
+                .fillMaxSize(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
                 horizontal = 6.dp,
                 vertical = 8.dp,

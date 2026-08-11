@@ -175,7 +175,7 @@ class MobileLayoutInstrumentationTest {
             )
         }
 
-        compose.onNodeWithTag("filer-pane")
+        compose.onNodeWithTag("filer-pane-list")
             .performScrollToNode(hasTestTag("filer-entry-entry-30"))
         compose.onNodeWithTag("filer-entry-entry-30").assertIsDisplayed()
 
@@ -212,6 +212,10 @@ class MobileLayoutInstrumentationTest {
         surface.performTouchInput {
             click(Offset(size.width * 0.65f, size.height * 0.10f))
         }
+        // detectTapGestures defers a single tap while waiting for a possible
+        // double tap, so advance past that decision window before asserting.
+        compose.mainClock.advanceTimeBy(1_000L)
+        compose.waitForIdle()
         compose.runOnIdle {
             val taps = events.filterIsInstance<ViewerUiEvent.TapZonePressed>()
             assertEquals(TapZone.TOP_RIGHT, taps.single().zone)

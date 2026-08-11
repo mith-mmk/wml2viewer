@@ -135,7 +135,9 @@ fun MobileViewerContent(
         dynamicColor = state.settings.dynamicColor,
     ) {
         BoxWithConstraints(
-            modifier = modifier.fillMaxSize(),
+            // Keep an explicit test/host size authoritative. App hosts without a
+            // size still receive a full-screen root via fillMaxSize first.
+            modifier = Modifier.fillMaxSize().then(modifier),
         ) {
             val compact = maxWidth < 600.dp
             val resolvedState = if (

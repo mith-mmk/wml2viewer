@@ -42,7 +42,7 @@ class SafSourceProvider(
     context: Context,
     private val treeUri: Uri,
 ) : SourceProvider {
-    private val resolver = context.applicationContext.contentResolver
+    private val resolver = (context.applicationContext ?: context).contentResolver
     private val treeDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
 
     override val providerId: String = "saf:${stableId(treeUri.toString())}"

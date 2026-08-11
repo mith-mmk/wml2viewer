@@ -1,6 +1,7 @@
 package io.github.mith_mmk.wml2viewer.platform.saf
 
 import android.provider.DocumentsContract
+import android.content.Intent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.mith_mmk.wml2viewer.data.source.SourceErrorCode
@@ -18,12 +19,18 @@ class SafSourceProviderInstrumentationTest {
     // package-visibility rules without changing the production manifest.
     private val context = InstrumentationRegistry.getInstrumentation().context
 
+    private fun grantTree(tree: android.net.Uri) {
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        context.grantUriPermission(context.packageName, tree, flags)
+    }
+
     @Test
     fun liveDocumentFlagsBecomeEntrySpecificCapabilities() = runBlocking {
         val tree = DocumentsContract.buildTreeDocumentUri(
             FakeSafDocumentsProvider.AUTHORITY,
             FakeSafDocumentsProvider.ROOT_ID,
         )
+        grantTree(tree)
         val provider = SafSourceProvider(context, tree)
 
         val root = provider.stat(provider.root)
@@ -59,6 +66,7 @@ class SafSourceProviderInstrumentationTest {
             FakeSafDocumentsProvider.AUTHORITY,
             FakeSafDocumentsProvider.REVOKED_ROOT_ID,
         )
+        grantTree(revokedTree)
         val provider = SafSourceProvider(context, revokedTree)
 
         val error = runCatching { provider.stat(provider.root) }.exceptionOrNull()

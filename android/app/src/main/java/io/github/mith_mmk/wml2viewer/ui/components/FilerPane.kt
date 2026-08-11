@@ -203,7 +203,12 @@ fun FilerPane(
                     modifier = Modifier.padding(20.dp),
                 )
             } else {
-                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("$paneTag-list"),
+                ) {
                     items(entries, key = { it.id }) { entry ->
                         FilerEntryRow(
                             entry = entry,
