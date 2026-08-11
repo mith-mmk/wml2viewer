@@ -101,7 +101,12 @@ fun MobileViewerContent(
 ) {
     val context = LocalContext.current
     val hostView = LocalView.current
-    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // A phone remains the compact mobile experience after rotation. Using only
+    // current width would classify a Pixel phone in landscape as a tablet and
+    // leave the filer/menu permanently beside the viewer.
+    val isTablet = configuration.smallestScreenWidthDp >= 600
     val darkSystemBars = state.settings.theme == ThemeMode.CINEMATIC_DARK ||
         (state.settings.theme == ThemeMode.SYSTEM && isSystemInDarkTheme())
     val filerListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
@@ -139,7 +144,7 @@ fun MobileViewerContent(
             // size still receive a full-screen root via fillMaxSize first.
             modifier = Modifier.fillMaxSize().then(modifier),
         ) {
-            val compact = maxWidth < 600.dp
+            val compact = maxWidth < 600.dp || !isTablet
             val resolvedState = if (
                 state.deviceClass == (
                     if (compact) DeviceClass.COMPACT else DeviceClass.EXPANDED
@@ -150,8 +155,8 @@ fun MobileViewerContent(
                 isLandscape = isLandscape,
             )
 
-            LaunchedEffect(maxWidth, isLandscape) {
-                dispatch(ViewerUiEvent.WindowMetricsChanged(maxWidth.value, isLandscape))
+            LaunchedEffect(maxWidth, isLandscape, isTablet) {
+                dispatch(ViewerUiEvent.WindowMetricsChanged(maxWidth.value, isLandscape, isTablet))
             }
             BackHandler(
                 enabled = resolvedState.screen != MobileScreen.VIEWER ||
@@ -364,7 +369,7 @@ private fun ViewerPane(
                 onEvent(ViewerUiEvent.Transform(panX, panY, zoom))
             },
         )
-        if (state.settings.viewing.showTopChrome) {
+        if (state.settings.viewing.showTopChrome && !(compact && state.isLandscape)) {
             Surface(
                 modifier = Modifier
                     .align(Alignment.TopCenter)

@@ -168,7 +168,11 @@ class ViewerViewModel(
     }
 
     private fun updateWindowMetrics(event: ViewerUiEvent.WindowMetricsChanged) {
-        val deviceClass = if (event.widthDp < 600f) DeviceClass.COMPACT else DeviceClass.EXPANDED
+        val deviceClass = if (event.widthDp < 600f || !event.isTablet) {
+            DeviceClass.COMPACT
+        } else {
+            DeviceClass.EXPANDED
+        }
         _uiState.update {
             it.copy(deviceClass = deviceClass, isLandscape = event.isLandscape)
         }

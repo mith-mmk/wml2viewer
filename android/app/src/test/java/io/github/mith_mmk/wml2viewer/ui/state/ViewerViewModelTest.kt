@@ -6,6 +6,7 @@ import io.github.mith_mmk.wml2viewer.ui.model.ExportDestination
 import io.github.mith_mmk.wml2viewer.ui.model.ExportFormat
 import io.github.mith_mmk.wml2viewer.ui.model.ExportRequest
 import io.github.mith_mmk.wml2viewer.ui.model.DisplayFit
+import io.github.mith_mmk.wml2viewer.ui.model.DeviceClass
 import io.github.mith_mmk.wml2viewer.ui.model.FilerCapabilitiesUi
 import io.github.mith_mmk.wml2viewer.ui.model.MangaLayoutMode
 import io.github.mith_mmk.wml2viewer.ui.model.MobileScreen
@@ -119,6 +120,26 @@ class ViewerViewModelTest {
 
         assertThat(controller.navigateUpCalls).isEqualTo(1)
         assertThat(viewModel.uiState.value.screen.name).isEqualTo("FILER")
+    }
+
+    @Test
+    fun phoneRemainsCompactWhenItsLandscapeWidthExceeds600Dp() = runTest(dispatcher) {
+        val viewModel = ViewerViewModel(
+            RecordingController(ViewerEngineSnapshot()),
+            InMemoryMobileSettingsStore(),
+        )
+
+        viewModel.onEvent(
+            ViewerUiEvent.WindowMetricsChanged(
+                widthDp = 700f,
+                isLandscape = true,
+                isTablet = false,
+            ),
+        )
+        advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.deviceClass).isEqualTo(DeviceClass.COMPACT)
+        assertThat(viewModel.uiState.value.isLandscape).isTrue()
     }
 
     @Test

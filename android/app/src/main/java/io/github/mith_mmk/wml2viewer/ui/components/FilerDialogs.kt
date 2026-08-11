@@ -418,20 +418,6 @@ internal fun SmbSetupDialog(
                             label = { Text(stringResource(R.string.smb_share_manual)) },
                             singleLine = true,
                         )
-                        if (!guest) {
-                            Text(
-                                text = stringResource(R.string.smb_password_reenter_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            OutlinedTextField(
-                                value = password,
-                                onValueChange = { password = it },
-                                label = { Text(stringResource(R.string.smb_password)) },
-                                visualTransformation = PasswordVisualTransformation(),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                                singleLine = true,
-                            )
-                        }
                     }
                 }
             }
@@ -458,7 +444,6 @@ internal fun SmbSetupDialog(
                                 guest = guest,
                                 requireEncryption = requireEncryption,
                             )
-                            password = ""
                             try {
                                 onRequestShares(input)
                             } finally {

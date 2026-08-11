@@ -138,7 +138,12 @@ sealed interface ViewerUiEffect {
 }
 
 sealed interface ViewerUiEvent {
-    data class WindowMetricsChanged(val widthDp: Float, val isLandscape: Boolean) : ViewerUiEvent
+    data class WindowMetricsChanged(
+        val widthDp: Float,
+        val isLandscape: Boolean,
+        /** True only for a tablet-sized device, independent of current rotation. */
+        val isTablet: Boolean = widthDp >= 600f,
+    ) : ViewerUiEvent
     data object Back : ViewerUiEvent
     data class TapZonePressed(val zone: TapZone) : ViewerUiEvent
     data class PerformAction(val action: ViewerAction) : ViewerUiEvent

@@ -3,6 +3,7 @@ package io.github.mith_mmk.wml2viewer.ui
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
@@ -10,6 +11,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -19,6 +21,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
+import androidx.test.core.app.ApplicationProvider
+import io.github.mith_mmk.wml2viewer.R
 import io.github.mith_mmk.wml2viewer.ui.model.DeviceClass
 import io.github.mith_mmk.wml2viewer.ui.model.FilmstripItemUi
 import io.github.mith_mmk.wml2viewer.ui.model.FilerEntryUi
@@ -62,11 +66,13 @@ class MobileLayoutInstrumentationTest {
     fun widthAtLeast600DpUsesFixedFilerAndViewerPanes() {
         val events = mutableListOf<ViewerUiEvent>()
         compose.setContent {
-            MobileViewerContent(
-                state = viewerState(deviceClass = DeviceClass.COMPACT),
-                onEvent = events::add,
-                modifier = Modifier.requiredSize(width = 700.dp, height = 600.dp),
-            )
+            TabletConfiguration {
+                MobileViewerContent(
+                    state = viewerState(deviceClass = DeviceClass.COMPACT),
+                    onEvent = events::add,
+                    modifier = Modifier.requiredSize(width = 700.dp, height = 600.dp),
+                )
+            }
         }
 
         compose.onNodeWithTag("expanded-two-pane").fetchSemanticsNode()
@@ -85,13 +91,15 @@ class MobileLayoutInstrumentationTest {
             FilerEntryUi("file", "Page.jpg", isContainer = false),
         )
         compose.setContent {
-            MobileViewerContent(
-                state = viewerState(
-                    engine = ViewerEngineSnapshot(filerEntries = entries),
-                ).copy(screen = MobileScreen.FILER),
-                onEvent = {},
-                modifier = Modifier.requiredSize(width = 840.dp, height = 600.dp),
-            )
+            TabletConfiguration {
+                MobileViewerContent(
+                    state = viewerState(
+                        engine = ViewerEngineSnapshot(filerEntries = entries),
+                    ).copy(screen = MobileScreen.FILER),
+                    onEvent = {},
+                    modifier = Modifier.requiredSize(width = 840.dp, height = 600.dp),
+                )
+            }
         }
 
         val navigator = compose.onNodeWithTag("filer-pane").fetchSemanticsNode().boundsInRoot
@@ -166,13 +174,15 @@ class MobileLayoutInstrumentationTest {
             FilerEntryUi("entry-$index", "Page $index", isContainer = false)
         }
         compose.setContent {
-            MobileViewerContent(
-                state = viewerState(
-                    engine = ViewerEngineSnapshot(filerEntries = entries),
-                ).copy(screen = MobileScreen.FILER),
-                onEvent = {},
-                modifier = Modifier.requiredSize(width = width.value, height = 360.dp),
-            )
+            TabletConfiguration {
+                MobileViewerContent(
+                    state = viewerState(
+                        engine = ViewerEngineSnapshot(filerEntries = entries),
+                    ).copy(screen = MobileScreen.FILER),
+                    onEvent = {},
+                    modifier = Modifier.requiredSize(width = width.value, height = 360.dp),
+                )
+            }
         }
 
         compose.onNodeWithTag("filer-pane-list")
@@ -182,6 +192,49 @@ class MobileLayoutInstrumentationTest {
         compose.runOnIdle { width.value = 700.dp }
         compose.waitForIdle()
         compose.onNodeWithTag("filer-entry-entry-30").assertIsDisplayed()
+    }
+
+    @Test
+    fun phoneLandscapeViewerHidesPersistentFilerAndTopChrome() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        compose.setContent {
+            val phoneLandscape = Configuration(LocalConfiguration.current).apply {
+                orientation = Configuration.ORIENTATION_LANDSCAPE
+                smallestScreenWidthDp = 411
+            }
+            CompositionLocalProvider(LocalConfiguration provides phoneLandscape) {
+                MobileViewerContent(
+                    state = viewerState(deviceClass = DeviceClass.EXPANDED).copy(isLandscape = true),
+                    onEvent = {},
+                    modifier = Modifier.requiredSize(width = 700.dp, height = 360.dp),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("viewer-pane").assertIsDisplayed()
+        assertTrue(compose.onAllNodesWithTag("expanded-two-pane").fetchSemanticsNodes().isEmpty())
+        assertTrue(compose.onAllNodesWithTag("filer-pane").fetchSemanticsNodes().isEmpty())
+        compose.onNodeWithText(context.getString(R.string.viewer_open_settings))
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun tabletLandscapeKeepsFixedFilerAndTopChrome() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        compose.setContent {
+            TabletConfiguration(orientation = Configuration.ORIENTATION_LANDSCAPE) {
+                MobileViewerContent(
+                    state = viewerState(deviceClass = DeviceClass.EXPANDED).copy(isLandscape = true),
+                    onEvent = {},
+                    modifier = Modifier.requiredSize(width = 800.dp, height = 600.dp),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("expanded-two-pane").assertIsDisplayed()
+        compose.onNodeWithTag("filer-pane").assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.viewer_open_settings))
+            .assertIsDisplayed()
     }
 
     @Test
@@ -241,6 +294,18 @@ class MobileLayoutInstrumentationTest {
         compose.runOnIdle {
             assertFalse(events.any { it is ViewerUiEvent.TapZonePressed })
         }
+    }
+
+    @Composable
+    private fun TabletConfiguration(
+        orientation: Int = Configuration.ORIENTATION_PORTRAIT,
+        content: @Composable () -> Unit,
+    ) {
+        val tablet = Configuration(LocalConfiguration.current).apply {
+            this.orientation = orientation
+            smallestScreenWidthDp = 700
+        }
+        CompositionLocalProvider(LocalConfiguration provides tablet, content = content)
     }
 
     private fun viewerState(
