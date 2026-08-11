@@ -4,10 +4,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.test.core.app.ActivityScenario
-import androidx.test.espresso.Espresso.onView
-import androidx.test.espresso.assertion.ViewAssertions.matches
-import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
-import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
 import androidx.test.platform.app.InstrumentationRegistry
@@ -23,6 +19,8 @@ import io.github.mith_mmk.wml2viewer.ui.state.ViewerUiEvent
 import io.github.mith_mmk.wml2viewer.ui.state.ViewerViewModel
 import io.github.mith_mmk.wml2viewer.ui.state.ViewerViewModelFactory
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -33,9 +31,20 @@ class AndroidActivityRecreationInstrumentationTest {
     @Test
     fun componentActivityHostSurvivesConfigurationRecreation() {
         ActivityScenario.launch(Wml2ViewerActivity::class.java).use { scenario ->
-            onView(isRoot()).check(matches(isDisplayed()))
+            lateinit var original: Wml2ViewerActivity
+            scenario.onActivity { activity ->
+                original = activity
+                assertFalse(activity.isFinishing)
+                assertFalse(activity.isDestroyed)
+                assertTrue(activity.window.decorView.isAttachedToWindow)
+            }
             scenario.recreate()
-            onView(isRoot()).check(matches(isDisplayed()))
+            scenario.onActivity { recreated ->
+                assertNotSame(original, recreated)
+                assertFalse(recreated.isFinishing)
+                assertFalse(recreated.isDestroyed)
+                assertTrue(recreated.window.decorView.isAttachedToWindow)
+            }
         }
     }
 

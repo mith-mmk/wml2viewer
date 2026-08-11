@@ -156,10 +156,10 @@ class MobileLayoutInstrumentationTest {
             }
         }
 
-        compose.onNodeWithText("Logical page 8").fetchSemanticsNode()
+        compose.onNodeWithTag("viewer-pane").assertIsDisplayed()
         compose.runOnIdle { landscape.value = true }
         compose.waitForIdle()
-        compose.onNodeWithText("Logical page 8").fetchSemanticsNode()
+        compose.onNodeWithTag("viewer-pane").assertIsDisplayed()
         compose.runOnIdle {
             assertEquals(7, state.engine.currentLogicalPageIndex)
             assertTrue(state.engine.filmstrip.single().selected)
@@ -236,8 +236,15 @@ class MobileLayoutInstrumentationTest {
 
         compose.onNodeWithTag("expanded-two-pane").assertIsDisplayed()
         compose.onNodeWithTag("filer-pane").assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.viewer_open_settings))
+        val chrome = compose.onNodeWithTag("viewer-top-chrome")
             .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val settings = compose.onNodeWithText(context.getString(R.string.viewer_open_settings))
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(settings.left >= chrome.left)
+        assertTrue(settings.right <= chrome.right)
     }
 
     @Test

@@ -374,6 +374,7 @@ private fun ViewerPane(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
+                    .testTag("viewer-top-chrome")
                     .consumeViewerInput()
                     .windowInsetsPadding(
                         WindowInsets.safeDrawing.only(
