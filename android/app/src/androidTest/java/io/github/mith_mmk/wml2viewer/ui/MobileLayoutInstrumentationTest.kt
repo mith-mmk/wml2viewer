@@ -11,10 +11,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.test.click
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -214,8 +214,11 @@ class MobileLayoutInstrumentationTest {
         compose.onNodeWithTag("viewer-pane").assertIsDisplayed()
         assertTrue(compose.onAllNodesWithTag("expanded-two-pane").fetchSemanticsNodes().isEmpty())
         assertTrue(compose.onAllNodesWithTag("filer-pane").fetchSemanticsNodes().isEmpty())
-        compose.onNodeWithText(context.getString(R.string.viewer_open_settings))
-            .assertDoesNotExist()
+        assertTrue(
+            compose.onAllNodesWithText(
+                context.getString(R.string.viewer_open_settings),
+            ).fetchSemanticsNodes().isEmpty(),
+        )
     }
 
     @Test
