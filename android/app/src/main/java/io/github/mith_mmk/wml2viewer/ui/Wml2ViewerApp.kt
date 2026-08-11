@@ -39,6 +39,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.mith_mmk.wml2viewer.R
 import io.github.mith_mmk.wml2viewer.ui.components.FilerPane
+import io.github.mith_mmk.wml2viewer.ui.components.FilerPaneMode
 import io.github.mith_mmk.wml2viewer.ui.components.Filmstrip
 import io.github.mith_mmk.wml2viewer.ui.components.ExportDialog
 import io.github.mith_mmk.wml2viewer.ui.components.MobileSettingsScreen
@@ -167,7 +168,14 @@ fun MobileViewerContent(
             }
 
             if (compact) {
-                CompactContent(resolvedState, dispatch, filerListState, filmstripListState)
+                CompactContent(
+                    state = resolvedState,
+                    onEvent = dispatch,
+                    filerListState = filerListState,
+                    folderListState = folderListState,
+                    filmstripListState = filmstripListState,
+                    useLandscapeFiler = isLandscape && !isTablet,
+                )
             } else {
                 ExpandedContent(
                     resolvedState,
@@ -187,10 +195,14 @@ private fun CompactContent(
     state: MobileViewerUiState,
     onEvent: (ViewerUiEvent) -> Unit,
     filerListState: LazyListState,
+    folderListState: LazyListState,
     filmstripListState: LazyListState,
+    useLandscapeFiler: Boolean,
 ) {
     when (state.screen) {
-        MobileScreen.FILER -> FilerPane(
+        MobileScreen.FILER -> if (useLandscapeFiler) {
+            LandscapeFilerContent(state, onEvent, folderListState, filerListState)
+        } else FilerPane(
             entries = state.engine.filerEntries,
             selectedSource = state.engine.sourceKind,
             pathLabel = state.engine.pathLabel,
@@ -205,6 +217,7 @@ private fun CompactContent(
             smbSecurityStatus = state.engine.smbSecurityStatus,
             compact = true,
             onBack = { onEvent(ViewerUiEvent.Back) },
+            onClose = { onEvent(ViewerUiEvent.CloseFiler) },
             onSelectSource = { onEvent(ViewerUiEvent.SelectSource(it)) },
             onRefresh = { onEvent(ViewerUiEvent.RefreshFiler) },
             onSelectEntry = {
@@ -231,6 +244,99 @@ private fun CompactContent(
             compact = true,
             onEvent = onEvent,
             filmstripListState = filmstripListState,
+        )
+    }
+}
+
+@Composable
+private fun LandscapeFilerContent(
+    state: MobileViewerUiState,
+    onEvent: (ViewerUiEvent) -> Unit,
+    folderListState: LazyListState,
+    filerListState: LazyListState,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("landscape-filer-two-pane"),
+    ) {
+        FilerPane(
+            entries = state.engine.filerEntries.filter(FilerEntryUi::isContainer),
+            selectedSource = state.engine.sourceKind,
+            pathLabel = state.engine.pathLabel,
+            currentDirectoryId = state.engine.currentDirectoryId,
+            breadcrumb = state.engine.breadcrumb,
+            currentCapabilities = state.engine.currentCapabilities,
+            pendingTransfer = state.pendingTransfer,
+            pendingCollision = state.engine.pendingCollision,
+            availableSmbShares = state.engine.availableSmbShares,
+            smbSharesLoading = state.engine.smbSharesLoading,
+            smbSetupId = state.engine.smbSetupId,
+            smbSecurityStatus = state.engine.smbSecurityStatus,
+            compact = true,
+            onBack = { onEvent(ViewerUiEvent.Back) },
+            onClose = { onEvent(ViewerUiEvent.CloseFiler) },
+            onSelectSource = { onEvent(ViewerUiEvent.SelectSource(it)) },
+            onRefresh = { onEvent(ViewerUiEvent.RefreshFiler) },
+            onSelectEntry = {
+                onEvent(ViewerUiEvent.SelectFilerEntry(it.id, it.isContainer))
+            },
+            onNavigateToBreadcrumb = { onEvent(ViewerUiEvent.NavigateToBreadcrumb(it)) },
+            onRequestSafRoot = { onEvent(ViewerUiEvent.RequestSafRoot) },
+            onRequestSmbShares = { onEvent(ViewerUiEvent.RequestSmbShares(it)) },
+            onAddSmbSource = { onEvent(ViewerUiEvent.AddSmbSource(it)) },
+            onReenterSmbCredential = { onEvent(ViewerUiEvent.ReenterSmbCredential(it)) },
+            onForgetSmbSource = { onEvent(ViewerUiEvent.ForgetSmbSource(it)) },
+            onBeginTransfer = { onEvent(ViewerUiEvent.BeginFilerTransfer(it)) },
+            onCancelTransfer = { onEvent(ViewerUiEvent.CancelFilerTransfer) },
+            onCompleteTransfer = { onEvent(ViewerUiEvent.CompleteFilerTransfer) },
+            onOperation = { onEvent(ViewerUiEvent.PerformFilerOperation(it)) },
+            onResolveCollision = { id, resolution, all ->
+                onEvent(ViewerUiEvent.ResolveCollision(id, resolution, all))
+            },
+            listState = folderListState,
+            mode = FilerPaneMode.NAVIGATION,
+            paneTag = "landscape-filer-navigation",
+            modifier = Modifier.weight(0.36f),
+        )
+        FilerPane(
+            entries = state.engine.filerEntries.filterNot(FilerEntryUi::isContainer),
+            selectedSource = state.engine.sourceKind,
+            pathLabel = state.engine.pathLabel,
+            currentDirectoryId = state.engine.currentDirectoryId,
+            breadcrumb = state.engine.breadcrumb,
+            currentCapabilities = state.engine.currentCapabilities,
+            pendingTransfer = state.pendingTransfer,
+            pendingCollision = state.engine.pendingCollision,
+            availableSmbShares = state.engine.availableSmbShares,
+            smbSharesLoading = state.engine.smbSharesLoading,
+            smbSetupId = state.engine.smbSetupId,
+            smbSecurityStatus = state.engine.smbSecurityStatus,
+            compact = false,
+            onBack = { onEvent(ViewerUiEvent.Back) },
+            onSelectSource = { onEvent(ViewerUiEvent.SelectSource(it)) },
+            onRefresh = { onEvent(ViewerUiEvent.RefreshFiler) },
+            onSelectEntry = {
+                onEvent(ViewerUiEvent.SelectFilerEntry(it.id, it.isContainer))
+            },
+            onNavigateToBreadcrumb = { onEvent(ViewerUiEvent.NavigateToBreadcrumb(it)) },
+            onRequestSafRoot = { onEvent(ViewerUiEvent.RequestSafRoot) },
+            onRequestSmbShares = { onEvent(ViewerUiEvent.RequestSmbShares(it)) },
+            onAddSmbSource = { onEvent(ViewerUiEvent.AddSmbSource(it)) },
+            onReenterSmbCredential = { onEvent(ViewerUiEvent.ReenterSmbCredential(it)) },
+            onForgetSmbSource = { onEvent(ViewerUiEvent.ForgetSmbSource(it)) },
+            onBeginTransfer = { onEvent(ViewerUiEvent.BeginFilerTransfer(it)) },
+            onCancelTransfer = { onEvent(ViewerUiEvent.CancelFilerTransfer) },
+            onCompleteTransfer = { onEvent(ViewerUiEvent.CompleteFilerTransfer) },
+            onOperation = { onEvent(ViewerUiEvent.PerformFilerOperation(it)) },
+            onResolveCollision = { id, resolution, all ->
+                onEvent(ViewerUiEvent.ResolveCollision(id, resolution, all))
+            },
+            listState = filerListState,
+            navigationControls = false,
+            mode = FilerPaneMode.LIST,
+            paneTag = "landscape-filer-list",
+            modifier = Modifier.weight(0.64f),
         )
     }
 }

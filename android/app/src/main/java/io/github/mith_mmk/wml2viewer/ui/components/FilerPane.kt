@@ -52,6 +52,12 @@ import io.github.mith_mmk.wml2viewer.ui.model.SmbCredentialInput
 import io.github.mith_mmk.wml2viewer.ui.model.SmbSecurityStatusUi
 import io.github.mith_mmk.wml2viewer.ui.model.SourceKind
 
+enum class FilerPaneMode {
+    FULL,
+    NAVIGATION,
+    LIST,
+}
+
 @Composable
 fun FilerPane(
     entries: List<FilerEntryUi>,
@@ -85,6 +91,8 @@ fun FilerPane(
     listState: LazyListState = rememberLazyListState(),
     navigationControls: Boolean = true,
     paneTag: String = "filer-pane",
+    mode: FilerPaneMode = FilerPaneMode.FULL,
+    onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var actionEntry by remember { mutableStateOf<FilerEntryUi?>(null) }
@@ -102,29 +110,57 @@ fun FilerPane(
     ) {
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = if (mode == FilerPaneMode.LIST) {
+                    Modifier
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (compact) {
-                    TextButton(onClick = onBack) {
-                        Text(stringResource(R.string.navigation_back))
+                if (mode != FilerPaneMode.LIST) {
+                    if (compact) {
+                        TextButton(onClick = onBack) {
+                            Text(stringResource(R.string.navigation_back))
+                        }
+                    }
+                    Text(
+                        text = stringResource(R.string.filer_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (compact) {
+                        TextButton(
+                            modifier = Modifier.testTag("$paneTag-close"),
+                            onClick = onClose ?: onBack,
+                        ) {
+                            Text(
+                                text = stringResource(
+                                    if (pendingTransfer == null) R.string.close else R.string.cancel,
+                                ),
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                    }
+                    TextButton(onClick = onRefresh) {
+                        Text(
+                            text = stringResource(R.string.filer_refresh),
+                            maxLines = 1,
+                            softWrap = false,
+                        )
                     }
                 }
-                Text(
-                    text = stringResource(R.string.filer_title),
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = onRefresh) {
-                    Text(stringResource(R.string.filer_refresh))
-                }
             }
-            if (navigationControls) {
+            if (navigationControls && mode != FilerPaneMode.LIST) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(
+                        if (mode == FilerPaneMode.NAVIGATION) 2.dp else 8.dp,
+                    ),
+                    modifier = Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = if (mode == FilerPaneMode.NAVIGATION) 8.dp else 16.dp),
                 ) {
                     SourceKind.entries.forEach { source ->
                         FilterChip(
@@ -140,8 +176,33 @@ fun FilerPane(
                             },
                         )
                     }
+                    if (mode == FilerPaneMode.NAVIGATION) {
+                        TextButton(onClick = onRequestSafRoot) {
+                            Text(
+                                stringResource(R.string.filer_add_saf_root),
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                        TextButton(onClick = { showingSmbSetup = true }) {
+                            Text(
+                                stringResource(R.string.filer_add_smb),
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                        if (currentCapabilities.canCreate && currentDirectoryId != null) {
+                            TextButton(onClick = { creatingFolder = true }) {
+                                Text(
+                                    stringResource(R.string.filer_create_folder),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                )
+                            }
+                        }
+                    }
                 }
-                if (breadcrumb.isNotEmpty()) {
+                if (mode == FilerPaneMode.FULL && breadcrumb.isNotEmpty()) {
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         modifier = Modifier.padding(horizontal = 8.dp),
@@ -153,36 +214,38 @@ fun FilerPane(
                             if (item != breadcrumb.last()) Text("/", modifier = Modifier.padding(top = 12.dp))
                         }
                     }
-                } else {
+                } else if (mode == FilerPaneMode.FULL) {
                     FilerPathLabel(pathLabel, selectedSource)
                 }
-                Row(
-                    modifier = Modifier
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    TextButton(onClick = onRequestSafRoot) {
-                        Text(
-                            stringResource(R.string.filer_add_saf_root),
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
-                    TextButton(onClick = { showingSmbSetup = true }) {
-                        Text(
-                            stringResource(R.string.filer_add_smb),
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
-                    if (currentCapabilities.canCreate && currentDirectoryId != null) {
-                        TextButton(onClick = { creatingFolder = true }) {
+                if (mode == FilerPaneMode.FULL) {
+                    Row(
+                        modifier = Modifier
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        TextButton(onClick = onRequestSafRoot) {
                             Text(
-                                stringResource(R.string.filer_create_folder),
+                                stringResource(R.string.filer_add_saf_root),
                                 maxLines = 1,
                                 softWrap = false,
                             )
+                        }
+                        TextButton(onClick = { showingSmbSetup = true }) {
+                            Text(
+                                stringResource(R.string.filer_add_smb),
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                        if (currentCapabilities.canCreate && currentDirectoryId != null) {
+                            TextButton(onClick = { creatingFolder = true }) {
+                                Text(
+                                    stringResource(R.string.filer_create_folder),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                )
+                            }
                         }
                     }
                 }
@@ -200,16 +263,18 @@ fun FilerPane(
             if (selectedSource == SourceKind.SMB && smbSecurityStatus != null) {
                 SmbSecurityBanner(smbSecurityStatus)
             }
-            Text(
-                text = stringResource(
-                    if (compact) R.string.filer_compact_description
-                    else R.string.filer_expanded_description,
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-            Spacer(Modifier.height(8.dp))
+            if (mode == FilerPaneMode.FULL) {
+                Text(
+                    text = stringResource(
+                        if (compact) R.string.filer_compact_description
+                        else R.string.filer_expanded_description,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
             HorizontalDivider()
             if (entries.isEmpty()) {
                 Text(

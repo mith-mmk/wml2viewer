@@ -145,6 +145,8 @@ sealed interface ViewerUiEvent {
         val isTablet: Boolean = widthDp >= 600f,
     ) : ViewerUiEvent
     data object Back : ViewerUiEvent
+    /** Leaves the compact filer immediately instead of navigating its folder hierarchy. */
+    data object CloseFiler : ViewerUiEvent
     data class TapZonePressed(val zone: TapZone) : ViewerUiEvent
     data class PerformAction(val action: ViewerAction) : ViewerUiEvent
     data class SelectSettingsCategory(val category: SettingsCategory?) : ViewerUiEvent

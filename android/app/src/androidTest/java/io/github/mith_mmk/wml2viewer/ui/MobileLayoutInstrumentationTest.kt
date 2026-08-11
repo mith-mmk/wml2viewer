@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
@@ -219,6 +220,59 @@ class MobileLayoutInstrumentationTest {
                 context.getString(R.string.viewer_open_settings),
             ).fetchSemanticsNodes().isEmpty(),
         )
+    }
+
+    @Test
+    fun phoneLandscapeFilerUsesNavigationAndFileListPanesWithCloseAction() {
+        val events = mutableListOf<ViewerUiEvent>()
+        val entries = listOf(
+            FilerEntryUi("folder", "Folder", isContainer = true),
+        ) + (0 until 20).map { index ->
+            FilerEntryUi("landscape-$index", "Page $index", isContainer = false)
+        }
+        compose.setContent {
+            val phoneLandscape = Configuration(LocalConfiguration.current).apply {
+                orientation = Configuration.ORIENTATION_LANDSCAPE
+                smallestScreenWidthDp = 411
+            }
+            CompositionLocalProvider(LocalConfiguration provides phoneLandscape) {
+                MobileViewerContent(
+                    state = viewerState(
+                        engine = ViewerEngineSnapshot(filerEntries = entries),
+                    ).copy(screen = MobileScreen.FILER),
+                    onEvent = events::add,
+                    modifier = Modifier.requiredSize(width = 800.dp, height = 420.dp),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("landscape-filer-two-pane").assertIsDisplayed()
+        val navigationPane = compose.onNodeWithTag("landscape-filer-navigation")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val filePane = compose.onNodeWithTag("landscape-filer-list")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        compose.onNodeWithTag("landscape-filer-list-list").assertIsDisplayed()
+        val folder = compose.onNodeWithTag("filer-entry-folder")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val fourthFile = compose.onNodeWithTag("filer-entry-landscape-3")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(navigationPane.right <= filePane.left)
+        assertTrue(folder.right <= navigationPane.right)
+        assertTrue(fourthFile.left >= filePane.left)
+        compose.onNodeWithTag("landscape-filer-navigation-close")
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle {
+            assertTrue(events.any { it == ViewerUiEvent.CloseFiler })
+        }
     }
 
     @Test

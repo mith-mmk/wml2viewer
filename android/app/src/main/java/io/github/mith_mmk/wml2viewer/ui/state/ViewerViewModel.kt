@@ -63,6 +63,9 @@ class ViewerViewModel(
         when (event) {
             is ViewerUiEvent.WindowMetricsChanged -> updateWindowMetrics(event)
             ViewerUiEvent.Back -> navigateBack()
+            ViewerUiEvent.CloseFiler -> _uiState.update {
+                it.copy(screen = MobileScreen.VIEWER, pendingTransfer = null)
+            }
             is ViewerUiEvent.TapZonePressed -> performAction(
                 _uiState.value.settings.touchMap.actionFor(event.zone),
             )

@@ -8,8 +8,10 @@ import io.github.mith_mmk.wml2viewer.ui.model.ExportRequest
 import io.github.mith_mmk.wml2viewer.ui.model.DisplayFit
 import io.github.mith_mmk.wml2viewer.ui.model.DeviceClass
 import io.github.mith_mmk.wml2viewer.ui.model.FilerCapabilitiesUi
+import io.github.mith_mmk.wml2viewer.ui.model.FilerOperationType
 import io.github.mith_mmk.wml2viewer.ui.model.MangaLayoutMode
 import io.github.mith_mmk.wml2viewer.ui.model.MobileScreen
+import io.github.mith_mmk.wml2viewer.ui.model.PendingTransferUi
 import io.github.mith_mmk.wml2viewer.ui.model.ViewerAction
 import io.github.mith_mmk.wml2viewer.ui.model.SmbConnectionInput
 import io.github.mith_mmk.wml2viewer.ui.model.SmbCredentialInput
@@ -120,6 +122,26 @@ class ViewerViewModelTest {
 
         assertThat(controller.navigateUpCalls).isEqualTo(1)
         assertThat(viewModel.uiState.value.screen.name).isEqualTo("FILER")
+    }
+
+    @Test
+    fun compactFilerCloseLeavesNestedFolderAndCancelsPendingTransfer() = runTest(dispatcher) {
+        val controller = RecordingController(ViewerEngineSnapshot(atSourceRoot = false))
+        val viewModel = ViewerViewModel(controller, InMemoryMobileSettingsStore())
+        viewModel.onEvent(ViewerUiEvent.WindowMetricsChanged(700f, true, isTablet = false))
+        viewModel.onEvent(ViewerUiEvent.PerformAction(ViewerAction.OPEN_FILER))
+        viewModel.onEvent(
+            ViewerUiEvent.BeginFilerTransfer(
+                PendingTransferUi(FilerOperationType.COPY, "entry", "Page.jpg"),
+            ),
+        )
+
+        viewModel.onEvent(ViewerUiEvent.CloseFiler)
+        advanceUntilIdle()
+
+        assertThat(controller.navigateUpCalls).isEqualTo(0)
+        assertThat(viewModel.uiState.value.screen).isEqualTo(MobileScreen.VIEWER)
+        assertThat(viewModel.uiState.value.pendingTransfer).isNull()
     }
 
     @Test
