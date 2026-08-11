@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -33,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mith_mmk.wml2viewer.R
@@ -155,19 +158,31 @@ fun FilerPane(
                 }
                 Row(
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
                         .padding(horizontal = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     TextButton(onClick = onRequestSafRoot) {
-                        Text(stringResource(R.string.filer_add_saf_root))
+                        Text(
+                            stringResource(R.string.filer_add_saf_root),
+                            maxLines = 1,
+                            softWrap = false,
+                        )
                     }
                     TextButton(onClick = { showingSmbSetup = true }) {
-                        Text(stringResource(R.string.filer_add_smb))
+                        Text(
+                            stringResource(R.string.filer_add_smb),
+                            maxLines = 1,
+                            softWrap = false,
+                        )
                     }
                     if (currentCapabilities.canCreate && currentDirectoryId != null) {
                         TextButton(onClick = { creatingFolder = true }) {
-                            Text(stringResource(R.string.filer_create_folder))
+                            Text(
+                                stringResource(R.string.filer_create_folder),
+                                maxLines = 1,
+                                softWrap = false,
+                            )
                         }
                     }
                 }
@@ -199,8 +214,14 @@ fun FilerPane(
             if (entries.isEmpty()) {
                 Text(
                     text = stringResource(R.string.filer_no_entries),
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(20.dp),
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 20.dp),
                 )
             } else {
                 LazyColumn(

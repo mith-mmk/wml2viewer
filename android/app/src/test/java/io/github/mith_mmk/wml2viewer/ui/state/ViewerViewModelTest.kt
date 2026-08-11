@@ -8,16 +8,19 @@ import io.github.mith_mmk.wml2viewer.ui.model.ExportRequest
 import io.github.mith_mmk.wml2viewer.ui.model.DisplayFit
 import io.github.mith_mmk.wml2viewer.ui.model.FilerCapabilitiesUi
 import io.github.mith_mmk.wml2viewer.ui.model.MangaLayoutMode
+import io.github.mith_mmk.wml2viewer.ui.model.MobileScreen
 import io.github.mith_mmk.wml2viewer.ui.model.ViewerAction
 import io.github.mith_mmk.wml2viewer.ui.model.SmbConnectionInput
 import io.github.mith_mmk.wml2viewer.ui.model.SmbCredentialInput
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -116,6 +119,25 @@ class ViewerViewModelTest {
 
         assertThat(controller.navigateUpCalls).isEqualTo(1)
         assertThat(viewModel.uiState.value.screen.name).isEqualTo("FILER")
+    }
+
+    @Test
+    fun selectingFileShowsViewerBeforeSlowDecodeCompletes() = runTest(dispatcher) {
+        val controller = RecordingController(ViewerEngineSnapshot())
+        controller.selectionGate = CompletableDeferred()
+        val viewModel = ViewerViewModel(controller, InMemoryMobileSettingsStore())
+
+        viewModel.onEvent(ViewerUiEvent.WindowMetricsChanged(400f, false))
+        viewModel.onEvent(ViewerUiEvent.PerformAction(ViewerAction.OPEN_FILER))
+        runCurrent()
+        assertThat(viewModel.uiState.value.screen).isEqualTo(MobileScreen.FILER)
+
+        viewModel.onEvent(ViewerUiEvent.SelectFilerEntry("file", isContainer = false))
+        runCurrent()
+        assertThat(viewModel.uiState.value.screen).isEqualTo(MobileScreen.VIEWER)
+
+        controller.selectionGate?.complete(Unit)
+        advanceUntilIdle()
     }
 
     @Test
@@ -313,6 +335,11 @@ class ViewerViewModelTest {
         var lastCredentialInput: SmbCredentialInput? = null
         var navigateUpCalls = 0
         val safRequests = mutableListOf<Triple<String, Boolean, Boolean>>()
+        var selectionGate: CompletableDeferred<Unit>? = null
+
+        override suspend fun selectFilerEntry(id: String) {
+            selectionGate?.await()
+        }
 
         override suspend fun dispatch(action: ViewerAction) {
             dispatchedActions += action

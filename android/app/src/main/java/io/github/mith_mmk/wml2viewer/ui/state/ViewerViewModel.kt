@@ -70,12 +70,19 @@ class ViewerViewModel(
             is ViewerUiEvent.SelectSettingsCategory -> _uiState.update {
                 it.copy(selectedSettingsCategory = event.category)
             }
-            is ViewerUiEvent.SelectFilerEntry -> viewModelScope.launch {
-                controller.selectFilerEntry(event.id)
-                _uiState.update {
-                    it.copy(
-                        screen = if (event.isContainer) MobileScreen.FILER else MobileScreen.VIEWER,
-                    )
+            is ViewerUiEvent.SelectFilerEntry -> {
+                // Leave the filer as soon as a file is selected. Decoding can involve
+                // SAF/SMB I/O and must not leave the user's tap target covered while
+                // that work is in progress. The viewer shows its loading/error state
+                // until the controller publishes the decoded page.
+                if (!event.isContainer) {
+                    _uiState.update { it.copy(screen = MobileScreen.VIEWER) }
+                }
+                viewModelScope.launch {
+                    controller.selectFilerEntry(event.id)
+                    if (event.isContainer) {
+                        _uiState.update { it.copy(screen = MobileScreen.FILER) }
+                    }
                 }
             }
             ViewerUiEvent.NavigateUp -> viewModelScope.launch {
