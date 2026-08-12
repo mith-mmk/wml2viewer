@@ -18,7 +18,7 @@ class TapZoneResolverTest {
     }
 
     @Test
-    fun contentScaleFitExcludesLetterbox() {
+    fun touchZonesUseSurfaceEvenWhenImageHasLetterbox() {
         val rect = TapZoneResolver.fitImageRect(
             surfaceWidth = 400f,
             surfaceHeight = 300f,
@@ -27,11 +27,24 @@ class TapZoneResolverTest {
         )
 
         assertThat(rect).isEqualTo(TouchRect(50f, 0f, 350f, 300f))
-        assertThat(TapZoneResolver.resolve(25f, 150f, rect)).isNull()
-        assertThat(TapZoneResolver.resolve(375f, 150f, rect)).isNull()
+        assertThat(TapZoneResolver.resolve(25f, 150f, 400f, 300f)).isEqualTo(TapZone.MIDDLE_LEFT)
+        assertThat(TapZoneResolver.resolve(375f, 150f, 400f, 300f)).isEqualTo(TapZone.MIDDLE_RIGHT)
         assertThat(TapZoneResolver.resolve(100f, 50f, rect)).isEqualTo(TapZone.TOP_LEFT)
         assertThat(TapZoneResolver.resolve(200f, 150f, rect)).isEqualTo(TapZone.CENTER)
         assertThat(TapZoneResolver.resolve(300f, 250f, rect)).isEqualTo(TapZone.BOTTOM_RIGHT)
+    }
+
+    @Test
+    fun surfaceRectUsesWholeAppSurfaceNotImageRect() {
+        assertThat(TapZoneResolver.surfaceRect(400f, 300f))
+            .isEqualTo(TouchRect(0f, 0f, 400f, 300f))
+        assertThat(
+            TapZoneResolver.surfaceRect(
+                400f,
+                300f,
+                TouchInsets(left = 24f, top = 12f, right = 8f, bottom = 20f),
+            ),
+        ).isEqualTo(TouchRect(24f, 12f, 392f, 280f))
     }
 
     @Test

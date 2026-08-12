@@ -125,8 +125,7 @@ fun ViewerSurface(
             panY = state.panY,
         )
     } else null
-    val visibleTouchRect = TapZoneResolver.visibleImageRect(
-        imageRect = fittedImageRect,
+    val surfaceTouchRect = TapZoneResolver.surfaceRect(
         surfaceWidth = size.width.toFloat(),
         surfaceHeight = size.height.toFloat(),
         insets = localTouchInsets,
@@ -200,7 +199,7 @@ fun ViewerSurface(
         .pointerInput(
             gestureSettings.doubleTapAction,
             gestureSettings.longPressAction,
-            visibleTouchRect,
+            surfaceTouchRect,
             state.touchReady,
         ) {
             detectTapGestures(
@@ -217,7 +216,7 @@ fun ViewerSurface(
                         TapZoneResolver.resolve(
                             x = offset.x,
                             y = offset.y,
-                            rect = visibleTouchRect,
+                            rect = surfaceTouchRect,
                         )?.let(onZoneTap)
                     }
                 },

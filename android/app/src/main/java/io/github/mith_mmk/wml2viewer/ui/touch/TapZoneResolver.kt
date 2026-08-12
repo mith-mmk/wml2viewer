@@ -59,6 +59,21 @@ object TapZoneResolver {
         return TapZone.at(row, column)
     }
 
+    /** The app/viewer touch surface, independent of the displayed image bounds. */
+    fun surfaceRect(
+        surfaceWidth: Float,
+        surfaceHeight: Float,
+        insets: TouchInsets = TouchInsets(),
+    ): TouchRect? {
+        if (surfaceWidth <= 0f || surfaceHeight <= 0f) return null
+        return TouchRect(
+            left = insets.left.coerceAtLeast(0f),
+            top = insets.top.coerceAtLeast(0f),
+            right = surfaceWidth - insets.right.coerceAtLeast(0f),
+            bottom = surfaceHeight - insets.bottom.coerceAtLeast(0f),
+        ).takeIf { it.width > 0f && it.height > 0f }
+    }
+
     /** Rectangle produced by ContentScale.Fit, centered inside the available surface. */
     fun fitImageRect(
         surfaceWidth: Float,

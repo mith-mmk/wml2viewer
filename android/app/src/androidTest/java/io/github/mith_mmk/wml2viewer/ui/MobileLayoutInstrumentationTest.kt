@@ -302,7 +302,7 @@ class MobileLayoutInstrumentationTest {
     }
 
     @Test
-    fun tapZonesUseDisplayedImageRectAndIgnoreLetterbox() {
+    fun tapZonesUseWholeViewerSurfaceInsteadOfDisplayedImageRect() {
         val bitmap = Bitmap.createBitmap(100, 300, Bitmap.Config.ARGB_8888)
         val events = mutableListOf<ViewerUiEvent>()
         compose.setContent {
@@ -321,13 +321,19 @@ class MobileLayoutInstrumentationTest {
         surface.performTouchInput {
             click(Offset(size.width * 0.05f, size.height * 0.10f))
         }
+        compose.mainClock.advanceTimeBy(1_000L)
+        compose.waitForIdle()
         compose.runOnIdle {
-            assertFalse(events.any { it is ViewerUiEvent.TapZonePressed })
+            assertEquals(
+                TapZone.TOP_LEFT,
+                events.filterIsInstance<ViewerUiEvent.TapZonePressed>().single().zone,
+            )
+            events.clear()
         }
 
         compose.mainClock.advanceTimeBy(1_000L)
         surface.performTouchInput {
-            click(Offset(size.width * 0.65f, size.height * 0.10f))
+            click(Offset(size.width * 0.85f, size.height * 0.10f))
         }
         // detectTapGestures defers a single tap while waiting for a possible
         // double tap, so advance past that decision window before asserting.
@@ -388,7 +394,7 @@ class MobileLayoutInstrumentationTest {
 
         val landscapeSize = surface.fetchSemanticsNode().size
         surface.performTouchInput {
-            click(Offset(landscapeSize.width * 0.575f, landscapeSize.height * 0.5f))
+            click(Offset(landscapeSize.width * 0.80f, landscapeSize.height * 0.5f))
         }
         compose.mainClock.advanceTimeBy(1_000L)
         compose.waitForIdle()
