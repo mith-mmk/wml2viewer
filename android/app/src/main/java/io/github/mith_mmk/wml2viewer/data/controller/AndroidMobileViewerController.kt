@@ -64,6 +64,7 @@ import io.github.mith_mmk.wml2viewer.ui.model.ExportDestination
 import io.github.mith_mmk.wml2viewer.ui.model.ExportRequest
 import io.github.mith_mmk.wml2viewer.ui.model.MangaLayoutMode
 import io.github.mith_mmk.wml2viewer.ui.model.MangaPageRef
+import io.github.mith_mmk.wml2viewer.ui.model.MobileViewerSettings
 import io.github.mith_mmk.wml2viewer.ui.model.PendingCollisionUi
 import io.github.mith_mmk.wml2viewer.ui.model.ReadingDirection
 import io.github.mith_mmk.wml2viewer.ui.model.SmbConnectionInput
@@ -92,6 +93,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -134,7 +136,6 @@ class AndroidMobileViewerController(
     private var lastNonSingleMangaLayout = MangaLayoutMode.AUTO
 
     init {
-        scope.launch { restoreSources() }
         scope.launch {
             val measured = runCatching {
                 withContext(Dispatchers.Default) {
@@ -146,42 +147,55 @@ class AndroidMobileViewerController(
             mutableSnapshot.update { it.copy(measuredOsCodecFormats = measured) }
         }
         scope.launch {
-            var previousFilerSettings = settingsStore.settings.value.filer
-            settingsStore.settings.collectLatest { settings ->
-                val rememberLocationChanged =
-                    previousFilerSettings.rememberLastLocation != settings.filer.rememberLastLocation
-                val filerListingChanged = previousFilerSettings.showHiddenFiles != settings.filer.showHiddenFiles ||
-                    previousFilerSettings.sortOrder != settings.filer.sortOrder
-                previousFilerSettings = settings.filer
-                if (settings.manga.layoutMode != MangaLayoutMode.SINGLE) {
-                    lastNonSingleMangaLayout = settings.manga.layoutMode
+            val initialSettings = settingsStore.awaitReady()
+            applySettings(initialSettings, previousSettings = null)
+            restoreSources()
+            var previousSettings = initialSettings
+            settingsStore.settings
+                .dropWhile { it == initialSettings }
+                .collectLatest { settings ->
+                    applySettings(settings, previousSettings)
+                    previousSettings = settings
                 }
-                val codecPolicy = settings.codecs.toPlatformPolicy()
-                graph.codecRouter.updatePolicy(codecPolicy)
-                val supportedExports = withContext(Dispatchers.Default) {
-                    graph.codecRouter.availableEncodeFormats(codecPolicy).mapNotNullTo(linkedSetOf()) {
-                        it.toUiExportFormat()
-                    }
-                }
-                mutableSnapshot.update { it.copy(supportedExportFormats = supportedExports) }
-                if (rememberLocationChanged) {
-                    if (settings.filer.rememberLastLocation) persistLastLocation()
-                    else withContext(Dispatchers.IO) { locationStore.replace(null) }
-                }
-                try {
-                    updateCacheLimit(settings.cache.automaticLimit, settings.cache.manualLimitMiB)
-                } catch (error: Throwable) {
-                    if (error is CancellationException) throw error
-                    mutableSnapshot.update { it.copy(error = error.toUiError()) }
-                }
-                if (filerListingChanged && currentDirectory != null) {
-                    try {
-                        refreshDirectory()
-                    } catch (error: Throwable) {
-                        if (error is CancellationException) throw error
-                        mutableSnapshot.update { it.copy(error = error.toUiError()) }
-                    }
-                }
+        }
+    }
+
+    private suspend fun applySettings(
+        settings: MobileViewerSettings,
+        previousSettings: MobileViewerSettings?,
+    ) {
+        val rememberLocationChanged = previousSettings != null &&
+            previousSettings.filer.rememberLastLocation != settings.filer.rememberLastLocation
+        val filerListingChanged = previousSettings != null &&
+            (previousSettings.filer.showHiddenFiles != settings.filer.showHiddenFiles ||
+                previousSettings.filer.sortOrder != settings.filer.sortOrder)
+        if (settings.manga.layoutMode != MangaLayoutMode.SINGLE) {
+            lastNonSingleMangaLayout = settings.manga.layoutMode
+        }
+        val codecPolicy = settings.codecs.toPlatformPolicy()
+        graph.codecRouter.updatePolicy(codecPolicy)
+        val supportedExports = withContext(Dispatchers.Default) {
+            graph.codecRouter.availableEncodeFormats(codecPolicy).mapNotNullTo(linkedSetOf()) {
+                it.toUiExportFormat()
+            }
+        }
+        mutableSnapshot.update { it.copy(supportedExportFormats = supportedExports) }
+        if (rememberLocationChanged) {
+            if (settings.filer.rememberLastLocation) persistLastLocation()
+            else withContext(Dispatchers.IO) { locationStore.replace(null) }
+        }
+        try {
+            updateCacheLimit(settings.cache.automaticLimit, settings.cache.manualLimitMiB)
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            mutableSnapshot.update { it.copy(error = error.toUiError()) }
+        }
+        if (filerListingChanged && currentDirectory != null) {
+            try {
+                refreshDirectory()
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                mutableSnapshot.update { it.copy(error = error.toUiError()) }
             }
         }
     }

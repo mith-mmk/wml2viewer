@@ -37,6 +37,7 @@ import io.github.mith_mmk.wml2viewer.ui.model.ViewerAction
 import io.github.mith_mmk.wml2viewer.ui.model.ViewingSettings
 import io.github.mith_mmk.wml2viewer.ui.state.MobileSettingsStore
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -48,17 +49,29 @@ class ProtoMobileSettingsStore(
     scope: CoroutineScope,
 ) : MobileSettingsStore {
     private val mutableSettings = MutableStateFlow(MobileConfigSerializer.defaultValue.toUiSettings())
+    private val ready = CompletableDeferred<MobileViewerSettings>()
     override val settings: StateFlow<MobileViewerSettings> = mutableSettings
 
     init {
         scope.launch {
-            repository.config
-                .catch { error ->
-                    if (error is IOException) emit(MobileConfigSerializer.defaultValue) else throw error
-                }
-                .collect { mutableSettings.value = it.toUiSettings() }
+            try {
+                repository.config
+                    .catch { error ->
+                        if (error is IOException) emit(MobileConfigSerializer.defaultValue) else throw error
+                    }
+                    .collect { config ->
+                        val loaded = config.toUiSettings()
+                        mutableSettings.value = loaded
+                        ready.complete(loaded)
+                    }
+            } catch (error: Throwable) {
+                ready.completeExceptionally(error)
+                throw error
+            }
         }
     }
+
+    override suspend fun awaitReady(): MobileViewerSettings = ready.await()
 
     override suspend fun replace(settings: MobileViewerSettings) {
         mutableSettings.value = settings
