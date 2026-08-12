@@ -32,14 +32,20 @@ internal object SmbConnectionSupport {
         profile: SmbProfile,
         credentialStore: CredentialStore,
     ): Session = when (profile.authenticationMode) {
-        SmbAuthenticationMode.GUEST -> connection.authenticate(guestAuthenticationContext())
+        SmbAuthenticationMode.GUEST -> connection.authenticate(
+            guestAuthenticationContext(connection.negotiatedProtocol.dialect),
+        )
         SmbAuthenticationMode.USER_PASSWORD -> credentialStore.load(profile.profileId)?.use { secret ->
             connection.authenticate(AuthenticationContext(profile.username!!, secret.password, profile.domain))
         } ?: throw SourceException(SourceErrorCode.AUTHENTICATION_FAILED, "SMB credentials are unavailable")
     }
 
-    /** Anonymous login lets the server select its configured guest account. */
-    internal fun guestAuthenticationContext(): AuthenticationContext = AuthenticationContext.anonymous()
+    /**
+     * Samba SMB2 maps anonymous sessions reliably, while SMB3 must carry the guest
+     * identity so SMBJ does not derive signing keys from an empty session key.
+     */
+    internal fun guestAuthenticationContext(dialect: SMB2Dialect): AuthenticationContext =
+        if (dialect.isSmb3x) AuthenticationContext.guest() else AuthenticationContext.anonymous()
 
     fun securityStatus(connection: Connection, session: Session): SmbSecurityStatus {
         val dialect = connection.negotiatedProtocol.dialect
