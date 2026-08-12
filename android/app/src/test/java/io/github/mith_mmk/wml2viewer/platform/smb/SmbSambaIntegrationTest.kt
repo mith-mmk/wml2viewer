@@ -58,38 +58,56 @@ class SmbSambaIntegrationTest {
         val directoryName = "wml2viewer-${UUID.randomUUID()}"
         var directory: EntryRef? = null
         try {
+            checkpoint("auth:create-directory")
             directory = provider.createDirectory(provider.root, directoryName, CollisionPolicy.FAIL)
             val largePayload = ByteArray(STREAM_BYTES) { index -> ((index * 31 + 17) and 0xff).toByte() }
+            checkpoint("auth:write-original")
             val original = provider.writeVerified(directory, "payload.bin", largePayload)
 
+            checkpoint("auth:list-original")
             assertThat(provider.list(directory).map { it.name }).containsExactly("payload.bin")
+            checkpoint("auth:read-original")
             assertThat(provider.readBytesAndDigest(original)).isEqualTo(largePayload.sha256())
 
+            checkpoint("auth:copy")
             val copied = provider.copy(original, directory, "copy.bin", CollisionPolicy.FAIL)
+            checkpoint("auth:read-copy")
             assertThat(provider.readBytesAndDigest(copied)).isEqualTo(largePayload.sha256())
 
+            checkpoint("auth:move")
             val moved = provider.move(copied, directory, "moved.bin", CollisionPolicy.FAIL)
+            checkpoint("auth:list-after-move")
             assertThat(provider.list(directory).map { it.name }).doesNotContain("copy.bin")
+            checkpoint("auth:rename")
             val renamed = provider.rename(moved, "renamed.bin", CollisionPolicy.FAIL)
+            checkpoint("auth:stat-renamed")
             assertThat(provider.stat(renamed).name).isEqualTo("renamed.bin")
 
+            checkpoint("auth:collision")
             val collision = runCatching {
                 provider.create(directory, CreateRequest("payload.bin", collisionPolicy = CollisionPolicy.FAIL))
             }.exceptionOrNull()
             assertThat(collision).isInstanceOf(SourceException::class.java)
             assertThat((collision as SourceException).code).isEqualTo(SourceErrorCode.ALREADY_EXISTS)
 
+            checkpoint("auth:keep-both")
             val kept = provider.writeVerified(directory, "payload.bin", byteArrayOf(1, 2, 3), CollisionPolicy.KEEP_BOTH)
             assertThat(provider.stat(kept).name).isEqualTo("payload (2).bin")
 
             val replacement = "replacement".encodeToByteArray()
+            checkpoint("auth:replace")
             val replaced = provider.writeVerified(directory, "payload.bin", replacement, CollisionPolicy.REPLACE)
+            checkpoint("auth:read-replacement")
             assertThat(provider.readBytesAndDigest(replaced)).isEqualTo(replacement.sha256())
 
+            checkpoint("auth:close-first-provider")
             provider.close()
             provider = SmbSourceProvider(profile, credentialStore)
+            checkpoint("auth:reconnect-list-root")
             val reconnectedDirectory = provider.list(provider.root).single { it.name == directoryName }.ref
+            checkpoint("auth:reconnect-list-directory")
             val afterReconnect = provider.list(reconnectedDirectory).associateBy { it.name }
+            checkpoint("auth:reconnect-read")
             assertThat(provider.readBytesAndDigest(afterReconnect.getValue("renamed.bin").ref))
                 .isEqualTo(largePayload.sha256())
             assertThat(provider.securityStatus.value.dialect).startsWith("SMB_")
@@ -168,6 +186,10 @@ class SmbSambaIntegrationTest {
     private fun ByteArray.sha256(): String = MessageDigest.getInstance("SHA-256")
         .digest(this)
         .joinToString("") { "%02x".format(it) }
+
+    private fun checkpoint(name: String) {
+        println("SMB integration checkpoint: $name")
+    }
 
     private data class IntegrationEnvironment(
         val server: String,

@@ -236,6 +236,7 @@ jobs:
             --publish 127.0.0.1:1445:445 \
             --volume "$samba_root:/shares" \
             --env "ACCOUNT_wml2ci=$WML2VIEWER_SMB_TEST_PASSWORD" \
+            --env 'SAMBA_CONF_LOG_LEVEL=3' \
             --env 'SAMBA_GLOBAL_CONFIG_server_SPACE_min_SPACE_protocol=SMB2_02' \
             --env "SAMBA_GLOBAL_CONFIG_server_SPACE_max_SPACE_protocol=$WML2VIEWER_SAMBA_MAX_PROTOCOL" \
             --env 'SAMBA_CONF_MAP_TO_GUEST=Bad User' \
