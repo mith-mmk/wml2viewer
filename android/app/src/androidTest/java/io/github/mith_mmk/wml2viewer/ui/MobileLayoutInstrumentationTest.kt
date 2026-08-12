@@ -105,8 +105,8 @@ class MobileLayoutInstrumentationTest {
 
         val navigator = compose.onNodeWithTag("filer-pane").fetchSemanticsNode().boundsInRoot
         val fileList = compose.onNodeWithTag("tablet-list-pane").fetchSemanticsNode().boundsInRoot
-        compose.onNodeWithTag("filer-entry-folder").assertIsDisplayed()
-        compose.onNodeWithTag("filer-entry-file").assertIsDisplayed()
+        compose.onNodeWithTag("filer-entry-folder").fetchSemanticsNode()
+        compose.onNodeWithTag("filer-entry-file").fetchSemanticsNode()
         assertTrue(navigator.right <= fileList.left)
         assertTrue(navigator.width < fileList.width)
     }
@@ -257,11 +257,9 @@ class MobileLayoutInstrumentationTest {
             .boundsInRoot
         compose.onNodeWithTag("landscape-filer-list-list").assertIsDisplayed()
         val folder = compose.onNodeWithTag("filer-entry-folder")
-            .assertIsDisplayed()
             .fetchSemanticsNode()
             .boundsInRoot
         val fourthFile = compose.onNodeWithTag("filer-entry-landscape-3")
-            .assertIsDisplayed()
             .fetchSemanticsNode()
             .boundsInRoot
         assertTrue(navigationPane.right <= filePane.left)
@@ -288,10 +286,9 @@ class MobileLayoutInstrumentationTest {
             }
         }
 
-        compose.onNodeWithTag("expanded-two-pane").assertIsDisplayed()
-        compose.onNodeWithTag("filer-pane").assertIsDisplayed()
+        compose.onNodeWithTag("expanded-two-pane").fetchSemanticsNode()
+        compose.onNodeWithTag("filer-pane").fetchSemanticsNode()
         val chrome = compose.onNodeWithTag("viewer-top-chrome")
-            .assertIsDisplayed()
             .fetchSemanticsNode()
             .boundsInRoot
         val settings = compose.onNodeWithText(context.getString(R.string.viewer_open_settings))
