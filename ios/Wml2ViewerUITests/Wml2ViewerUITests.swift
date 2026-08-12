@@ -100,5 +100,9 @@ final class Wml2ViewerUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["書類がありません"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["viewer.settings"].waitForExistence(timeout: 5))
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let panel = app.descendants(matching: .any)["settings.panel"]
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        XCTAssertEqual(panel.value as? String, "表示")
     }
 }

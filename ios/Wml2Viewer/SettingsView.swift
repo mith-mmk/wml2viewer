@@ -71,7 +71,6 @@ struct SettingsView: View {
             }
         }
         .accessibilityIdentifier("settings.panel")
-        .accessibilityValue(String(localized: "Display", locale: store.config.locale))
-        .accessibilityIdentifier("settings.panel")
+        .accessibilityValue(displayTitle)
     }
 }
