@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.text.format.Formatter
 import androidx.compose.ui.graphics.asAndroidBitmap
+import io.github.mith_mmk.wml2viewer.BuildConfig
 import io.github.mith_mmk.wml2viewer.data.config.MobileSourceProfileStore
 import io.github.mith_mmk.wml2viewer.data.config.MobileLastLocation
 import io.github.mith_mmk.wml2viewer.data.config.MobileLastLocationStore
@@ -1558,8 +1559,16 @@ class AndroidMobileViewerController(
                 else -> UiErrorCode.UNKNOWN
             },
         )
-        is IllegalArgumentException -> UiError(UiErrorCode.UNKNOWN)
-        else -> UiError(UiErrorCode.UNKNOWN)
+        is IllegalArgumentException -> UiError(UiErrorCode.UNKNOWN, debugOrigin())
+        else -> UiError(UiErrorCode.UNKNOWN, debugOrigin())
+    }
+
+    private fun Throwable.debugOrigin(): List<String> {
+        if (!BuildConfig.DEBUG) return emptyList()
+        val origin = stackTrace.firstOrNull { frame ->
+            frame.className == AndroidMobileViewerController::class.java.name
+        }?.methodName
+        return listOfNotNull(javaClass.simpleName.takeIf(String::isNotBlank), origin)
     }
 
     private fun NativeRequestError?.toUiError(fallback: UiErrorCode = UiErrorCode.DECODE): UiError = if (this == null) {
