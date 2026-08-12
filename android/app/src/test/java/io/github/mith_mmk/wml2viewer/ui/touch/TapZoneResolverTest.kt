@@ -65,6 +65,46 @@ class TapZoneResolverTest {
     }
 
     @Test
+    fun visibleImageRectClipsZoomedAndPannedImageToSurface() {
+        val visible = TapZoneResolver.visibleImageRect(
+            imageRect = TouchRect(-200f, -50f, 600f, 350f),
+            surfaceWidth = 400f,
+            surfaceHeight = 300f,
+        )
+
+        assertThat(visible).isEqualTo(TouchRect(0f, 0f, 400f, 300f))
+        assertThat(TapZoneResolver.resolve(350f, 150f, visible))
+            .isEqualTo(TapZone.MIDDLE_RIGHT)
+    }
+
+    @Test
+    fun visibleImageRectReturnsOnlyTheOnScreenPanIntersection() {
+        val visible = TapZoneResolver.visibleImageRect(
+            imageRect = TouchRect(250f, 50f, 550f, 250f),
+            surfaceWidth = 400f,
+            surfaceHeight = 300f,
+        )
+
+        assertThat(visible).isEqualTo(TouchRect(250f, 50f, 400f, 250f))
+        assertThat(TapZoneResolver.visibleImageRect(null, 400f, 300f)).isNull()
+        assertThat(
+            TapZoneResolver.visibleImageRect(TouchRect(500f, 0f, 600f, 100f), 400f, 300f),
+        ).isNull()
+    }
+
+    @Test
+    fun visibleImageRectExcludesLocalSafeDrawingInsets() {
+        val visible = TapZoneResolver.visibleImageRect(
+            imageRect = TouchRect(0f, 0f, 400f, 300f),
+            surfaceWidth = 400f,
+            surfaceHeight = 300f,
+            insets = TouchInsets(left = 24f, top = 12f, right = 8f, bottom = 20f),
+        )
+
+        assertThat(visible).isEqualTo(TouchRect(24f, 12f, 392f, 280f))
+    }
+
+    @Test
     fun defaultTouchMapMatchesMobilePreset() {
         val map = TouchMapConfig()
         TapZone.entries.filter { it.column == 0 }.forEach {

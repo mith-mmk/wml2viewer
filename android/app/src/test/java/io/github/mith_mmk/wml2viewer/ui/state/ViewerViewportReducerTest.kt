@@ -1,6 +1,7 @@
 package io.github.mith_mmk.wml2viewer.ui.state
 
 import com.google.common.truth.Truth.assertThat
+import io.github.mith_mmk.wml2viewer.ui.model.DisplayFit
 import org.junit.Test
 
 class ViewerViewportReducerTest {
@@ -39,5 +40,37 @@ class ViewerViewportReducerTest {
             zoomChange = 3f,
         )
         assertThat(gesture.zoom).isEqualTo(ViewerViewportReducer.MAX_ZOOM)
+    }
+
+    @Test
+    fun resizeKeepsZoomAndRecentersAxesThatNoLongerOverflow() {
+        val resized = ViewerViewportReducer.clampToSurface(
+            viewport = ViewerViewport(zoom = 2f, panX = 900f, panY = -900f),
+            surfaceWidth = 800,
+            surfaceHeight = 400,
+            imageWidth = 400,
+            imageHeight = 800,
+            fit = DisplayFit.CONTAIN,
+        )
+
+        assertThat(resized.zoom).isEqualTo(2f)
+        assertThat(resized.panX).isEqualTo(0f)
+        assertThat(resized.panY).isEqualTo(-200f)
+    }
+
+    @Test
+    fun clampUsesVisibleOverflowForOriginalSizeImages() {
+        val clamped = ViewerViewportReducer.clampToSurface(
+            viewport = ViewerViewport(zoom = 1.5f, panX = 5_000f, panY = -5_000f),
+            surfaceWidth = 600,
+            surfaceHeight = 300,
+            imageWidth = 1_000,
+            imageHeight = 800,
+            fit = DisplayFit.ORIGINAL,
+        )
+
+        assertThat(clamped.zoom).isEqualTo(1.5f)
+        assertThat(clamped.panX).isEqualTo(450f)
+        assertThat(clamped.panY).isEqualTo(-450f)
     }
 }

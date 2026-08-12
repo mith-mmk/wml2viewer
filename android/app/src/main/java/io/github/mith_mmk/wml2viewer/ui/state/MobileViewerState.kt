@@ -79,6 +79,8 @@ data class MangaSpreadRequest(
     val landscape: Boolean,
     val divider: Boolean,
     val prefetchSpreads: Int,
+    /** UI viewport generation that this rendered spread will satisfy. */
+    val viewportGeneration: Long = 0L,
 )
 
 @Immutable
@@ -89,6 +91,8 @@ data class ViewerEngineSnapshot(
     val currentLogicalPageIndex: Int = 0,
     /** Zero to two composited page frames, in final display order. */
     val spreadFrames: List<ViewerPageFrameUi> = emptyList(),
+    /** Generation copied from the MangaSpreadRequest that produced spreadFrames. */
+    val renderedViewportGeneration: Long = 0L,
     val filerEntries: List<FilerEntryUi> = emptyList(),
     val filmstrip: List<FilmstripItemUi> = emptyList(),
     val sourceKind: SourceKind = SourceKind.LOCAL,
@@ -131,6 +135,11 @@ data class MobileViewerUiState(
     val pendingTransfer: PendingTransferUi? = null,
     val quickMenuVisible: Boolean = false,
     val exportDialogVisible: Boolean = false,
+    val viewportWidthPx: Int = 0,
+    val viewportHeightPx: Int = 0,
+    val viewportGeneration: Long = 0L,
+    /** False while the displayed spread belongs to an older viewport generation. */
+    val touchReady: Boolean = true,
 )
 
 sealed interface ViewerUiEffect {
@@ -143,6 +152,10 @@ sealed interface ViewerUiEvent {
         val isLandscape: Boolean,
         /** True only for a tablet-sized device, independent of current rotation. */
         val isTablet: Boolean = widthDp >= 600f,
+    ) : ViewerUiEvent
+    data class ViewportSizeChanged(
+        val widthPx: Int,
+        val heightPx: Int,
     ) : ViewerUiEvent
     data object Back : ViewerUiEvent
     /** Leaves the compact filer immediately instead of navigating its folder hierarchy. */

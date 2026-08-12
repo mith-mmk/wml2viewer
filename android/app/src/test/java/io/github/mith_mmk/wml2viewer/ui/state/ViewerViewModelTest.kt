@@ -69,6 +69,45 @@ class ViewerViewModelTest {
     }
 
     @Test
+    fun viewportResizeSuppressesTouchUntilMatchingSpreadGenerationArrives() = runTest(dispatcher) {
+        val pages = listOf(MangaPageRef("0", "source", portrait = true))
+        val controller = RecordingController(
+            ViewerEngineSnapshot(mangaPages = pages, currentLogicalPageIndex = 0),
+        )
+        val viewModel = ViewerViewModel(controller, InMemoryMobileSettingsStore())
+        advanceUntilIdle()
+
+        viewModel.onEvent(ViewerUiEvent.ViewportSizeChanged(800, 400))
+        runCurrent()
+
+        val generation = viewModel.uiState.value.viewportGeneration
+        assertThat(generation).isGreaterThan(0L)
+        assertThat(viewModel.uiState.value.touchReady).isFalse()
+        assertThat(controller.requests.last().viewportGeneration).isEqualTo(generation)
+
+        controller.snapshot.value = controller.snapshot.value.copy(
+            renderedViewportGeneration = generation,
+        )
+        advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.touchReady).isTrue()
+    }
+
+    @Test
+    fun viewportResizeWithoutMangaPagesKeepsTouchEnabled() = runTest(dispatcher) {
+        val controller = RecordingController(ViewerEngineSnapshot(title = "Single frame"))
+        val viewModel = ViewerViewModel(controller, InMemoryMobileSettingsStore())
+        advanceUntilIdle()
+
+        viewModel.onEvent(ViewerUiEvent.ViewportSizeChanged(600, 300))
+        advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.touchReady).isTrue()
+        assertThat(viewModel.uiState.value.viewportGeneration).isEqualTo(0L)
+        assertThat(controller.requests).isEmpty()
+    }
+
+    @Test
     fun externallyChangedMangaSettingsImmediatelyReplanCurrentLogicalPage() = runTest(dispatcher) {
         val pages = (0..3).map { MangaPageRef(it.toString(), "source", portrait = true) }
         val controller = RecordingController(

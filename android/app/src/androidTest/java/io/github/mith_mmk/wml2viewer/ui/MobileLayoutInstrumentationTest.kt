@@ -340,6 +340,90 @@ class MobileLayoutInstrumentationTest {
     }
 
     @Test
+    fun tapZonesFollowSurfaceResizeFromPortraitToLandscape() {
+        val landscape = mutableStateOf(false)
+        val bitmap = Bitmap.createBitmap(100, 300, Bitmap.Config.ARGB_8888)
+        val events = mutableListOf<ViewerUiEvent>()
+        compose.setContent {
+            val configuration = Configuration(LocalConfiguration.current).apply {
+                orientation = if (landscape.value) {
+                    Configuration.ORIENTATION_LANDSCAPE
+                } else {
+                    Configuration.ORIENTATION_PORTRAIT
+                }
+                smallestScreenWidthDp = 411
+            }
+            CompositionLocalProvider(LocalConfiguration provides configuration) {
+                MobileViewerContent(
+                    state = viewerState(
+                        engine = ViewerEngineSnapshot(frame = bitmap.asImageBitmap()),
+                        showTopChrome = false,
+                    ),
+                    onEvent = events::add,
+                    modifier = if (landscape.value) {
+                        Modifier.requiredSize(width = 600.dp, height = 300.dp)
+                    } else {
+                        Modifier.requiredSize(width = 300.dp, height = 600.dp)
+                    },
+                )
+            }
+        }
+
+        val surface = compose.onNodeWithTag("viewer-surface")
+        val portraitSize = surface.fetchSemanticsNode().size
+        surface.performTouchInput {
+            click(Offset(portraitSize.width * 0.75f, portraitSize.height * 0.5f))
+        }
+        compose.mainClock.advanceTimeBy(1_000L)
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(
+                TapZone.MIDDLE_RIGHT,
+                events.filterIsInstance<ViewerUiEvent.TapZonePressed>().single().zone,
+            )
+            events.clear()
+            landscape.value = true
+        }
+        compose.waitForIdle()
+
+        val landscapeSize = surface.fetchSemanticsNode().size
+        surface.performTouchInput {
+            click(Offset(landscapeSize.width * 0.575f, landscapeSize.height * 0.5f))
+        }
+        compose.mainClock.advanceTimeBy(1_000L)
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(
+                TapZone.MIDDLE_RIGHT,
+                events.filterIsInstance<ViewerUiEvent.TapZonePressed>().single().zone,
+            )
+        }
+    }
+
+    @Test
+    fun pendingViewportGenerationSuppressesZoneTap() {
+        val bitmap = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
+        val events = mutableListOf<ViewerUiEvent>()
+        compose.setContent {
+            MobileViewerContent(
+                state = viewerState(
+                    engine = ViewerEngineSnapshot(frame = bitmap.asImageBitmap()),
+                    showTopChrome = false,
+                ).copy(touchReady = false),
+                onEvent = events::add,
+                modifier = Modifier.requiredSize(360.dp),
+            )
+        }
+
+        compose.onNodeWithTag("viewer-surface").performTouchInput { click() }
+        compose.mainClock.advanceTimeBy(1_000L)
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertFalse(events.any { it is ViewerUiEvent.TapZonePressed })
+        }
+    }
+
+    @Test
     fun filmstripPanelConsumesBlankAreaWithoutTriggeringViewerZone() {
         val bitmap = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
         val events = mutableListOf<ViewerUiEvent>()

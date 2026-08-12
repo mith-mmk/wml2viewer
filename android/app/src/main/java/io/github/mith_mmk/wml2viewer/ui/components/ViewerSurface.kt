@@ -11,6 +11,8 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -21,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
@@ -28,7 +31,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -47,6 +55,7 @@ import io.github.mith_mmk.wml2viewer.ui.state.ViewerPageFrameUi
 import io.github.mith_mmk.wml2viewer.ui.touch.GestureArbiter
 import io.github.mith_mmk.wml2viewer.ui.touch.GestureIntent
 import io.github.mith_mmk.wml2viewer.ui.touch.TapZoneResolver
+import io.github.mith_mmk.wml2viewer.ui.touch.TouchInsets
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -57,9 +66,34 @@ fun ViewerSurface(
     onZoneTap: (TapZone) -> Unit,
     onAction: (ViewerAction) -> Unit,
     onTransform: (panX: Float, panY: Float, zoomChange: Float) -> Unit,
+    onViewportSizeChanged: (IntSize) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var size by remember { mutableStateOf(IntSize.Zero) }
+    var boundsInWindow by remember { mutableStateOf(Rect.Zero) }
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val hostView = LocalView.current
+    val safeDrawing = WindowInsets.safeDrawing
+    val localTouchInsets = if (
+        boundsInWindow.width > 0f && boundsInWindow.height > 0f &&
+        hostView.width > 0 && hostView.height > 0
+    ) {
+        val windowLeft = safeDrawing.getLeft(density, layoutDirection).toFloat()
+        val windowTop = safeDrawing.getTop(density).toFloat()
+        val windowRight = safeDrawing.getRight(density, layoutDirection).toFloat()
+        val windowBottom = safeDrawing.getBottom(density).toFloat()
+        val safeRightEdge = hostView.width.toFloat() - windowRight
+        val safeBottomEdge = hostView.height.toFloat() - windowBottom
+        TouchInsets(
+            left = (windowLeft - boundsInWindow.left).coerceAtLeast(0f),
+            top = (windowTop - boundsInWindow.top).coerceAtLeast(0f),
+            right = (boundsInWindow.right - safeRightEdge).coerceAtLeast(0f),
+            bottom = (boundsInWindow.bottom - safeBottomEdge).coerceAtLeast(0f),
+        )
+    } else {
+        TouchInsets()
+    }
     val arbiter = remember { GestureArbiter() }
     val colorFilter = remember(state.grayscaleEnabled) {
         val saturation = viewerSaturation(state.grayscaleEnabled)
@@ -91,6 +125,12 @@ fun ViewerSurface(
             panY = state.panY,
         )
     } else null
+    val visibleTouchRect = TapZoneResolver.visibleImageRect(
+        imageRect = fittedImageRect,
+        surfaceWidth = size.width.toFloat(),
+        surfaceHeight = size.height.toFloat(),
+        insets = localTouchInsets,
+    )
     val gestureModifier = Modifier
         .pointerInput(gestureSettings.pinchZoom, gestureSettings.pan, state.zoom) {
             if (!gestureSettings.pinchZoom && !gestureSettings.pan) return@pointerInput
@@ -160,7 +200,8 @@ fun ViewerSurface(
         .pointerInput(
             gestureSettings.doubleTapAction,
             gestureSettings.longPressAction,
-            fittedImageRect,
+            visibleTouchRect,
+            state.touchReady,
         ) {
             detectTapGestures(
                 onPress = {
@@ -172,11 +213,11 @@ fun ViewerSurface(
                     }
                 },
                 onTap = { offset ->
-                    if (arbiter.accept(GestureIntent.SINGLE_TAP)) {
+                    if (state.touchReady && arbiter.accept(GestureIntent.SINGLE_TAP)) {
                         TapZoneResolver.resolve(
                             x = offset.x,
                             y = offset.y,
-                            rect = fittedImageRect,
+                            rect = visibleTouchRect,
                         )?.let(onZoneTap)
                     }
                 },
@@ -197,7 +238,11 @@ fun ViewerSurface(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            .onSizeChanged { size = it }
+            .onGloballyPositioned { boundsInWindow = it.boundsInWindow() }
+            .onSizeChanged {
+                size = it
+                onViewportSizeChanged(it)
+            }
             .then(gestureModifier)
             .testTag("viewer-surface"),
         contentAlignment = Alignment.Center,

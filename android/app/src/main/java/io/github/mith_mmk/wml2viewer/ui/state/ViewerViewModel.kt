@@ -45,7 +45,9 @@ class ViewerViewModel(
                     it.copy(
                         engine = snapshot,
                         fitOverride = if (mangaIdentityChanged) null else it.fitOverride,
-                    )
+                        touchReady = snapshot.mangaPages.isEmpty() ||
+                            snapshot.renderedViewportGeneration >= it.viewportGeneration,
+                    ).clampViewportToSurface()
                 }
                 if (mangaIdentityChanged) requestMangaSpread(_uiState.value.isLandscape)
             }
@@ -62,6 +64,7 @@ class ViewerViewModel(
     fun onEvent(event: ViewerUiEvent) {
         when (event) {
             is ViewerUiEvent.WindowMetricsChanged -> updateWindowMetrics(event)
+            is ViewerUiEvent.ViewportSizeChanged -> updateViewportSize(event)
             ViewerUiEvent.Back -> navigateBack()
             ViewerUiEvent.CloseFiler -> _uiState.update {
                 it.copy(screen = MobileScreen.VIEWER, pendingTransfer = null)
@@ -176,10 +179,45 @@ class ViewerViewModel(
         } else {
             DeviceClass.EXPANDED
         }
-        _uiState.update {
-            it.copy(deviceClass = deviceClass, isLandscape = event.isLandscape)
+        _uiState.update { state ->
+            val changed = state.deviceClass != deviceClass || state.isLandscape != event.isLandscape
+            val needsSpread = state.engine.hasCurrentMangaPage()
+            state.copy(
+                deviceClass = deviceClass,
+                isLandscape = event.isLandscape,
+                viewportGeneration = if (changed && needsSpread) {
+                    state.viewportGeneration + 1L
+                } else {
+                    state.viewportGeneration
+                },
+                touchReady = if (changed && needsSpread) false else state.touchReady,
+            ).clampViewportToSurface()
         }
         requestMangaSpread(event.isLandscape)
+    }
+
+    private fun updateViewportSize(event: ViewerUiEvent.ViewportSizeChanged) {
+        if (event.widthPx <= 0 || event.heightPx <= 0) return
+        var changed = false
+        _uiState.update { state ->
+            changed = state.viewportWidthPx != event.widthPx ||
+                state.viewportHeightPx != event.heightPx
+            if (!changed) return@update state
+            val needsSpread = state.engine.hasCurrentMangaPage()
+            state.copy(
+                viewportWidthPx = event.widthPx,
+                viewportHeightPx = event.heightPx,
+                viewportGeneration = if (needsSpread) {
+                    state.viewportGeneration + 1L
+                } else {
+                    state.viewportGeneration
+                },
+                touchReady = if (needsSpread) false else true,
+            ).clampViewportToSurface()
+        }
+        if (changed && _uiState.value.engine.hasCurrentMangaPage()) {
+            requestMangaSpread(_uiState.value.isLandscape)
+        }
     }
 
     private fun navigateBack() {
@@ -310,7 +348,9 @@ class ViewerViewModel(
     }
 
     private fun updateViewport(transform: (ViewerViewport) -> ViewerViewport) {
-        _uiState.update { state -> state.withViewport(transform(state.viewport())) }
+        _uiState.update { state ->
+            state.withViewport(transform(state.viewport())).clampViewportToSurface()
+        }
     }
 
     private fun replaceSettings(settings: MobileViewerSettings) {
@@ -331,6 +371,7 @@ class ViewerViewModel(
                     landscape = isLandscape,
                     divider = state.settings.manga.divider,
                     prefetchSpreads = state.settings.manga.prefetchSpreads,
+                    viewportGeneration = state.viewportGeneration,
                 ),
             )
         }
@@ -382,11 +423,39 @@ private fun MobileViewerUiState.viewport(): ViewerViewport = ViewerViewport(
     panY = panY,
 )
 
+private fun ViewerEngineSnapshot.hasCurrentMangaPage(): Boolean =
+    currentLogicalPageIndex in mangaPages.indices
+
 private fun MobileViewerUiState.withViewport(viewport: ViewerViewport): MobileViewerUiState = copy(
     zoom = viewport.zoom,
     panX = viewport.panX,
     panY = viewport.panY,
 )
+
+private fun MobileViewerUiState.clampViewportToSurface(): MobileViewerUiState {
+    if (viewportWidthPx <= 0 || viewportHeightPx <= 0) return this
+    val frames = engine.spreadFrames
+    val imageWidth = if (frames.isNotEmpty()) {
+        frames.sumOf { it.frame.width }
+    } else {
+        engine.frame?.width ?: return this
+    }
+    val imageHeight = if (frames.isNotEmpty()) {
+        frames.maxOf { it.frame.height }
+    } else {
+        engine.frame?.height ?: return this
+    }
+    return withViewport(
+        ViewerViewportReducer.clampToSurface(
+            viewport = viewport(),
+            surfaceWidth = viewportWidthPx,
+            surfaceHeight = viewportHeightPx,
+            imageWidth = imageWidth,
+            imageHeight = imageHeight,
+            fit = fitOverride ?: settings.viewing.fit,
+        ),
+    )
+}
 
 /** ServiceLocator/AppGraph integration point for production Activity hosts. */
 class ViewerViewModelFactory(

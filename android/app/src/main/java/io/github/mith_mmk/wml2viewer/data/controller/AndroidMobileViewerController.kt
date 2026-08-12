@@ -683,6 +683,7 @@ class AndroidMobileViewerController(
                     frame = currentFrame,
                     mangaPages = pageRefs,
                     spreadFrames = frames,
+                    renderedViewportGeneration = request.viewportGeneration,
                     loading = false,
                     error = null,
                 )

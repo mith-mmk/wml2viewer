@@ -154,6 +154,7 @@ fun MobileViewerContent(
             ) state else state.copy(
                 deviceClass = if (compact) DeviceClass.COMPACT else DeviceClass.EXPANDED,
                 isLandscape = isLandscape,
+                touchReady = if (state.engine.mangaPages.isEmpty()) state.touchReady else false,
             )
 
             LaunchedEffect(maxWidth, isLandscape, isTablet) {
@@ -473,6 +474,9 @@ private fun ViewerPane(
             onAction = { onEvent(ViewerUiEvent.PerformAction(it)) },
             onTransform = { panX, panY, zoom ->
                 onEvent(ViewerUiEvent.Transform(panX, panY, zoom))
+            },
+            onViewportSizeChanged = { size ->
+                onEvent(ViewerUiEvent.ViewportSizeChanged(size.width, size.height))
             },
         )
         if (state.settings.viewing.showTopChrome && !(compact && state.isLandscape)) {

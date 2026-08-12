@@ -18,6 +18,16 @@ data class TouchRect(
 ) {
     val width: Float get() = right - left
     val height: Float get() = bottom - top
+
+    fun intersect(other: TouchRect): TouchRect? {
+        val intersection = TouchRect(
+            left = maxOf(left, other.left),
+            top = maxOf(top, other.top),
+            right = minOf(right, other.right),
+            bottom = minOf(bottom, other.bottom),
+        )
+        return intersection.takeIf { it.width > 0f && it.height > 0f }
+    }
 }
 
 object TapZoneResolver {
@@ -98,6 +108,24 @@ object TapZoneResolver {
             top = (base.top - centerY) * safeZoom + centerY + panY,
             right = (base.right - centerX) * safeZoom + centerX + panX,
             bottom = (base.bottom - centerY) * safeZoom + centerY + panY,
+        )
+    }
+
+    /** Visible portion of a transformed image; zone cells must never include clipped pixels. */
+    fun visibleImageRect(
+        imageRect: TouchRect?,
+        surfaceWidth: Float,
+        surfaceHeight: Float,
+        insets: TouchInsets = TouchInsets(),
+    ): TouchRect? {
+        if (imageRect == null || surfaceWidth <= 0f || surfaceHeight <= 0f) return null
+        return imageRect.intersect(
+            TouchRect(
+                left = insets.left.coerceAtLeast(0f),
+                top = insets.top.coerceAtLeast(0f),
+                right = (surfaceWidth - insets.right.coerceAtLeast(0f)),
+                bottom = (surfaceHeight - insets.bottom.coerceAtLeast(0f)),
+            ),
         )
     }
 }
