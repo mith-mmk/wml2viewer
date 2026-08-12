@@ -246,8 +246,9 @@ jobs:
             if (echo > /dev/tcp/127.0.0.1/1445) 2>/dev/null; then
               actual_max_protocol="$(docker exec wml2viewer-samba \
                 testparm --suppress-prompt --parameter-name='server max protocol' 2>/dev/null | tr -d '\r')"
-              if [ "$actual_max_protocol" != "$WML2VIEWER_SAMBA_MAX_PROTOCOL" ]; then
-                echo "Samba server max protocol mismatch: expected $WML2VIEWER_SAMBA_MAX_PROTOCOL, got $actual_max_protocol" >&2
+              expected_testparm_protocol="${WML2VIEWER_SAMBA_MAX_PROTOCOL%%_*}"
+              if [ "$actual_max_protocol" != "$expected_testparm_protocol" ]; then
+                echo "Samba server max protocol mismatch: expected $expected_testparm_protocol, got $actual_max_protocol" >&2
                 exit 1
               fi
               exit 0
