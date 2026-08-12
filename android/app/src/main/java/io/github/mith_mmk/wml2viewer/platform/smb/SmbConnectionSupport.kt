@@ -21,10 +21,9 @@ internal object SmbConnectionSupport {
         )
         .withMultiProtocolNegotiate(false)
         .withSigningEnabled(true)
-        // SMBJ treats this as a client preference/capability. shouldEncryptData() remains
-        // false when the negotiated SMB2/3 session has no encryption key, allowing a
-        // visible plaintext fallback unless the profile requires encryption below.
-        .withEncryptData(true)
+        // Anonymous sessions have no key for SMB3 encryption. Authenticated sessions
+        // prefer encryption; requireEncryption is enforced after session negotiation.
+        .withEncryptData(profile.authenticationMode != SmbAuthenticationMode.GUEST)
         .build()
 
     /** Authentication must complete before CredentialSecret.use clears its password. */

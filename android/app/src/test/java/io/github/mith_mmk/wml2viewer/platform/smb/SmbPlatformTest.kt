@@ -22,6 +22,9 @@ class SmbPlatformTest {
         SmbDialectPolicy.requireSmb2Or3("SMB_3_1_1")
         assertThat(SmbConnectionSupport.config(
             SmbProfile("prefer-encryption", "nas", authenticationMode = SmbAuthenticationMode.GUEST, requireEncryption = false),
+        ).isEncryptData).isFalse()
+        assertThat(SmbConnectionSupport.config(
+            SmbProfile("prefer-encryption", "nas", username = "reader"),
         ).isEncryptData).isTrue()
     }
 
