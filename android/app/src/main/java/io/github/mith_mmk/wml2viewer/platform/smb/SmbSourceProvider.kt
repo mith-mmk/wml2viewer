@@ -39,7 +39,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.FilterInputStream
-import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.URLConnection
@@ -458,7 +457,7 @@ class SmbSourceProvider(
             }
             return SourceException(code, message, error, retryable = false)
         }
-        return if (error is IOException) {
+        return if (error.isRetryableSmbNetworkFailure()) {
             SourceException(SourceErrorCode.NETWORK, message, error, retryable = true)
         } else {
             SourceException(SourceErrorCode.IO, message, error, retryable = false)
