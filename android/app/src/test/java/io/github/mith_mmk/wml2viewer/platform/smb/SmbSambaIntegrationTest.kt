@@ -139,13 +139,18 @@ class SmbSambaIntegrationTest {
         val name = "guest-${UUID.randomUUID()}.txt"
         try {
             val bytes = "guest-write".encodeToByteArray()
+            checkpoint("guest:write")
             val entry = provider.writeVerified(provider.root, name, bytes)
+            checkpoint("guest:read")
             assertThat(provider.readBytesAndDigest(entry)).isEqualTo(bytes.sha256())
+            checkpoint("guest:delete")
             assertThat(provider.trashOrDelete(entry, allowPermanentDelete = true))
                 .isEqualTo(DeleteDisposition.PERMANENTLY_DELETED)
+            checkpoint("guest:security-status")
             assertThat(provider.securityStatus.value.dialect).startsWith(environment.expectedDialectPrefix)
             SmbDialectPolicy.requireSmb2Or3(provider.securityStatus.value.dialect!!)
         } finally {
+            checkpoint("guest:cleanup")
             runCatching { provider.list(provider.root) }.getOrDefault(emptyList()).firstOrNull { it.name == name }?.let {
                 runCatching { provider.trashOrDelete(it.ref, allowPermanentDelete = true) }
             }

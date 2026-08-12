@@ -33,11 +33,14 @@ internal object SmbConnectionSupport {
         profile: SmbProfile,
         credentialStore: CredentialStore,
     ): Session = when (profile.authenticationMode) {
-        SmbAuthenticationMode.GUEST -> connection.authenticate(AuthenticationContext.guest())
+        SmbAuthenticationMode.GUEST -> connection.authenticate(guestAuthenticationContext())
         SmbAuthenticationMode.USER_PASSWORD -> credentialStore.load(profile.profileId)?.use { secret ->
             connection.authenticate(AuthenticationContext(profile.username!!, secret.password, profile.domain))
         } ?: throw SourceException(SourceErrorCode.AUTHENTICATION_FAILED, "SMB credentials are unavailable")
     }
+
+    /** Anonymous login lets the server select its configured guest account. */
+    internal fun guestAuthenticationContext(): AuthenticationContext = AuthenticationContext.anonymous()
 
     fun securityStatus(connection: Connection, session: Session): SmbSecurityStatus {
         val dialect = connection.negotiatedProtocol.dialect
