@@ -185,6 +185,25 @@ jobs:
           path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
 
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: install rust Apple targets
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.97.1
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - name: test Rust workspace
+        run: cargo test --workspace --locked
+      - name: build iOS app (unsigned device)
+        run: xcodebuild -project ios/Wml2Viewer.xcodeproj -scheme Wml2Viewer -sdk iphoneos -configuration Debug -derivedDataPath "$RUNNER_TEMP/.test-xcode" CODE_SIGNING_ALLOWED=NO build
+      - name: build iOS Simulator tests
+        run: xcodebuild -project ios/Wml2Viewer.xcodeproj -scheme Wml2Viewer -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -configuration Debug -derivedDataPath "$RUNNER_TEMP/.test-xcode-simulator" CODE_SIGNING_ALLOWED=NO build-for-testing
+      - name: verify iOS C ABI header
+        run: clang -fsyntax-only -x c -std=c17 -Wall -Wextra -Werror crates/wml2viewer-ios/include/wml2viewer_ios.h
+
   android-samba-integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

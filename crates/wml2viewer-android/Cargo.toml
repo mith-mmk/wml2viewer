@@ -12,4 +12,4 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 jni = "0.22.4"
-wml2viewer-core = { path = "../wml2viewer-core" }
+wml2viewer-mobile-bridge = { path = "../wml2viewer-mobile-bridge" }

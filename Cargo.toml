@@ -3,7 +3,9 @@ members = [
     ".",
     "crates/wml2",
     "crates/wml2viewer-core",
+    "crates/wml2viewer-mobile-bridge",
     "crates/wml2viewer-android",
+    "crates/wml2viewer-ios",
 ]
 resolver = "2"
 

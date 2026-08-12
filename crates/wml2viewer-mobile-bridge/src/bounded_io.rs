@@ -1,3 +1,5 @@
+//! Bounded local-file reads shared by mobile bridge adapters.
+
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
@@ -5,12 +7,12 @@ use std::path::Path;
 const READ_CHUNK_BYTES: usize = 64 * 1024;
 
 #[derive(Debug)]
-pub(crate) enum BoundedReadError {
+pub enum BoundedReadError {
     Io(io::Error),
     Limit { dimension: &'static str },
 }
 
-pub(crate) fn read_file_bounded(
+pub fn read_file_bounded(
     path: &Path,
     maximum_bytes: u64,
     dimension: &'static str,
@@ -69,7 +71,7 @@ fn read_bounded(
 }
 
 #[cfg(test)]
-pub(crate) fn read_bounded_for_test(
+pub fn read_bounded_for_test(
     reader: impl Read,
     declared_bytes: u64,
     maximum_bytes: u64,

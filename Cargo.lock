@@ -5083,7 +5083,7 @@ name = "wml2viewer-android"
 version = "0.0.19"
 dependencies = [
  "jni",
- "wml2viewer-core",
+ "wml2viewer-mobile-bridge",
 ]
 
 [[package]]
@@ -5093,6 +5093,20 @@ dependencies = [
  "oxiarc-archive",
  "wml2",
  "zip",
+]
+
+[[package]]
+name = "wml2viewer-ios"
+version = "0.0.19"
+dependencies = [
+ "wml2viewer-mobile-bridge",
+]
+
+[[package]]
+name = "wml2viewer-mobile-bridge"
+version = "0.0.19"
+dependencies = [
+ "wml2viewer-core",
 ]
 
 [[package]]
