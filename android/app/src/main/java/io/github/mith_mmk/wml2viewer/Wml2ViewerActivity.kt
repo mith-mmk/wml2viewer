@@ -1,145 +1,228 @@
 package io.github.mith_mmk.wml2viewer
 
-import android.app.NativeActivity
+import android.Manifest
+import android.graphics.Color
 import android.content.Intent
-import android.net.Uri
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.provider.DocumentsContract
-import android.provider.OpenableColumns
-import android.widget.Toast
-import java.io.File
-import java.io.FileOutputStream
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.core.view.WindowCompat
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
+import io.github.mith_mmk.wml2viewer.ui.MobileUiHostCallbacks
+import io.github.mith_mmk.wml2viewer.ui.Wml2ViewerApp
+import io.github.mith_mmk.wml2viewer.ui.model.ExportDestination
+import io.github.mith_mmk.wml2viewer.ui.model.ExportFormat
+import io.github.mith_mmk.wml2viewer.ui.model.ExportRequest
+import io.github.mith_mmk.wml2viewer.ui.state.ViewerUiEvent
+import io.github.mith_mmk.wml2viewer.ui.state.ViewerViewModel
+import io.github.mith_mmk.wml2viewer.ui.theme.CinematicDarkTheme
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
-class Wml2ViewerActivity : NativeActivity() {
-    private val handler = Handler(Looper.getMainLooper())
-    private val pickerRequestCode = 4107
-    private val pollRequest = object : Runnable {
-        override fun run() {
-            if (File(filesDir, "picker.request").delete()) openFolderPicker()
-            handler.postDelayed(this, 250)
+class Wml2ViewerActivity : ComponentActivity() {
+    private var viewerViewModel: ViewerViewModel? = null
+    private var pendingExportRequest: ExportRequest? = null
+    private val deferredViewerEvents = ArrayDeque<ViewerUiEvent>()
+    private val requestNotificationPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { /* Foreground work remains valid when the user declines. */ }
+    private val selectExportDirectory = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val request = pendingExportRequest
+        pendingExportRequest = null
+        val uri = result.data?.data
+        if (result.resultCode == RESULT_OK && uri != null) {
+            dispatchViewerEvent(
+                ViewerUiEvent.ExportDocumentCreated(uri.toString(), request),
+            )
+        } else {
+            dispatchViewerEvent(ViewerUiEvent.ExportDocumentCancelled)
         }
+    }
+    private val openDocumentTree = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val data = result.data ?: return@registerForActivityResult
+        val uri = data.data ?: return@registerForActivityResult
+        val takeFlags = data.flags and (
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        )
+        if (takeFlags and Intent.FLAG_GRANT_READ_URI_PERMISSION == 0) return@registerForActivityResult
+        dispatchViewerEvent(
+            ViewerUiEvent.SafRootGranted(
+                uriToken = uri.toString(),
+                requestRead = true,
+                requestWrite = takeFlags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0,
+            ),
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        handler.post(pollRequest)
-        val imported = File(filesDir, "imported")
-        if (!imported.exists() || imported.listFiles().isNullOrEmpty()) {
-            handler.post { openFolderPicker() }
+        pendingExportRequest = PendingExportState.restore(savedInstanceState)
+        applyDarkSystemBars(true)
+        setContent { StartupContent() }
+        lifecycleScope.launch {
+            val component = try {
+                (application as Wml2ViewerApplication).awaitComponent()
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                setContent { StartupContent(failed = true) }
+                return@launch
+            }
+            val viewModel = ViewModelProvider(
+                this@Wml2ViewerActivity,
+                component.viewerViewModelFactory,
+            )[ViewerViewModel::class.java]
+            attachViewModel(viewModel)
+            setContent {
+                Wml2ViewerApp(
+                    viewModel = viewModel,
+                    hostCallbacks = MobileUiHostCallbacks(
+                        requestSafRoot = ::requestSafRoot,
+                        applyEdgeToEdge = ::applyEdgeToEdge,
+                        applyDarkSystemBars = ::applyDarkSystemBars,
+                        requestTransferNotifications = ::requestTransferNotifications,
+                        requestCreateExportDocument = ::requestCreateExportDocument,
+                    ),
+                )
+            }
         }
     }
 
-    override fun onDestroy() {
-        handler.removeCallbacks(pollRequest)
-        super.onDestroy()
+    override fun onSaveInstanceState(outState: Bundle) {
+        PendingExportState.save(outState, pendingExportRequest)
+        super.onSaveInstanceState(outState)
     }
 
-    @Deprecated("NativeActivity uses the platform activity result callback")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != pickerRequestCode || resultCode != RESULT_OK) return
-        val resultData = data ?: return
-        val uri = resultData.data ?: return
-        val flags = resultData.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION
-        try {
-            contentResolver.takePersistableUriPermission(uri, flags)
-        } catch (_: SecurityException) {
-            showMessage("The selected provider cannot persist access")
-        }
-        getSharedPreferences("storage", MODE_PRIVATE).edit().putString("tree_uri", uri.toString()).apply()
-        importTreeAsync(uri)
-    }
-
-    private fun openFolderPicker() {
+    private fun requestSafRoot() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-            getSharedPreferences("storage", MODE_PRIVATE).getString("tree_uri", null)?.let {
-                putExtra(DocumentsContract.EXTRA_INITIAL_URI, Uri.parse(it))
-            }
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
+            )
         }
-        startActivityForResult(intent, pickerRequestCode)
+        openDocumentTree.launch(intent)
     }
 
-    private fun importTreeAsync(treeUri: Uri) {
-        showMessage("Importing folder…")
-        Thread {
-            val staging = File(filesDir, ".importing")
-            val destination = File(filesDir, "imported")
-            try {
-                staging.deleteRecursively()
-                staging.mkdirs()
-                copyDocumentChildren(treeUri, DocumentsContract.getTreeDocumentId(treeUri), staging)
-                destination.deleteRecursively()
-                if (!staging.renameTo(destination)) {
-                    staging.copyRecursively(destination, overwrite = true)
-                    staging.deleteRecursively()
-                }
-                File(filesDir, "import.ready").writeText(treeUri.toString())
-                showMessage("Folder imported")
-            } catch (error: Exception) {
-                staging.deleteRecursively()
-                showMessage("Import failed: ${error.message ?: error.javaClass.simpleName}")
-            }
-        }.start()
+    private fun applyEdgeToEdge(enabled: Boolean) {
+        WindowCompat.setDecorFitsSystemWindows(window, !enabled)
     }
 
-    private fun copyDocumentChildren(treeUri: Uri, parentId: String, destination: File) {
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
-        val projection = arrayOf(
-            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-            OpenableColumns.DISPLAY_NAME,
-            DocumentsContract.Document.COLUMN_MIME_TYPE,
-        )
-        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
-            val idIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-            val nameIndex = cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)
-            val mimeIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
-            while (cursor.moveToNext()) {
-                val documentId = cursor.getString(idIndex)
-                val displayName = safeName(cursor.getString(nameIndex), documentId)
-                val mime = cursor.getString(mimeIndex)
-                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                    val child = uniqueDestination(destination, displayName)
-                    child.mkdirs()
-                    copyDocumentChildren(treeUri, documentId, child)
-                    if (child.listFiles().isNullOrEmpty()) child.delete()
-                } else if (isSupported(displayName)) {
-                    val documentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
-                    contentResolver.openInputStream(documentUri)?.use { input ->
-                        FileOutputStream(uniqueDestination(destination, displayName)).use { input.copyTo(it) }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun safeName(name: String?, documentId: String): String {
-        val cleaned = name.orEmpty().replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
-        return cleaned.ifEmpty { "document_${documentId.hashCode().toUInt()}" }
-    }
-
-    private fun uniqueDestination(parent: File, name: String): File {
-        var candidate = File(parent, name)
-        if (!candidate.exists()) return candidate
-        val dot = name.lastIndexOf('.')
-        val stem = if (dot > 0) name.substring(0, dot) else name
-        val extension = if (dot > 0) name.substring(dot) else ""
-        var suffix = 2
-        while (candidate.exists()) candidate = File(parent, "${stem}_${suffix++}$extension")
-        return candidate
-    }
-
-    private fun isSupported(name: String): Boolean {
-        return name.substringAfterLast('.', "").lowercase() in setOf(
-            "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "avif",
-            "mag", "maki", "pi", "pic", "zip", "lha", "lzh", "wmltxt"
+    private fun applyDarkSystemBars(dark: Boolean) {
+        enableEdgeToEdge(
+            statusBarStyle = if (dark) {
+                SystemBarStyle.dark(Color.TRANSPARENT)
+            } else {
+                SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+            },
+            navigationBarStyle = if (dark) {
+                SystemBarStyle.dark(Color.rgb(9, 12, 15))
+            } else {
+                val lightNavigation = Color.rgb(247, 249, 254)
+                SystemBarStyle.light(lightNavigation, lightNavigation)
+            },
         )
     }
 
-    private fun showMessage(message: String) {
-        runOnUiThread { Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
+    private fun requestTransferNotifications() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    private fun requestCreateExportDocument(request: ExportRequest) {
+        if (pendingExportRequest != null) return
+        pendingExportRequest = request
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
+        selectExportDirectory.launch(intent)
+    }
+
+    private fun dispatchViewerEvent(event: ViewerUiEvent) {
+        val viewModel = viewerViewModel
+        if (viewModel == null) {
+            deferredViewerEvents.addLast(event)
+        } else {
+            viewModel.onEvent(event)
+        }
+    }
+
+    private fun attachViewModel(viewModel: ViewerViewModel) {
+        viewerViewModel = viewModel
+        while (deferredViewerEvents.isNotEmpty()) {
+            viewModel.onEvent(deferredViewerEvents.removeFirst())
+        }
+    }
+}
+
+internal object PendingExportState {
+    private const val FORMAT = "pending_export_format"
+    private const val QUALITY = "pending_export_quality"
+    private const val FILE_NAME = "pending_export_file_name"
+    private const val DESTINATION = "pending_export_destination"
+
+    fun save(state: Bundle, request: ExportRequest?) {
+        if (request == null) return
+        state.putString(FORMAT, request.format.name)
+        state.putInt(QUALITY, request.quality)
+        state.putString(FILE_NAME, request.fileName)
+        state.putString(DESTINATION, request.destination.name)
+    }
+
+    fun restore(state: Bundle?): ExportRequest? {
+        state ?: return null
+        val format = state.getString(FORMAT)?.let { runCatching { ExportFormat.valueOf(it) }.getOrNull() }
+            ?: return null
+        val destination = state.getString(DESTINATION)
+            ?.let { runCatching { ExportDestination.valueOf(it) }.getOrNull() }
+            ?: return null
+        val quality = state.getInt(QUALITY, -1).takeIf { it in 0..100 } ?: return null
+        val fileName = state.getString(FILE_NAME)?.takeIf { it.isNotBlank() } ?: return null
+        return ExportRequest(format, quality, fileName, destination)
+    }
+}
+
+@Composable
+private fun StartupContent(failed: Boolean = false) {
+    CinematicDarkTheme {
+        val description = stringResource(
+            if (failed) R.string.app_start_failed else R.string.app_starting,
+        )
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (failed) {
+                Text(description, color = MaterialTheme.colorScheme.error)
+            } else {
+                CircularProgressIndicator(
+                    Modifier.semantics { contentDescription = description },
+                )
+            }
+        }
     }
 }

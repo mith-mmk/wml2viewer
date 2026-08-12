@@ -153,33 +153,27 @@ impl ViewerApp {
         let viewer_text = self.text(UiTextKey::Viewer);
         let input_text = self.text(UiTextKey::Input);
         let render_text = self.text(UiTextKey::Render);
-        #[cfg(not(target_os = "android"))]
         let window_text = self.text(UiTextKey::Window);
         let navigation_text = self.text(UiTextKey::Navigation);
-        #[cfg(not(target_os = "android"))]
         let plugins_text = self.text(UiTextKey::Plugins);
         let resources_text = self.text(UiTextKey::Resources);
-        #[cfg(not(target_os = "android"))]
         let system_text = self.text(UiTextKey::System);
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Viewer, viewer_text);
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Input, input_text);
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Render, render_text);
-            #[cfg(not(target_os = "android"))]
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Window, window_text);
             ui.selectable_value(
                 &mut self.settings_tab,
                 SettingsTab::Navigation,
                 navigation_text,
             );
-            #[cfg(not(target_os = "android"))]
             ui.selectable_value(&mut self.settings_tab, SettingsTab::Plugins, plugins_text);
             ui.selectable_value(
                 &mut self.settings_tab,
                 SettingsTab::Resources,
                 resources_text,
             );
-            #[cfg(not(target_os = "android"))]
             ui.selectable_value(&mut self.settings_tab, SettingsTab::System, system_text);
         });
     }

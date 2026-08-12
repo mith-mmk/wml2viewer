@@ -1,0 +1,196 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "0bcd7f7539346e32ce01ff36e9553941",
+    "entities": [
+      {
+        "tableName": "transfer_jobs_v1",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`job_id` TEXT NOT NULL, `source_provider_id` TEXT NOT NULL, `source_opaque_id` TEXT NOT NULL, `destination_provider_id` TEXT NOT NULL, `destination_parent_opaque_id` TEXT NOT NULL, `destination_name` TEXT NOT NULL, `operation` TEXT NOT NULL, `collision_policy` TEXT NOT NULL, `state` TEXT NOT NULL, `phase` TEXT NOT NULL, `staging_provider_id` TEXT, `staging_opaque_id` TEXT, `planned_final_name` TEXT, `replacement_backup_name` TEXT, `committed_provider_id` TEXT, `committed_opaque_id` TEXT, `bytes_copied` INTEGER NOT NULL, `total_bytes` INTEGER, `sha256` TEXT, `attempt_count` INTEGER NOT NULL, `cancel_requested` INTEGER NOT NULL, `error_code` TEXT, `error_message` TEXT, `created_at_epoch_ms` INTEGER NOT NULL, `updated_at_epoch_ms` INTEGER NOT NULL, `started_at_epoch_ms` INTEGER, `completed_at_epoch_ms` INTEGER, PRIMARY KEY(`job_id`))",
+        "fields": [
+          {
+            "fieldPath": "jobId",
+            "columnName": "job_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceProviderId",
+            "columnName": "source_provider_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceOpaqueId",
+            "columnName": "source_opaque_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "destinationProviderId",
+            "columnName": "destination_provider_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "destinationParentOpaqueId",
+            "columnName": "destination_parent_opaque_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "destinationName",
+            "columnName": "destination_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "operation",
+            "columnName": "operation",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "collisionPolicy",
+            "columnName": "collision_policy",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phase",
+            "columnName": "phase",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stagingProviderId",
+            "columnName": "staging_provider_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "stagingOpaqueId",
+            "columnName": "staging_opaque_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "plannedFinalName",
+            "columnName": "planned_final_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "replacementBackupName",
+            "columnName": "replacement_backup_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "committedProviderId",
+            "columnName": "committed_provider_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "committedOpaqueId",
+            "columnName": "committed_opaque_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "bytesCopied",
+            "columnName": "bytes_copied",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "total_bytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sha256",
+            "columnName": "sha256",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "attemptCount",
+            "columnName": "attempt_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cancelRequested",
+            "columnName": "cancel_requested",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "errorCode",
+            "columnName": "error_code",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "errorMessage",
+            "columnName": "error_message",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "created_at_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updated_at_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtEpochMillis",
+            "columnName": "started_at_epoch_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "completedAtEpochMillis",
+            "columnName": "completed_at_epoch_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "job_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_transfer_jobs_v1_state_created_at_epoch_ms",
+            "unique": false,
+            "columnNames": [
+              "state",
+              "created_at_epoch_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfer_jobs_v1_state_created_at_epoch_ms` ON `${TABLE_NAME}` (`state`, `created_at_epoch_ms`)"
+          },
+          {
+            "name": "index_transfer_jobs_v1_updated_at_epoch_ms",
+            "unique": false,
+            "columnNames": [
+              "updated_at_epoch_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfer_jobs_v1_updated_at_epoch_ms` ON `${TABLE_NAME}` (`updated_at_epoch_ms`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '0bcd7f7539346e32ce01ff36e9553941')"
+    ]
+  }
+}

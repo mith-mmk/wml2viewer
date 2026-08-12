@@ -2,7 +2,6 @@ pub(crate) mod dispatch;
 
 use crate::options::ViewerAction;
 use crate::ui::input::dispatch::collect_triggered_actions;
-#[cfg(not(target_os = "android"))]
 use crate::ui::viewer::FileActionDialogMode;
 use crate::ui::viewer::ViewerApp;
 use eframe::egui;
@@ -162,7 +161,6 @@ impl ViewerApp {
             | ViewerAction::CopyFile
             | ViewerAction::DeleteFile
             | ViewerAction::RenameFile => {
-                #[cfg(not(target_os = "android"))]
                 self.open_file_action_dialog(action);
             }
             ViewerAction::SetMoveFolder1 => self.set_active_file_action_slot(action),
@@ -215,14 +213,6 @@ impl ViewerApp {
                 .map(PointerIntent::Action);
         }
 
-        if cfg!(target_os = "android") && response.drag_stopped() {
-            if let Some(action) =
-                horizontal_swipe_action(response.drag_delta(), &self.input_options.touch)
-            {
-                return Some(PointerIntent::Action(action));
-            }
-        }
-
         if response.double_clicked_by(egui::PointerButton::Primary) {
             return self
                 .input_options
@@ -263,7 +253,6 @@ impl ViewerApp {
         }
     }
 
-    #[cfg(not(target_os = "android"))]
     fn open_file_action_dialog(&mut self, action: ViewerAction) {
         let mode = match action {
             ViewerAction::MoveFile => FileActionDialogMode::Move,
@@ -329,43 +318,5 @@ impl ViewerApp {
             _ => return,
         }
         self.persist_config_async();
-    }
-}
-
-fn horizontal_swipe_action(
-    delta: egui::Vec2,
-    touch: &crate::options::TouchOptions,
-) -> Option<ViewerAction> {
-    if delta.x.abs() < 64.0 || delta.x.abs() <= delta.y.abs() {
-        return None;
-    }
-    if delta.x < 0.0 {
-        touch.swipe_left
-    } else {
-        touch.swipe_right
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn horizontal_swipe_uses_directional_touch_mapping() {
-        let touch = crate::options::TouchOptions::default();
-
-        assert_eq!(
-            horizontal_swipe_action(egui::vec2(-80.0, 10.0), &touch),
-            Some(ViewerAction::NextImage)
-        );
-        assert_eq!(
-            horizontal_swipe_action(egui::vec2(80.0, 10.0), &touch),
-            Some(ViewerAction::PrevImage)
-        );
-        assert_eq!(horizontal_swipe_action(egui::vec2(40.0, 0.0), &touch), None);
-        assert_eq!(
-            horizontal_swipe_action(egui::vec2(80.0, 90.0), &touch),
-            None
-        );
     }
 }

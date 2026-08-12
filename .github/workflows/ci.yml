@@ -35,12 +35,19 @@ jobs:
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: 1.97.1
+          components: rustfmt
 
       - name: cache cargo
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
+      - name: check formatting
+        run: cargo fmt --all --check
+
       - name: test workspace
         run: cargo test --workspace --locked
+
+      - name: test documentation
+        run: cargo test --workspace --doc --locked
 
       - name: check examples
         run: cargo check --workspace --examples --locked
@@ -112,12 +119,16 @@ jobs:
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
       - name: set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
 
+      - name: install Android API 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
       - name: set up Android NDK
+        id: setup-ndk
         uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1.6.0
         with:
           ndk-version: r27c
@@ -129,9 +140,29 @@ jobs:
       - name: set up Gradle
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      - name: build Android debug APK
+      - name: audit Rust Android cutover and targets
+        shell: bash
+        run: |
+          legacy_pattern='android_main|android_activity|android-native-activity|take_completed_import|request_folder_import|picker\.request|import\.ready'
+          if grep -R -n -E --include='*.rs' --include='Cargo.toml' "${legacy_pattern}" Cargo.toml src crates; then
+            echo 'legacy Android Rust entrypoint or marker code is still present' >&2
+            exit 1
+          fi
+          cargo check --package wml2viewer-android --target aarch64-linux-android --locked
+          cargo check --package wml2viewer-android --target x86_64-linux-android --locked
+
+      - name: test and build Android artifacts
         working-directory: android
-        run: bash ./gradlew assembleDebug --no-daemon
+        run: bash ./gradlew check assembleDebug assembleRelease bundleRelease --no-daemon
+
+      - name: verify Kotlin and native JNI ABI
+        shell: bash
+        env:
+          LLVM_READELF: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf
+        run: |
+          bash .github/verify-android-jni-exports.sh \
+            android/app/build/generated/jniLibs/debug/arm64-v8a/libwml2viewer_android.so \
+            android/app/build/generated/jniLibs/debug/x86_64/libwml2viewer_android.so
 
       - name: upload Android debug APK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -139,3 +170,193 @@ jobs:
           name: wml2viewer-android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: upload Android unsigned release APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wml2viewer-android-release-apk-unsigned
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
+
+      - name: upload Android unsigned release AAB
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wml2viewer-android-release-aab-unsigned
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+  android-samba-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dialect: smb2
+            server_max_protocol: SMB2_10
+            expected_dialect_prefix: SMB_2
+          - dialect: smb3
+            server_max_protocol: SMB3_11
+            expected_dialect_prefix: SMB_3
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: install Android API 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: generate ephemeral SMB credential
+        shell: bash
+        run: |
+          smb_password="$(openssl rand -hex 32)"
+          echo "::add-mask::$smb_password"
+          echo "WML2VIEWER_SMB_TEST_PASSWORD=$smb_password" >> "$GITHUB_ENV"
+
+      - name: start SMB2/3 Samba test server
+        shell: bash
+        env:
+          WML2VIEWER_SAMBA_MAX_PROTOCOL: ${{ matrix.server_max_protocol }}
+        run: |
+          samba_root="$RUNNER_TEMP/.test-wml2viewer-samba"
+          mkdir -p "$samba_root/auth" "$samba_root/guest"
+          chmod -R 0777 "$samba_root"
+          docker run --detach --name wml2viewer-samba \
+            --publish 127.0.0.1:1445:445 \
+            --volume "$samba_root:/shares" \
+            --env "ACCOUNT_wml2ci=$WML2VIEWER_SMB_TEST_PASSWORD" \
+            --env 'SAMBA_CONF_LOG_LEVEL=3' \
+            --env 'SAMBA_GLOBAL_CONFIG_server_SPACE_min_SPACE_protocol=SMB2_02' \
+            --env "SAMBA_GLOBAL_CONFIG_server_SPACE_max_SPACE_protocol=$WML2VIEWER_SAMBA_MAX_PROTOCOL" \
+            --env 'SAMBA_CONF_MAP_TO_GUEST=Bad User' \
+            --env 'SAMBA_VOLUME_CONFIG_auth=[auth]; path = /shares/auth; valid users = wml2ci; guest ok = no; read only = no; browseable = yes' \
+            --env 'SAMBA_VOLUME_CONFIG_guest=[guest]; path = /shares/guest; guest ok = yes; read only = no; browseable = yes; force user = wml2ci' \
+            ghcr.io/servercontainers/samba:smbd-only-a3.24.1-s4.23.8-r0
+          for attempt in $(seq 1 60); do
+            if (echo > /dev/tcp/127.0.0.1/1445) 2>/dev/null; then
+              actual_max_protocol="$(docker exec wml2viewer-samba \
+                testparm --suppress-prompt --parameter-name='server max protocol' 2>/dev/null | tr -d '\r')"
+              expected_testparm_protocol="${WML2VIEWER_SAMBA_MAX_PROTOCOL%%_*}"
+              if [ "$actual_max_protocol" != "$expected_testparm_protocol" ]; then
+                echo "Samba server max protocol mismatch: expected $expected_testparm_protocol, got $actual_max_protocol" >&2
+                exit 1
+              fi
+              exit 0
+            fi
+            if [ "$(docker inspect --format '{{.State.Running}}' wml2viewer-samba)" != 'true' ]; then
+              echo 'Samba test server exited before accepting connections' >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          echo 'Samba test server did not become ready' >&2
+          exit 1
+
+      - name: run real Samba provider integration tests
+        working-directory: android
+        env:
+          WML2VIEWER_SMB_TEST_SERVER: 127.0.0.1
+          WML2VIEWER_SMB_TEST_PORT: 1445
+          WML2VIEWER_SMB_TEST_USERNAME: wml2ci
+          WML2VIEWER_SMB_TEST_AUTH_SHARE: auth
+          WML2VIEWER_SMB_TEST_GUEST_SHARE: guest
+          WML2VIEWER_SMB_TEST_EXPECTED_DIALECT_PREFIX: ${{ matrix.expected_dialect_prefix }}
+        run: >-
+          bash ./gradlew :app:testDebugUnitTest
+          --tests io.github.mith_mmk.wml2viewer.platform.smb.SmbSambaIntegrationTest
+          -x buildRustDebug --no-daemon
+
+      - name: report Samba integration diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          if [ -d android/app/build/test-results/testDebugUnitTest ]; then
+            find android/app/build/test-results/testDebugUnitTest -type f -name '*.xml' -exec cat {} +
+          fi
+          docker logs --tail 200 wml2viewer-samba 2>&1 || true
+
+      - name: stop Samba test server and clear generated data
+        if: always()
+        shell: bash
+        run: |
+          docker rm --force wml2viewer-samba >/dev/null 2>&1 || true
+          rm -rf "$RUNNER_TEMP/.test-wml2viewer-samba"
+
+  android-instrumentation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 29
+            device_class: phone
+            size: 1080x2160
+            density: 420
+          - api: 36
+            device_class: phone
+            size: 1080x2400
+            density: 420
+          - api: 36
+            device_class: tablet
+            size: 2560x1600
+            density: 320
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: enable KVM group permissions
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: install rust and Android target
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.97.1
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: cache cargo
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: install Android API 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: install cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+
+      - name: set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: run API ${{ matrix.api }} ${{ matrix.device_class }} tests
+        uses: reactivecircus/android-emulator-runner@c9c93e6ba9c4194322e114c40970d5983d9a07cc # v2.38.0
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          ndk: 27.3.13750724
+          working-directory: android
+          script: bash ../.github/android-instrumentation-gate.sh '${{ matrix.size }}' '${{ matrix.density }}'

@@ -185,7 +185,6 @@ pub(crate) struct ViewerApp {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(target_os = "android", allow(dead_code))]
 pub(crate) enum SettingsTab {
     Viewer,
     Input,
@@ -2667,15 +2666,6 @@ impl ViewerApp {
 
 impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        #[cfg(target_os = "android")]
-        if let Some(root) = crate::dependent::take_completed_import() {
-            self.current_navigation_path = root.clone();
-            self.current_path = root.clone();
-            self.empty_mode = true;
-            self.set_show_filer(true);
-            self.browse_filer_directory(root.clone());
-            self.respawn_filesystem_worker();
-        }
         self.sync_window_state(ctx);
         self.update_window_title(ctx);
         self.poll_worker();

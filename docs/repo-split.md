@@ -4,13 +4,9 @@
 
 ## Current dependency shape
 
-- `wml2viewer` depends on `wml2 = "0.0.19"`
-- local development inside this repository uses:
-
-```toml
-[patch.crates-io]
-wml2 = { path = "../wml2/wml2" }
-```
+- `wml2viewer` and `wml2viewer-core` depend on `wml2 = "0.0.23"`
+- the workspace also contains the non-published `wml2viewer-core` and `wml2viewer-android` path crates
+- local source overrides, when needed, should be added explicitly with `[patch.crates-io]`; the committed manifest has no active local override
 
 ## Steps to create the new repository
 
@@ -18,8 +14,8 @@ wml2 = { path = "../wml2/wml2" }
 2. Keep `Cargo.lock` committed because this is an application crate.
 3. Move `.github/workflows/release.yml` with the repository contents.
 4. Keep `LICENSE` in the new repository root.
-5. If `wml2` should be consumed from crates.io, delete the `[patch.crates-io]` section in `Cargo.toml`.
-6. If `wml2` should track an unreleased branch, replace the dependency with a `git` dependency instead.
+5. Keep the `crates/wml2viewer-core` and `crates/wml2viewer-android` workspace members with the desktop crate.
+6. If `wml2` should track an unreleased branch, add a temporary source override without committing a machine-local absolute path.
 
 ## After the split
 

@@ -94,7 +94,7 @@
   - `touch.double_tap` / `touch.long_press`
   - `touch.pinch_zoom`
   - タッチジェスチャーは既存の `ViewerAction` または無効へ割り当てる
-  - Android初期値は左スワイプ=次、右スワイプ=前、ダブルタップ=フィット切替、長押し=メニュー、ピンチズーム=有効
+  - デスクトップUIの既定値は左スワイプ=次、右スワイプ=前、ダブルタップ=フィット切替、長押し=メニュー、ピンチズーム=有効
   - 既定値は `src/options.rs` の `default_key_mapping()`
   - 設定画面を開いた時点で、`Input` タブの編集行は「現在有効な割り当て（デフォルト+カスタム反映後）」を表示する
   - 設定画面 `Input` タブは初心者向けの行編集（`Function / Key / CTRL / ALT / SHIFT`）を提供する
@@ -106,15 +106,40 @@
   - `SetMoveFolder1` / `SetMoveFolder2` / `SetCopyFolder1` / `SetCopyFolder2` は、ファイル操作ダイアログを開かずに移動先・コピー先の active slot だけを切り替える
   - active slot の切り替えは即時に `config.toml` へ保存し、次回の `MoveFile` / `CopyFile` ダイアログ初期値へ反映する
 
-## Android MVP
+## Android 0.0.19
 
-- Android 10以降を対象とし、Debug版はエミュレータ用`x86_64`と実機用`arm64-v8a`、Release版は`arm64-v8a`を収録する
-- `NativeActivity` と `eframe` のAndroidバックエンドで既存UIを起動する
-- 共有ファイルはStorage Access Frameworkのフォルダ選択で許可を得る
-- 選択ツリー内の対応画像・ZIP/LHA・listed fileをアプリ専用領域へ読取用スナップショットとして同期する
-- 再選択時はステージング領域への同期完了後にスナップショットを置き換える
-- 共有ストレージ上の元ファイルに対する移動・コピー・削除・名称変更は行わない
-- 外部プラグイン、Google Play用AAB、製品署名は初版の対象外とする
+- Android 10（API 29）以降を対象とし、`ComponentActivity + Jetpack Compose`の単一Activityでモバイル専用UIを構成する
+- Android側はCompose、ViewModel/StateFlow、SAF、SMB、Room/WorkManager、Keystore、OS codecを所有し、Rust側は`wml2viewer-core`とJNI handle APIに限定する
+- ファイルを`EntryRef(source_id, opaque_entry_id)`で識別し、SAF URI、SMB URI、ユーザー名、パスワードはRustへ渡さない
+- SAFはpersistable URI grantを使ってproviderを直接操作し、旧方式の全ツリーsnapshotは作らない
+- SMBはSMBJのlow-level APIでSMB2/3だけを扱う。LAN自動探索とSMB1は対象外とする
+- Copy/Move/Uploadは一時名への書込、close、サイズ確認、renameで確定する。provider跨ぎMoveはSHA-256再読検証後だけ元データを削除する
+- 長時間転送はRoomの`TransferJobV1`とForeground WorkManagerで継続し、通知から進捗確認とキャンセルを行う
+- SMB passwordはAndroid Keystoreの非抽出AES-256-GCM鍵で暗号化し、ciphertextは`noBackupFilesDir`へ保存する。設定はcredential IDだけを保持する
+- codecは内蔵優先・OS fallbackを既定とし、形式ごとのoverrideと端末実測capabilityを提供する
+- Androidの見開きanchor・logical/visual order・前後anchor・次方向preloadは`wml2viewer-core`が所有する。Kotlinはtyped `NativeReadingPlanner`からstateless JNI `planReading`を呼び、同じ計算を再実装しない。入力は最大4096 pages・64 preload spreads、出力はversion/length/countを持つwire v1として検証してからUI型へ変換する
+- JNIの画像handleはRGBAのwidth/height/stride/direct bufferに加え、合成済みframe数、loop回数、frame表示時間、独立所有frame handleを公開する。公開前にposter 4096×4096 pixels、animation 4096 frames、poster+全frame RGBA総量128MiBをchecked算術で検証する。Kotlinは親handleを保持して再生対象frameだけを短命な子handleからcopy/releaseし、bufferは対応handleのrelease後に無効となる。Bitmap cacheも128MiBのbyte-weighted LRUとする
+- Android内蔵decodeはvendored `wml2` 0.0.23のlimit-aware APIを使い、canvas/frame寸法・宣言animation総量・zlib/LZW出力・cancelを対応する確保/展開/合成より前に検査する。長い合成loop中もcancelを検査し、desktopが使う従来APIはunlimitedのまま互換維持する
+- JNIの書庫handleはZIP/LHA/`.wmltxt`のentry名・size・decodeを提供し、OS codec用encoded entryはsize limit付きowned bytes handleとしてmaterializeして明示releaseする。direct encoded画像入力、書庫container、単一展開entryは各64MiB、書庫containerとentryの同時保持は128MiBを上限とする
+- local file読込はmetadataを先行検査し、fallible reserveと`limit + 1`のbounded readを使う。上限超過はdecoder/archive parserへ渡さずerror code 7とする
+- JNIの`encodeRgba`はdirect RGBA bufferとwidth/height/strideを検証し、100MP・stride 16MiB・owned input/output 512MiBを上限としてPNG/JPEG/WebPのowned bytes handleを返す
+- session内request IDは単調増加とし、cancelまたは後続requestでstaleになった処理結果を公開しない。handle IDは型を跨いで再利用せず、二重releaseとwrong-kind handleを拒否する
+- Debug版は`arm64-v8a + x86_64`、Release APK/AABは`arm64-v8a`。製品署名と公開は対象外とする
+
+### Androidモバイル設定
+
+- Android設定はversioned Proto DataStoreの`MobileConfigV1`へ保存し、デスクトップ`config.toml`を読書きしない
+- 「最後の場所を記憶」が有効な場合はsource ID、provider opaque directory/page ID、logical archive page indexだけを同DataStoreへ保存し、source/profile復元後にbreadcrumbと論理ページを再構成する。URI、path、credentialは保存しない
+- 設定カテゴリは「表示」「マンガ」「タッチ領域」「ファイラーとSMB」「コーデック」「言語と外観」「キャッシュ」「情報」だけとする
+- window位置/サイズ、pane side、キーボード/マウス、ファイル関連付け、外部plugin設定を型・保存・画面へ含めない
+- 画像矩形を3×3へ等分し、左列=前、右列=次、中央上=ファイラー、中央=設定、中央下=サブファイラーを既定とする
+- 9セルは安全なViewerActionまたは無効へ変更できるが、破壊的なファイル操作は割当不可とする
+- 既定gestureはswipe無効、pinch有効、double tap=Fit切替、long press=quick menuとし、子UI/パン/pinch/long press/double tapをtapより優先する
+- 横向き漫画は表紙を単独表示し、その後の縦長ページを見開き単位で送る。横長、相方なし、source境界は単独表示し、先読みは次の見開き1組までとする
+- 表示文字列はAndroid resource key化し、英語と日本語を同一キー集合で提供する
+- 一時的なsystem tree grantを使うexportではprocess kill後に旧文書を安全に復旧できないため`REPLACE`を提示せず、`KEEP_BOTH`または`SKIP`だけを許可する
+
+詳細は`docs/android-v2.md`、iOS/iPadOSの将来接続契約は`docs/ios-platform-contract.md`を参照する。
 
 ### ファンクション追加手順（実装者向け）
 
