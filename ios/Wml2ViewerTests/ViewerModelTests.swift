@@ -61,6 +61,60 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertTrue(config.longPressQuickMenuEnabled)
     }
 
+    func testPickerCompletionGateDeliversOnlyFirstProviderCallback() {
+        let gate = PickerCompletionGate()
+        var callbackCount = 0
+        XCTAssertTrue(gate.perform { callbackCount += 1 })
+        XCTAssertFalse(gate.perform { callbackCount += 1 })
+        XCTAssertTrue(gate.isCompleted)
+        XCTAssertEqual(callbackCount, 1)
+    }
+
+    func testFolderPickerContractDoesNotDependOnProviderURLTrailingSlash() {
+        XCTAssertTrue(PickerRequest.folder.selectionIsFolder(resourceIsDirectory: false))
+        XCTAssertTrue(PickerRequest.file.selectionIsFolder(resourceIsDirectory: true))
+        XCTAssertFalse(PickerRequest.file.selectionIsFolder(resourceIsDirectory: false))
+    }
+
+    func testWideIPadPinsConfiguredFilmstripButPhoneAndNarrowPadUseSheet() {
+        XCTAssertTrue(ViewerResponsiveLayout.pinsFilmstrip(isPad: true, width: 1_024, enabled: true))
+        XCTAssertFalse(ViewerResponsiveLayout.pinsFilmstrip(isPad: true, width: 899, enabled: true))
+        XCTAssertFalse(ViewerResponsiveLayout.pinsFilmstrip(isPad: false, width: 1_024, enabled: true))
+        XCTAssertFalse(ViewerResponsiveLayout.pinsFilmstrip(isPad: true, width: 1_024, enabled: false))
+    }
+
+    func testCodecRoutingProducesStrictFallbackOrder() {
+        XCTAssertEqual(ImageIOCodecRouter.decodeOrder(routing: "DEFAULT"), [.internalCodec, .imageIO])
+        XCTAssertEqual(ImageIOCodecRouter.decodeOrder(routing: "INTERNAL_FIRST"), [.internalCodec, .imageIO])
+        XCTAssertEqual(ImageIOCodecRouter.decodeOrder(routing: "OS_FIRST"), [.imageIO, .internalCodec])
+        XCTAssertEqual(ImageIOCodecRouter.decodeOrder(routing: "INTERNAL_ONLY"), [.internalCodec])
+        XCTAssertEqual(ImageIOCodecRouter.decodeOrder(routing: "OS_ONLY"), [.imageIO])
+        XCTAssertEqual(ImageIOCodecRouter.decodeOrder(routing: "UNKNOWN"), [.internalCodec, .imageIO])
+    }
+
+    func testCoordinatedFolderSourceListsOnlySupportedDirectChildrenAndReadsSelection() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wml2viewer-source-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let selected = root.appendingPathComponent("002.png")
+        try Data([1, 2, 3]).write(to: selected)
+        try Data([4]).write(to: root.appendingPathComponent("001.jpg"))
+        try Data([5]).write(to: root.appendingPathComponent("notes.txt"))
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("subfolder", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let source = SecurityScopedDocumentSource(
+            sourceID: UUID(), displayName: "fixture", rootURL: root, isFolder: true
+        )
+        let items = try await source.list()
+        XCTAssertEqual(items.map(\.displayName), ["001.jpg", "002.png"])
+        let selectedData = try await source.read(items[1])
+        XCTAssertEqual(selectedData, Data([1, 2, 3]))
+    }
+
     func testDoubleTapFitOverrideAlternatesWithoutChangingConfiguredFit() {
         let configured = DisplayFit.width
         let first = FitOverridePolicy.next(current: configured)
@@ -101,5 +155,16 @@ final class ViewerModelTests: XCTestCase {
         store.installTestPages(count: 5)
         XCTAssertEqual(store.testReadingPlan?.logicalIndices, [1, 2])
         XCTAssertEqual(store.testReadingPlan?.visualIndices, [2, 1])
+    }
+
+    @MainActor
+    func testViewerStorePreviousNextChangesFolderIndex() {
+        let store = ViewerStore()
+        store.installTestPages(count: 3)
+        XCTAssertEqual(store.currentIndex, 1)
+        store.next()
+        XCTAssertEqual(store.currentIndex, 2)
+        store.previous()
+        XCTAssertEqual(store.currentIndex, 1)
     }
 }

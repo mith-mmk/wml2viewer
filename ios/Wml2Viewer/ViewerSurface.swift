@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ViewerSurface: View {
     @ObservedObject var store: ViewerStore
+    var filmstripIsPinned = false
     @State private var dragStart: CGSize = .zero
     @State private var gestureScale: CGFloat = 1
     @State private var runtimeFit: DisplayFit?
@@ -22,6 +23,7 @@ struct ViewerSurface: View {
                         .scaleEffect(store.zoom * gestureScale)
                         .offset(store.pan)
                         .accessibilityLabel(store.pages.indices.contains(store.currentIndex) ? store.pages[store.currentIndex].displayName : String(localized: "Image"))
+                        .accessibilityIdentifier("viewer.currentImage")
                 } else if store.isLoading {
                     ProgressView().tint(.white)
                 } else {
@@ -30,18 +32,6 @@ struct ViewerSurface: View {
 
             }
             .contentShape(Rectangle())
-            // SwiftUI fallback keeps the bottom-center action reachable when UIKit's
-            // recognizer is hosted inside an empty-state view hierarchy.
-            .simultaneousGesture(
-                SpatialTapGesture().onEnded { value in
-                    guard store.config.touchZonesEnabled,
-                          geometry.size.height > 0,
-                          value.location.y >= geometry.size.height * 2.0 / 3.0,
-                          value.location.x >= geometry.size.width / 3.0,
-                          value.location.x < geometry.size.width * 2.0 / 3.0 else { return }
-                    store.showFilmstrip = true
-                }
-            )
             .overlay {
                 TouchGestureBridge(
                     pinchEnabled: store.config.pinchZoomEnabled,
@@ -75,14 +65,10 @@ struct ViewerSurface: View {
                     onGenerationChanged: { dragStart = .zero }
                 )
                 .accessibilityIdentifier("viewer.touchSurface")
-                .allowsHitTesting(!store.showSettings && !store.showFilmstrip && !store.isPickerPresented)
+                .accessibilityLabel(String(localized: "Viewer"))
+                .accessibilityValue(store.pagePositionAccessibilityValue)
+                .allowsHitTesting(!store.showSettings && (!store.showFilmstrip || filmstripIsPinned) && !store.isPickerPresented)
             }
-            .overlay(alignment: .top) {
-                if store.config.showTopChrome {
-                    topChrome
-                }
-            }
-            .overlay(alignment: .bottom) { bottomChrome }
             .onAppear { store.updateViewport(geometry.size) }
             .onChange(of: geometry.size) { _, size in store.updateViewport(size) }
         }
@@ -95,48 +81,6 @@ struct ViewerSurface: View {
         case .contain, .original: .fit
         case .width, .height: .fill
         }
-    }
-
-    private var topChrome: some View {
-        VStack {
-            HStack {
-                Button { store.requestFilePicker() } label: {
-                    Label(String(localized: "Open"), systemImage: "folder")
-                }
-                .frame(minHeight: 44)
-                .accessibilityIdentifier("viewer.open")
-                .accessibilityHint(String(localized: "Open a document from Files"))
-                Spacer()
-                Button { store.showSettings = true } label: {
-                    Image(systemName: "gearshape")
-                }
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityIdentifier("viewer.settings")
-                .accessibilityLabel(String(localized: "Settings"))
-            }
-            .padding(.horizontal)
-            .padding(.top, 8)
-            .foregroundStyle(.white)
-            Spacer()
-        }
-    }
-
-    private var bottomChrome: some View {
-        HStack(spacing: 24) {
-            Button { store.previous() } label: { Image(systemName: "chevron.left") }
-                .accessibilityIdentifier("viewer.previous")
-            Button { store.showFilmstrip = true } label: { Image(systemName: "rectangle.stack") }
-                .accessibilityIdentifier("viewer.filmstrip")
-            Button { store.requestFolderPicker() } label: { Image(systemName: "folder.badge.plus") }
-                .accessibilityIdentifier("viewer.folder")
-            Button { store.next() } label: { Image(systemName: "chevron.right") }
-                .accessibilityIdentifier("viewer.next")
-        }
-        .font(.title2)
-        .buttonStyle(.borderedProminent)
-        .tint(.black.opacity(0.65))
-        .foregroundStyle(.white)
-        .padding(.bottom, 18)
     }
 
 }

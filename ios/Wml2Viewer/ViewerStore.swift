@@ -82,6 +82,38 @@ final class ViewerStore: ObservableObject {
             config.showTopChrome = false
         }
     }
+
+    func installUITestFixtureIfRequested() async {
+        guard ProcessInfo.processInfo.environment["WML2VIEWER_UI_TEST_FIXTURE_FOLDER"] == "1" else { return }
+        do {
+            let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("ui-folder-fixture", isDirectory: true)
+            try? FileManager.default.removeItem(at: directory)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let colors: [[UInt8]] = [[0xE8, 0x4A, 0x5F, 0xFF], [0x4A, 0x90, 0xE2, 0xFF], [0x50, 0xC8, 0x78, 0xFF]]
+            for (index, color) in colors.enumerated() {
+                let data = Data(color)
+                guard let provider = CGDataProvider(data: data as CFData),
+                      let image = CGImage(
+                          width: 1, height: 1, bitsPerComponent: 8, bitsPerPixel: 32,
+                          bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                          bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                          provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
+                      ) else { continue }
+                let url = directory.appendingPathComponent(String(format: "page-%02d.png", index + 1))
+                guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else { continue }
+                CGImageDestinationAddImage(destination, image, nil)
+                _ = CGImageDestinationFinalize(destination)
+            }
+            let fixture = SecurityScopedDocumentSource(
+                sourceID: UUID(), displayName: "UI fixture", rootURL: directory, isFolder: true
+            )
+            source = fixture
+            try await open(source: fixture, preferredIndex: 0)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
     #endif
 
     func requestFilePicker() {
@@ -95,11 +127,25 @@ final class ViewerStore: ObservableObject {
     }
 
     func finishPicker(_ result: Result<URL, Error>?) {
+        let completedRequest = pendingPicker
         pendingPicker = nil
         isPickerPresented = false
-        guard let result else { return }
+        guard let result else {
+            Task { await reconcileExternalChanges() }
+            return
+        }
         Task { @MainActor in
-            do { try await accept(url: result.get(), isFolder: result.get().hasDirectoryPath) }
+            do {
+                let url = try result.get()
+                // An explicit folder picker is authoritative. File Provider URLs do
+                // not have to encode directory-ness with a trailing slash.
+                let resourceIsDirectory =
+                    (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                let isFolder = completedRequest?.selectionIsFolder(
+                    resourceIsDirectory: resourceIsDirectory
+                ) ?? resourceIsDirectory
+                try await accept(url: url, isFolder: isFolder)
+            }
             catch { errorMessage = error.localizedDescription }
         }
     }
@@ -183,6 +229,11 @@ final class ViewerStore: ObservableObject {
         guard !pages.isEmpty else { return }
         currentIndex = readingPlan?.previousAnchorIndex ?? max(currentIndex - 1, 0)
         loadCurrent()
+    }
+
+    var pagePositionAccessibilityValue: String {
+        guard !pages.isEmpty else { return "0 / 0" }
+        return "\(currentIndex + 1) / \(pages.count)"
     }
 
     func select(index: Int) {
@@ -326,7 +377,10 @@ final class ViewerStore: ObservableObject {
                         guard let self, self.pages.indices.contains(plannedIndex) else { continue }
                         let plannedItem = self.pages[plannedIndex]
                         let data = try await source.read(plannedItem)
-                        decodedByIndex[plannedIndex] = try Self.decodeFrames(data: data)
+                        decodedByIndex[plannedIndex] = try await self.decodeDocumentFrames(
+                            data: data,
+                            item: plannedItem
+                        )
                     }
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
@@ -405,6 +459,32 @@ final class ViewerStore: ObservableObject {
         }
         guard !frames.isEmpty else { throw DocumentSourceError.unsupportedItem }
         return frames
+    }
+
+    private func decodeDocumentFrames(data: Data, item: PageItem) async throws -> [AnimationFrame] {
+        var lastError: Error = DocumentSourceError.unsupportedItem
+        for backend in ImageIOCodecRouter.decodeOrder(routing: config.codecRouting) {
+            do {
+                switch backend {
+                case .imageIO:
+                    return try Self.decodeFrames(data: data)
+                case .internalCodec:
+                    let localURL = try await MaterializeCache.shared.materialize(
+                        data,
+                        suggestedExtension: item.url.pathExtension
+                    )
+                    let session = try NativeSession()
+                    defer { session.close() }
+                    let request = try session.nextRequest()
+                    let nativeImage = try NativeBridge.decode(path: localURL, session: session, request: request)
+                    defer { nativeImage.close() }
+                    return try Self.decodeNativeFrames(nativeImage)
+                }
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
     }
 
     private static func decodeNativeFrames(_ image: NativeImage) throws -> [AnimationFrame] {

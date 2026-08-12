@@ -20,14 +20,16 @@ struct SystemDocumentPicker: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
         let completion: (Result<URL, Error>?) -> Void
+        private let completionGate = PickerCompletionGate()
 
         init(completion: @escaping (Result<URL, Error>?) -> Void) { self.completion = completion }
 
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            guard let url = urls.first else { completion(nil); return }
-            completion(.success(url))
+            completionGate.perform { completion(urls.first.map { .success($0) }) }
         }
 
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { completion(nil) }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            completionGate.perform { completion(nil) }
+        }
     }
 }

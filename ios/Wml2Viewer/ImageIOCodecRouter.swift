@@ -3,6 +3,10 @@ import CoreGraphics
 import ImageIO
 
 enum ImageIOCodecRouter {
+    static func decodeOrder(routing: String) -> [CodecBackend] {
+        CodecRouting(configValue: routing).decodeOrder
+    }
+
     static func decode(_ data: Data, routing: String = "DEFAULT") throws -> CGImage {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {

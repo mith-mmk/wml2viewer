@@ -19,16 +19,17 @@ struct DocumentBrowserView: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, UIDocumentBrowserViewControllerDelegate {
         let onPick: (Result<URL, Error>?) -> Void
+        private let completionGate = PickerCompletionGate()
         init(onPick: @escaping (Result<URL, Error>?) -> Void) { self.onPick = onPick }
         func documentBrowser(_ controller: UIDocumentBrowserViewController, didPickDocumentsAt documentURLs: [URL]) {
-            onPick(documentURLs.first.map { .success($0) })
+            completionGate.perform { onPick(documentURLs.first.map { .success($0) }) }
         }
         func documentBrowser(_ controller: UIDocumentBrowserViewController, didRequestDocumentCreationWithHandler importHandler: @escaping (URL?, UIDocumentBrowserViewController.ImportMode) -> Void) {
             importHandler(nil, UIDocumentBrowserViewController.ImportMode.none)
         }
         func documentBrowser(_ controller: UIDocumentBrowserViewController, didImportDocumentAt documentURL: URL, toDestinationURL destinationURL: URL) {}
         func documentBrowser(_ controller: UIDocumentBrowserViewController, failedToImportDocumentAt documentURL: URL, error: Error?) {
-            onPick(.failure(error ?? CocoaError(.fileReadUnknown)))
+            completionGate.perform { onPick(.failure(error ?? CocoaError(.fileReadUnknown))) }
         }
     }
 }

@@ -18,6 +18,7 @@ struct Wml2ViewerApp: App {
                     await store.restoreLastSource()
                     #if DEBUG
                     store.applyUITestOverrides()
+                    await store.installUITestFixtureIfRequested()
                     #endif
                 }
                 .onOpenURL { store.openExternalURL($0) }
@@ -75,14 +76,32 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        ViewerSurface(store: store)
+        GeometryReader { geometry in
+            let pinsFilmstrip = ViewerResponsiveLayout.pinsFilmstrip(
+                isPad: UIDevice.current.userInterfaceIdiom == .pad,
+                width: geometry.size.width,
+                enabled: store.config.showFilmstrip && store.showFilmstrip
+            )
+            Group {
+                if pinsFilmstrip {
+                    HStack(spacing: 0) {
+                        ViewerSurface(store: store, filmstripIsPinned: true)
+                        Divider()
+                        FilmstripView(store: store)
+                            .frame(width: min(360, max(280, geometry.size.width * 0.28)))
+                    }
+                } else {
+                    ViewerSurface(store: store)
+                }
+            }
             .disabled(store.isPickerPresented)
+            .sheet(isPresented: filmstripPresentation(isPinned: pinsFilmstrip)) {
+                FilmstripView(store: store)
+                    .presentationDetents([.medium, .large])
+            }
+        }
         .sheet(isPresented: $store.showSettings) {
             SettingsView(store: store)
-        }
-        .sheet(isPresented: $store.showFilmstrip) {
-            FilmstripView(store: store)
-                .presentationDetents([.medium, .large])
         }
         .confirmationDialog(String(localized: "Quick menu"), isPresented: $store.showQuickMenu, titleVisibility: .visible) {
             Button(String(localized: "Open")) { store.requestFilePicker() }
@@ -101,7 +120,7 @@ struct ContentView: View {
         .sheet(item: $store.exportItem, onDismiss: { store.finishExport() }) { item in
             SystemShareSheet(activityItems: [item.url])
         }
-        .sheet(item: $store.pendingPicker) { request in
+        .fullScreenCover(item: $store.pendingPicker) { request in
             Group {
                 if request == .file {
                     DocumentBrowserView { result in store.finishPicker(result) }
@@ -128,6 +147,15 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await store.reconcileExternalChanges() } }
         }
+    }
+
+    private func filmstripPresentation(isPinned: Bool) -> Binding<Bool> {
+        Binding(
+            get: { store.showFilmstrip && !isPinned },
+            set: { presented in
+                if !presented { store.showFilmstrip = false }
+            }
+        )
     }
 }
 

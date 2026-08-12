@@ -20,17 +20,29 @@ struct SecurityScopedDocumentSource: DocumentSource, @unchecked Sendable {
     func list() async throws -> [PageItem] {
         try await withSecurityScope {
             if isFolder {
-                let keys: Set<URLResourceKey> = [.isRegularFileKey, .isDirectoryKey, .nameKey]
-                let urls = try FileManager.default.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles])
-                return urls.compactMap(Self.pageItem(for:)).sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+                return try coordinatedRead(at: rootURL) { coordinatedRoot in
+                    let keys: Set<URLResourceKey> = [.isRegularFileKey, .isDirectoryKey, .nameKey]
+                    let urls = try FileManager.default.contentsOfDirectory(
+                        at: coordinatedRoot,
+                        includingPropertiesForKeys: Array(keys),
+                        options: [.skipsHiddenFiles]
+                    )
+                    return urls.compactMap(Self.pageItem(for:)).sorted {
+                        $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+                    }
+                }
             }
-            return [PageItem(id: rootURL.path, url: rootURL, displayName: displayName, isArchive: Self.isArchive(rootURL))]
+            return try coordinatedRead(at: rootURL) { coordinatedURL in
+                [PageItem(id: coordinatedURL.path, url: coordinatedURL, displayName: displayName, isArchive: Self.isArchive(coordinatedURL))]
+            }
         }
     }
 
     func read(_ item: PageItem) async throws -> Data {
         try await withSecurityScope {
-            try Data(contentsOf: item.url, options: [.mappedIfSafe])
+            try coordinatedRead(at: item.url) { coordinatedURL in
+                try Data(contentsOf: coordinatedURL, options: [.mappedIfSafe])
+            }
         }
     }
 
@@ -38,6 +50,22 @@ struct SecurityScopedDocumentSource: DocumentSource, @unchecked Sendable {
         let scoped = rootURL.startAccessingSecurityScopedResource()
         defer { if scoped { rootURL.stopAccessingSecurityScopedResource() } }
         return try operation()
+    }
+
+    private func coordinatedRead<T>(at url: URL, operation: (URL) throws -> T) throws -> T {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var result: Result<T, Error>?
+        coordinator.coordinate(
+            readingItemAt: url,
+            options: .withoutChanges,
+            error: &coordinationError
+        ) { coordinatedURL in
+            result = Result { try operation(coordinatedURL) }
+        }
+        if let coordinationError { throw coordinationError }
+        guard let result else { throw CocoaError(.fileReadUnknown) }
+        return try result.get()
     }
 
     private static func pageItem(for url: URL) -> PageItem? {

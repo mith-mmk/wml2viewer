@@ -16,7 +16,6 @@ struct SettingsView: View {
                     Picker(String(localized: "Fit", locale: store.config.locale), selection: Binding(get: { store.config.fit }, set: { var c = store.config; c.fit = $0; store.update(c) })) {
                         ForEach(DisplayFit.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
                     }
-                    Toggle(String(localized: "Show top controls", locale: store.config.locale), isOn: Binding(get: { store.config.showTopChrome }, set: { var c = store.config; c.showTopChrome = $0; store.update(c) }))
                     Toggle(String(localized: "Keep screen awake", locale: store.config.locale), isOn: Binding(get: { store.config.keepScreenOn }, set: { var c = store.config; c.keepScreenOn = $0; store.update(c) }))
                 }
                 Section(String(localized: "Manga", locale: store.config.locale)) {

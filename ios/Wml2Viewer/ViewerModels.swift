@@ -16,6 +16,10 @@ enum PickerRequest: Identifiable, Hashable {
         case .folder: "folder"
         }
     }
+
+    func selectionIsFolder(resourceIsDirectory: Bool) -> Bool {
+        self == .folder || resourceIsDirectory
+    }
 }
 
 enum DisplayFit: String, Codable, CaseIterable {
@@ -34,6 +38,55 @@ enum ExternalPageReconciler {
         guard !refreshedIDs.isEmpty else { return nil }
         if let oldID, let retained = refreshedIDs.firstIndex(of: oldID) { return retained }
         return min(max(oldIndex, 0), refreshedIDs.count - 1)
+    }
+}
+
+/// Keeps UIKit picker delegate callbacks idempotent. Some providers dismiss while
+/// also completing an outstanding callback; the SwiftUI presentation must only be
+/// torn down once.
+final class PickerCompletionGate {
+    private(set) var isCompleted = false
+
+    @discardableResult
+    func perform(_ completion: () -> Void) -> Bool {
+        guard !isCompleted else { return false }
+        isCompleted = true
+        completion()
+        return true
+    }
+}
+
+enum ViewerResponsiveLayout {
+    static let pinnedFilmstripMinimumWidth: CGFloat = 900
+
+    static func pinsFilmstrip(isPad: Bool, width: CGFloat, enabled: Bool) -> Bool {
+        isPad && enabled && width >= pinnedFilmstripMinimumWidth
+    }
+}
+
+enum CodecBackend: Equatable {
+    case internalCodec
+    case imageIO
+}
+
+enum CodecRouting: String, CaseIterable {
+    case `default` = "DEFAULT"
+    case internalFirst = "INTERNAL_FIRST"
+    case osFirst = "OS_FIRST"
+    case internalOnly = "INTERNAL_ONLY"
+    case osOnly = "OS_ONLY"
+
+    init(configValue: String) {
+        self = CodecRouting(rawValue: configValue) ?? .default
+    }
+
+    var decodeOrder: [CodecBackend] {
+        switch self {
+        case .default, .internalFirst: [.internalCodec, .imageIO]
+        case .osFirst: [.imageIO, .internalCodec]
+        case .internalOnly: [.internalCodec]
+        case .osOnly: [.imageIO]
+        }
     }
 }
 

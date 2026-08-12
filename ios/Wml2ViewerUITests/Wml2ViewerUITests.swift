@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 final class Wml2ViewerUITests: XCTestCase {
     override func setUpWithError() throws {
@@ -7,7 +8,6 @@ final class Wml2ViewerUITests: XCTestCase {
 
     override func tearDownWithError() throws {
         XCUIDevice.shared.orientation = .portrait
-        XCUIApplication().terminate()
     }
 
     func testColdLaunchAndSettingsPanel() throws {
@@ -16,30 +16,32 @@ final class Wml2ViewerUITests: XCTestCase {
         app.launchEnvironment["WML2VIEWER_UI_TEST_LANGUAGE"] = "en"
         app.launch()
 
-        XCTAssertTrue(app.buttons["viewer.open"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["viewer.settings"].exists)
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["viewer.open"].exists)
+        XCTAssertFalse(app.buttons["viewer.settings"].exists)
         let emptyState = app.staticTexts.matching(NSPredicate(format: "label == 'No document' OR label == '書類がありません'"))
         XCTAssertTrue(emptyState.firstMatch.waitForExistence(timeout: 5))
 
-        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(app.descendants(matching: .any)["settings.panel"].waitForExistence(timeout: 5))
         let done = app.buttons.matching(NSPredicate(format: "label == 'Done' OR label == '完了'"))
         XCTAssertTrue(done.firstMatch.waitForExistence(timeout: 5))
         done.firstMatch.tap()
-        XCTAssertTrue(app.buttons["viewer.open"].waitForExistence(timeout: 5))
+        XCTAssertTrue(surface.exists)
     }
 
     func testSystemDocumentBrowserPresentation() throws {
         let app = XCUIApplication()
         app.launch()
 
-        let open = app.buttons["viewer.open"]
-        XCTAssertTrue(open.waitForExistence(timeout: 10))
-        open.tap()
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
 
         let browserPresented = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "isHittable == false"),
-            object: open
+            object: surface
         )
         XCTAssertEqual(XCTWaiter.wait(for: [browserPresented], timeout: 10), .completed)
     }
@@ -47,24 +49,25 @@ final class Wml2ViewerUITests: XCTestCase {
     func testRotationKeepsViewerControlsInteractive() throws {
         let app = XCUIApplication()
         app.launch()
-        let open = app.buttons["viewer.open"]
-        XCTAssertTrue(open.waitForExistence(timeout: 10))
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
 
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(open.waitForExistence(timeout: 5))
-        XCTAssertTrue(open.isHittable)
+        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+        XCTAssertTrue(surface.isHittable)
 
         XCUIDevice.shared.orientation = .portrait
-        XCTAssertTrue(open.waitForExistence(timeout: 5))
-        XCTAssertTrue(open.isHittable)
+        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+        XCTAssertTrue(surface.isHittable)
     }
 
     func testCenterZoneOpensSettingsWithoutUsingChromeButton() throws {
         let app = XCUIApplication()
         app.launch()
-        XCTAssertTrue(app.buttons["viewer.open"].waitForExistence(timeout: 10))
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
 
-        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(app.descendants(matching: .any)["settings.panel"].waitForExistence(timeout: 5))
     }
 
@@ -76,19 +79,35 @@ final class Wml2ViewerUITests: XCTestCase {
         app.launch()
         let surface = app.otherElements["viewer.touchSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
-        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75)).tap()
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75)).tap()
         XCTAssertTrue(app.descendants(matching: .any)["filmstrip.panel"].waitForExistence(timeout: 5))
     }
 
     func testLongPressOpensQuickMenuInsteadOfFilmstrip() throws {
         let app = XCUIApplication()
         app.launch()
-        XCTAssertTrue(app.buttons["viewer.open"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.otherElements["viewer.touchSurface"].waitForExistence(timeout: 10))
 
-        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        app.otherElements["viewer.touchSurface"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.6)
         XCTAssertTrue(app.buttons["quickMenu.pages"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["filmstrip.list"].exists)
+    }
+
+    func testFolderThreeByThreeLeftRightMovesImages() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_FIXTURE_FOLDER"] = "1"
+        app.launch()
+        let current = app.descendants(matching: .any)["viewer.currentImage"]
+        XCTAssertTrue(current.waitForExistence(timeout: 10))
+        XCTAssertEqual(current.label, "page-01.png")
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let next = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'viewer.currentImage' AND label == 'page-02.png'")).firstMatch
+        XCTAssertTrue(next.waitForExistence(timeout: 10))
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
+        let previous = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'viewer.currentImage' AND label == 'page-01.png'")).firstMatch
+        XCTAssertTrue(previous.waitForExistence(timeout: 10))
     }
 
     func testJapaneseSystemLanguageUsesJapaneseStrings() throws {
@@ -99,10 +118,40 @@ final class Wml2ViewerUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["書類がありません"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["viewer.settings"].waitForExistence(timeout: 5))
-        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        app.otherElements["viewer.touchSurface"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let panel = app.descendants(matching: .any)["settings.panel"]
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
         XCTAssertEqual(panel.value as? String, "表示")
+    }
+
+    func testWideIPadShowsPinnedFilmstripWithoutOpeningSheet() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("This responsive-layout case runs on the iPad Simulator destination")
+        }
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launch()
+        XCTAssertTrue(app.otherElements["viewer.touchSurface"].waitForExistence(timeout: 10))
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["filmstrip.panel"].exists)
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["filmstrip.panel"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.otherElements["viewer.touchSurface"].isHittable)
+    }
+
+    func testViewerHasNoPersistentNavigationOrDuplicateOpenIcons() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launch()
+        XCTAssertTrue(app.otherElements["viewer.touchSurface"].waitForExistence(timeout: 10))
+        for identifier in [
+            "viewer.open", "viewer.settings", "viewer.previous", "viewer.next",
+            "viewer.folder", "viewer.filmstrip"
+        ] {
+            XCTAssertFalse(app.buttons[identifier].exists, "Unexpected persistent control: \(identifier)")
+        }
     }
 }
