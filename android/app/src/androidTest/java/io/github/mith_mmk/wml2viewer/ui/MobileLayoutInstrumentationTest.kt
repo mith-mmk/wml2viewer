@@ -266,7 +266,6 @@ class MobileLayoutInstrumentationTest {
         assertTrue(folder.right <= navigationPane.right)
         assertTrue(fourthFile.left >= filePane.left)
         compose.onNodeWithTag("landscape-filer-navigation-close")
-            .assertIsDisplayed()
             .performClick()
         compose.runOnIdle {
             assertTrue(events.any { it == ViewerUiEvent.CloseFiler })

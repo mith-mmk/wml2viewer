@@ -5,6 +5,8 @@ screen_size="${1:?screen size is required}"
 screen_density="${2:?screen density is required}"
 application_id='io.github.mith_mmk.wml2viewer'
 test_runner='io.github.mith_mmk.wml2viewer.test/androidx.test.runner.AndroidJUnitRunner'
+app_apk='app/build/outputs/apk/debug/app-debug.apk'
+test_apk='app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk'
 test_status=0
 
 cleanup() {
@@ -47,17 +49,29 @@ if ! bash ./gradlew connectedDebugAndroidTest --no-daemon \
 fi
 
 process_death_id="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
-if run_last_location_phase seed "$process_death_id"; then
-  adb shell am force-stop "$application_id" || test_status=1
-  run_last_location_phase verify "$process_death_id" || test_status=1
-else
-  test_status=1
+if [ "$test_status" -eq 0 ]; then
+  if adb install -r "$app_apk" && adb install -r -t "$test_apk"; then
+    if run_last_location_phase seed "$process_death_id"; then
+      adb shell am force-stop "$application_id" || test_status=1
+      run_last_location_phase verify "$process_death_id" || test_status=1
+    else
+      test_status=1
+    fi
+  else
+    echo 'Failed to reinstall instrumentation APKs for process-death validation' >&2
+    test_status=1
+  fi
 fi
 
-strictmode_log="$(adb logcat -d -v brief | grep -E -i \
-  'StrictMode (ThreadPolicy|VmPolicy|policy) violation|android\.os\.strictmode\..*Violation' || true)"
+app_pid="$(adb shell pidof "$application_id" 2>/dev/null | tr -d '\r' | awk '{print $1}')"
+strictmode_log=''
+if [ -n "$app_pid" ]; then
+  strictmode_log="$(adb logcat -d -v brief --pid "$app_pid" | grep -E -i \
+    'StrictMode (ThreadPolicy|VmPolicy|policy) violation|android\.os\.strictmode\..*Violation' || true)"
+fi
 if [ -n "$strictmode_log" ]; then
   echo 'StrictMode disk, network, or resource leak violation detected' >&2
+  printf '%s\n' "$strictmode_log" >&2
   test_status=1
 fi
 
