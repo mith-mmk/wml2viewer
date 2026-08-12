@@ -44,7 +44,7 @@ public final class FakeSafDocumentsProvider extends ContentProvider {
         DocumentsContract.Document.COLUMN_FLAGS,
     };
     private static final byte[] TINY_PNG = Base64.decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+Nq2VAAAAAElFTkSuQmCC",
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==",
         Base64.DEFAULT
     );
     private static final Map<String, FakeDocument> DOCUMENTS = createDocuments();

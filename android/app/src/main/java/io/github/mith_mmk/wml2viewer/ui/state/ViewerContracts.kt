@@ -39,7 +39,6 @@ interface MobileViewerController {
 
 interface MobileSettingsStore {
     val settings: StateFlow<MobileViewerSettings>
-    suspend fun awaitReady(): MobileViewerSettings = settings.value
     suspend fun replace(settings: MobileViewerSettings)
 }
 
