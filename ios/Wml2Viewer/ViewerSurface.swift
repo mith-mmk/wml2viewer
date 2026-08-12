@@ -10,10 +10,15 @@ struct ViewerSurface: View {
         GeometryReader { geometry in
             ZStack {
                 Color.black.ignoresSafeArea()
-                if let image = store.displayImage {
-                    Image(decorative: image, scale: 1, orientation: .up)
-                        .resizable()
-                    .aspectRatio(contentMode: runtimeFit == nil ? fitMode : (runtimeFit == .original ? .fit : .fill))
+                if !store.displaySpreadImages.isEmpty {
+                    HStack(spacing: 0) {
+                        ForEach(Array(store.displaySpreadImages.enumerated()), id: \.offset) { _, image in
+                            Image(decorative: image, scale: 1, orientation: .up)
+                                .resizable()
+                                .aspectRatio(contentMode: runtimeFit == nil ? fitMode : (runtimeFit == .original ? .fit : .fill))
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
                         .scaleEffect(store.zoom * gestureScale)
                         .offset(store.pan)
                         .accessibilityLabel(store.pages.indices.contains(store.currentIndex) ? store.pages[store.currentIndex].displayName : String(localized: "Image"))
@@ -44,7 +49,7 @@ struct ViewerSurface: View {
                     swipeEnabled: store.config.swipeEnabled,
                     canPan: { store.zoom > 1.01 },
                     canSwipe: { store.zoom <= 1.01 },
-                    onPinch: { scale in store.zoom = min(max(store.zoom * scale, 1), 8) },
+                    onPinch: { scale in guard store.interactionReady else { return }; store.zoom = min(max(store.zoom * scale, 1), 8) },
                     onPan: { translation, ended in
                         if store.zoom > 1.01 { store.pan.width += translation.width; store.pan.height += translation.height }
                         if ended { dragStart = store.pan }
@@ -57,7 +62,7 @@ struct ViewerSurface: View {
                         store.pan = .zero
                     },
                     onZoneTap: { row, col in
-                        guard store.config.touchZonesEnabled else { return }
+                        guard store.config.touchZonesEnabled, store.interactionReady else { return }
                         switch TouchZoneResolver.defaultAction(row: row, column: col) {
                         case .previous: store.previous()
                         case .next: store.next()
@@ -78,6 +83,8 @@ struct ViewerSurface: View {
                 }
             }
             .overlay(alignment: .bottom) { bottomChrome }
+            .onAppear { store.updateViewport(geometry.size) }
+            .onChange(of: geometry.size) { _, size in store.updateViewport(size) }
         }
         .onChange(of: store.currentIndex) { _, _ in runtimeFit = nil }
         .toolbar(.hidden, for: .navigationBar)

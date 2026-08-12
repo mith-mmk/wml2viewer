@@ -36,6 +36,22 @@ final class NativeImage {
     var width: Int { Int(wml2viewer_ios_image_width(handle)) }
     var height: Int { Int(wml2viewer_ios_image_height(handle)) }
     var stride: Int { Int(wml2viewer_ios_image_stride(handle)) }
+    var frameCount: Int { Int(wml2viewer_ios_image_frame_count(handle)) }
+    var loopCount: Int64 { wml2viewer_ios_image_loop_count(handle) }
+
+    func frameDurationMilliseconds(at index: Int) throws -> UInt64 {
+        var duration: UInt64 = 0
+        guard wml2viewer_ios_image_frame_duration_ms(handle, index, &duration) != 0 else {
+            throw NativeBridgeError.invalidBuffer
+        }
+        return duration
+    }
+
+    func frame(at index: Int) throws -> NativeImage {
+        let child = wml2viewer_ios_image_frame(handle, index)
+        guard child != 0 else { throw NativeBridgeError.invalidBuffer }
+        return NativeImage(handle: child)
+    }
 
     func copyRGBA() throws -> Data {
         var pointer: UnsafePointer<UInt8>?

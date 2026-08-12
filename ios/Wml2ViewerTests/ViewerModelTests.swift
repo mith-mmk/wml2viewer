@@ -87,4 +87,19 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertNil(NativeReadingPlanner.decode([1, 8, 0, -1, -1, 3, 3, 0], pageCount: 1, currentIndex: 0, maximumPrefetchSpreads: 1))
         XCTAssertNil(NativeReadingPlanner.decode([1, 10, 0, -1, -1, 1, 1, 0, 0, 2], pageCount: 1, currentIndex: 0, maximumPrefetchSpreads: 1))
     }
+
+    func testExternalReconcileKeepsCurrentOrSelectsNearestSortedIndex() {
+        XCTAssertEqual(ExternalPageReconciler.index(oldIndex: 1, oldID: "b", refreshedIDs: ["a", "b", "c"]), 1)
+        XCTAssertEqual(ExternalPageReconciler.index(oldIndex: 2, oldID: "c", refreshedIDs: ["a", "b"]), 1)
+        XCTAssertEqual(ExternalPageReconciler.index(oldIndex: 0, oldID: "a", refreshedIDs: ["b", "c"]), 0)
+        XCTAssertNil(ExternalPageReconciler.index(oldIndex: 0, oldID: "a", refreshedIDs: []))
+    }
+
+    @MainActor
+    func testViewerStoreConnectsRTLSpreadPlannerToCurrentPages() {
+        let store = ViewerStore()
+        store.installTestPages(count: 5)
+        XCTAssertEqual(store.testReadingPlan?.logicalIndices, [1, 2])
+        XCTAssertEqual(store.testReadingPlan?.visualIndices, [2, 1])
+    }
 }

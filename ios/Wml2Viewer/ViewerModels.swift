@@ -29,6 +29,14 @@ enum FitOverridePolicy {
     }
 }
 
+enum ExternalPageReconciler {
+    static func index(oldIndex: Int, oldID: String?, refreshedIDs: [String]) -> Int? {
+        guard !refreshedIDs.isEmpty else { return nil }
+        if let oldID, let retained = refreshedIDs.firstIndex(of: oldID) { return retained }
+        return min(max(oldIndex, 0), refreshedIDs.count - 1)
+    }
+}
+
 enum ThemeMode: String, Codable, CaseIterable {
     case cinematicDark, light, system
 

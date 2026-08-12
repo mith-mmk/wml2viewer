@@ -72,6 +72,7 @@ private enum NativeBridgeSelfTest {
 
 struct ContentView: View {
     @ObservedObject var store: ViewerStore
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ViewerSurface(store: store)
@@ -124,6 +125,9 @@ struct ContentView: View {
         }
         .environment(\.locale, store.config.locale)
         .preferredColorScheme(store.config.theme.colorScheme)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await store.reconcileExternalChanges() } }
+        }
     }
 }
 

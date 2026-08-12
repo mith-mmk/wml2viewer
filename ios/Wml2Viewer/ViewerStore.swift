@@ -20,7 +20,9 @@ final class ViewerStore: ObservableObject {
     @Published private(set) var pages: [PageItem] = []
     @Published private(set) var currentIndex = 0
     @Published private(set) var image: CGImage?
+    @Published private(set) var spreadImages: [CGImage] = []
     @Published private(set) var isLoading = false
+    @Published private(set) var touchReady = false
     @Published var errorMessage: String?
     @Published var showSettings = false
     @Published var showFilmstrip = false
@@ -45,6 +47,10 @@ final class ViewerStore: ObservableObject {
     private var loadTask: Task<Void, Never>?
     private var animationTask: Task<Void, Never>?
     private var sourceGeneration = 0
+    private var viewportGeneration = 0
+    private var viewportSize: CGSize = .zero
+    private var readingPlan: NativeReadingPlan?
+    private var portraitByPageID: [String: Bool] = [:]
 
     func restoreLastSource() async {
         config = await configStore.load()
@@ -111,7 +117,7 @@ final class ViewerStore: ObservableObject {
 
     func next() {
         guard !pages.isEmpty else { return }
-        currentIndex = min(currentIndex + 1, pages.count - 1)
+        currentIndex = readingPlan?.nextAnchorIndex ?? min(currentIndex + 1, pages.count - 1)
         loadCurrent()
     }
 
@@ -126,6 +132,22 @@ final class ViewerStore: ObservableObject {
 
     var displayImage: CGImage? {
         guard grayscaleEnabled, let image else { return image }
+        let ciImage = CIImage(cgImage: image)
+        let filter = CIFilter(name: "CIColorControls")
+        filter?.setValue(ciImage, forKey: kCIInputImageKey)
+        filter?.setValue(0.0, forKey: kCIInputSaturationKey)
+        guard let output = filter?.outputImage else { return image }
+        return CIContext(options: nil).createCGImage(output, from: output.extent) ?? image
+    }
+
+    var displaySpreadImages: [CGImage] {
+        guard grayscaleEnabled else { return spreadImages }
+        return spreadImages.map(Self.grayscale)
+    }
+
+    var interactionReady: Bool { pages.isEmpty || touchReady }
+
+    private static func grayscale(_ image: CGImage) -> CGImage {
         let ciImage = CIImage(cgImage: image)
         let filter = CIFilter(name: "CIColorControls")
         filter?.setValue(ciImage, forKey: kCIInputImageKey)
@@ -159,7 +181,7 @@ final class ViewerStore: ObservableObject {
 
     func previous() {
         guard !pages.isEmpty else { return }
-        currentIndex = max(currentIndex - 1, 0)
+        currentIndex = readingPlan?.previousAnchorIndex ?? max(currentIndex - 1, 0)
         loadCurrent()
     }
 
@@ -171,8 +193,45 @@ final class ViewerStore: ObservableObject {
     }
 
     func update(_ config: MobileConfigV1) {
+        let readingChanged = config.mangaEnabled != self.config.mangaEnabled ||
+            config.mangaRTL != self.config.mangaRTL || config.coverAlone != self.config.coverAlone
         self.config = config
         Task { try? await configStore.save(config) }
+        if readingChanged { loadCurrent() }
+    }
+
+    func updateViewport(_ size: CGSize) {
+        guard size.width > 0, size.height > 0, size != viewportSize else { return }
+        viewportSize = size
+        viewportGeneration &+= 1
+        touchReady = false
+        if !pages.isEmpty { loadCurrent() }
+    }
+
+    func reconcileExternalChanges() async {
+        guard nativeArchive == nil, let source else { return }
+        let oldIndex = currentIndex
+        let oldID = pages.indices.contains(oldIndex) ? pages[oldIndex].id : nil
+        do {
+            let refreshed = try await source.list()
+            guard !refreshed.isEmpty else {
+                pages = []
+                currentIndex = 0
+                image = nil
+                spreadImages = []
+                touchReady = false
+                errorMessage = DocumentSourceError.unsupportedItem.localizedDescription
+                return
+            }
+            pages = refreshed
+            currentIndex = ExternalPageReconciler.index(
+                oldIndex: oldIndex, oldID: oldID, refreshedIDs: refreshed.map(\.id)
+            ) ?? 0
+            sourceGeneration &+= 1
+            loadCurrent()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func accept(url: URL, isFolder: Bool) async throws {
@@ -193,6 +252,7 @@ final class ViewerStore: ObservableObject {
         archiveURL = nil
         archiveParentPages = nil
         sourceGeneration += 1
+        portraitByPageID.removeAll()
         let generation = sourceGeneration
         pages = try await source.list()
         guard !pages.isEmpty else { throw DocumentSourceError.unsupportedItem }
@@ -204,42 +264,94 @@ final class ViewerStore: ObservableObject {
     private func loadCurrent() {
         loadTask?.cancel()
         animationTask?.cancel()
-        guard let source, pages.indices.contains(currentIndex) else { image = nil; return }
+        guard let source, pages.indices.contains(currentIndex) else {
+            image = nil; spreadImages = []; touchReady = false; return
+        }
         let item = pages[currentIndex]
         let index = currentIndex
         let generation = sourceGeneration
+        let viewport = viewportGeneration
+        touchReady = false
         isLoading = true
         loadTask = Task { [weak self] in
             do {
                 if let archive = self?.nativeArchive, let session = self?.nativeSession, let archiveURL = self?.archiveURL,
-                   let nativeIndex = self?.archiveEntryIndices.indices.contains(index) == true ? self?.archiveEntryIndices[index] : nil {
-                    let request = try session.nextRequest()
-                    let nativeImage = try archive.decode(session: session, request: request, index: nativeIndex, mime: nil)
-                    let rgba = try nativeImage.copyRGBA()
-                    let decoded = try Self.decodeNativeRGBA(rgba, width: nativeImage.width, height: nativeImage.height, stride: nativeImage.stride)
-                    nativeImage.close()
+                   self?.archiveEntryIndices.indices.contains(index) == true {
+                    let planned = self?.plannedIndices() ?? [index]
+                    var decodedByIndex: [Int: [AnimationFrame]] = [:]
+                    for plannedIndex in planned {
+                        guard let self, self.archiveEntryIndices.indices.contains(plannedIndex) else { continue }
+                        let archiveIndex = self.archiveEntryIndices[plannedIndex]
+                        let request = try session.nextRequest()
+                        let nativeImage = try archive.decode(session: session, request: request, index: archiveIndex, mime: nil)
+                        decodedByIndex[plannedIndex] = try Self.decodeNativeFrames(nativeImage)
+                        nativeImage.close()
+                    }
                     guard !Task.isCancelled else { return }
                     await MainActor.run {
-                        guard let self, self.sourceGeneration == generation, self.archiveURL == archiveURL else { return }
-                        self.image = decoded
+                        guard let self, self.sourceGeneration == generation, self.viewportGeneration == viewport,
+                              self.archiveURL == archiveURL else { return }
+                        let visual = self.readingPlan?.visualIndices ?? [index]
+                        let images = visual.compactMap { decodedByIndex[$0]?.first?.image }
+                        guard let currentFrames = decodedByIndex[index], !images.isEmpty else { return }
+                        for (pageIndex, frames) in decodedByIndex {
+                            if let first = frames.first {
+                                self.portraitByPageID[self.pages[pageIndex].id] = first.image.height >= first.image.width
+                            }
+                        }
+                        let corrected = self.plannedIndices()
+                        if corrected != planned {
+                            DispatchQueue.main.async { self.loadCurrent() }
+                            return
+                        }
+                        self.image = currentFrames[0].image
+                        self.spreadImages = images
                         self.isLoading = false
+                        self.touchReady = true
                         self.errorMessage = nil
+                        let position = visual.firstIndex(of: index) ?? 0
+                        self.startAnimation(currentFrames, generation: generation, viewport: viewport, spreadPosition: position)
                     }
                     return
                 }
-                let data = try await source.read(item)
-                guard !Task.isCancelled else { return }
                 if item.isArchive {
+                    let data = try await source.read(item)
+                    guard !Task.isCancelled else { return }
                     try await self?.openArchive(data: data, item: item, generation: generation)
                     return
                 }
-                let frames = try Self.decodeFrames(data: data)
+                    let planned = self?.plannedIndices() ?? [index]
+                    var decodedByIndex: [Int: [AnimationFrame]] = [:]
+                    for plannedIndex in planned {
+                        guard let self, self.pages.indices.contains(plannedIndex) else { continue }
+                        let plannedItem = self.pages[plannedIndex]
+                        let data = try await source.read(plannedItem)
+                        decodedByIndex[plannedIndex] = try Self.decodeFrames(data: data)
+                    }
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    guard let self, self.sourceGeneration == generation else { return }
-                    self.image = frames[0].image
+                    guard let self, self.sourceGeneration == generation, self.viewportGeneration == viewport else { return }
+                    let plan = self.readingPlan
+                    let visual = plan?.visualIndices ?? [index]
+                    let images = visual.compactMap { decodedByIndex[$0]?.first?.image }
+                    guard !images.isEmpty, let currentFrames = decodedByIndex[index] else { return }
+                    for (pageIndex, frames) in decodedByIndex {
+                        if let first = frames.first {
+                            self.portraitByPageID[self.pages[pageIndex].id] = first.image.height >= first.image.width
+                        }
+                    }
+                    let corrected = self.plannedIndices()
+                    if corrected != planned {
+                        DispatchQueue.main.async { self.loadCurrent() }
+                        return
+                    }
+                    self.image = currentFrames[0].image
+                    self.spreadImages = images
                     self.isLoading = false
+                    self.touchReady = true
                     self.errorMessage = nil
-                    self.startAnimation(frames, generation: generation)
+                    let position = visual.firstIndex(of: index) ?? 0
+                    self.startAnimation(currentFrames, generation: generation, viewport: viewport, spreadPosition: position)
                 }
             } catch {
                 await MainActor.run { [weak self] in
@@ -248,6 +360,24 @@ final class ViewerStore: ObservableObject {
                 }
             }
         }
+    }
+
+    private func plannedIndices() -> [Int] {
+        guard config.mangaEnabled, !pages.isEmpty else {
+            readingPlan = nil
+            return [currentIndex]
+        }
+        let nativePages = pages.enumerated().map { index, page in
+            NativeReadingPage(sourceID: 1, portrait: portraitByPageID[page.id] ?? true, cover: index == 0)
+        }
+        let plan = NativeReadingPlanner.plan(
+            pages: nativePages, currentIndex: currentIndex,
+            landscape: viewportSize.width > viewportSize.height, layout: .auto,
+            direction: config.mangaRTL ? .rightToLeft : .leftToRight,
+            coverAlone: config.coverAlone, maximumPrefetchSpreads: config.prefetchSpreads
+        )
+        readingPlan = plan
+        return plan?.logicalIndices ?? [currentIndex]
     }
 
     private static func decodeFrames(data: Data) throws -> [AnimationFrame] {
@@ -277,16 +407,33 @@ final class ViewerStore: ObservableObject {
         return frames
     }
 
-    private func startAnimation(_ frames: [AnimationFrame], generation: Int) {
+    private static func decodeNativeFrames(_ image: NativeImage) throws -> [AnimationFrame] {
+        var frames: [AnimationFrame] = []
+        for index in 0..<max(1, image.frameCount) {
+            let frame = image.frameCount > 1 ? try image.frame(at: index) : image
+            let rgba = try frame.copyRGBA()
+            let decoded = try decodeNativeRGBA(rgba, width: frame.width, height: frame.height, stride: frame.stride)
+            let milliseconds = image.frameCount > 1 ? try image.frameDurationMilliseconds(at: index) : 100
+            frames.append(AnimationFrame(image: decoded, durationNanoseconds: max(20, milliseconds) * 1_000_000))
+            if frame !== image { frame.close() }
+        }
+        return frames
+    }
+
+    private func startAnimation(_ frames: [AnimationFrame], generation: Int, viewport: Int, spreadPosition: Int) {
         guard animationEnabled, frames.count > 1 else { return }
         animationTask?.cancel()
         animationTask = Task { [weak self] in
             var index = 0
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: frames[index].durationNanoseconds)
-                guard !Task.isCancelled, let self, self.sourceGeneration == generation else { return }
+                guard !Task.isCancelled, let self, self.sourceGeneration == generation,
+                      self.viewportGeneration == viewport else { return }
                 index = (index + 1) % frames.count
                 self.image = frames[index].image
+                if self.spreadImages.indices.contains(spreadPosition) {
+                    self.spreadImages[spreadPosition] = frames[index].image
+                }
             }
         }
     }
@@ -319,6 +466,26 @@ final class ViewerStore: ObservableObject {
             self.archiveEntryIndices = entryIndices
         }
         loadCurrent()
+    }
+
+    func installTestPages(count: Int) {
+        pages = (0..<count).map { index in
+            PageItem(
+                id: "test-\(index)", url: URL(fileURLWithPath: "/test-\(index).png"),
+                displayName: "test-\(index).png", isArchive: false
+            )
+        }
+        currentIndex = min(1, max(0, count - 1))
+        portraitByPageID = Dictionary(uniqueKeysWithValues: pages.map { ($0.id, true) })
+        viewportSize = CGSize(width: 800, height: 600)
+        config.mangaEnabled = true
+        config.mangaRTL = true
+        config.coverAlone = true
+    }
+
+    var testReadingPlan: NativeReadingPlan? {
+        _ = plannedIndices()
+        return readingPlan
     }
 
     private static func decodeNativeRGBA(_ data: Data, width: Int, height: Int, stride: Int) throws -> CGImage {
