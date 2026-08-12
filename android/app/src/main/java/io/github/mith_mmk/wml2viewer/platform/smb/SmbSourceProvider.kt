@@ -53,6 +53,7 @@ class SmbSourceProvider(
     private val shareEnumerationService: SmbShareEnumerationService = SrvsvcShareEnumerationService(credentialStore),
 ) : SourceProvider {
     private val mutableSecurityStatus = MutableStateFlow(SmbSecurityStatus.DISCONNECTED)
+    private val connectedShares = SharedCloseableCache<String, ConnectedShare>(::connectNew)
     val securityStatus: StateFlow<SmbSecurityStatus> = mutableSecurityStatus.asStateFlow()
     override val providerId = "smb:${profile.profileId}"
     override val root = ref(SmbLocation(profile.share, ""))
@@ -152,9 +153,9 @@ class SmbSourceProvider(
         if (info.kind != EntryKind.FILE) throw SourceException(SourceErrorCode.UNSUPPORTED, "Cannot read an SMB directory")
         val location = location(entry)
         return retryNetwork {
-            val connected = connect(location.requireShare())
+            val connected = connectedShares.acquire(location.requireShare())
             try {
-                val file = connected.share.openFile(
+                val file = connected.value.share.openFile(
                     location.path,
                     EnumSet.of(AccessMask.FILE_READ_DATA, AccessMask.FILE_READ_ATTRIBUTES),
                     null,
@@ -184,9 +185,9 @@ class SmbSourceProvider(
                     parentLocation.path,
                     ".wml2viewer-${UUID.randomUUID()}.part",
                 )
-                val connected = connect(shareName)
+                val connected = connectedShares.acquire(shareName)
                 try {
-                    val file = connected.share.openFile(
+                    val file = connected.value.share.openFile(
                         tempPath,
                         EnumSet.of(AccessMask.FILE_WRITE_DATA, AccessMask.FILE_WRITE_ATTRIBUTES, AccessMask.DELETE),
                         EnumSet.of(FileAttributes.FILE_ATTRIBUTE_TEMPORARY),
@@ -332,6 +333,11 @@ class SmbSourceProvider(
 
     override suspend fun thumbnail(entry: EntryRef, maxWidth: Int, maxHeight: Int): SourceThumbnail? = null
 
+    override fun close() {
+        connectedShares.close()
+        mutableSecurityStatus.value = SmbSecurityStatus.DISCONNECTED
+    }
+
     internal suspend fun verifyTemporary(ref: EntryRef, expected: WriteVerification): Boolean =
         openRead(ref).use { it.stream.sha256AndSize() == expected }
 
@@ -403,7 +409,7 @@ class SmbSourceProvider(
             }
     }
 
-    private fun connect(shareName: String): ConnectedShare {
+    private fun connectNew(shareName: String): ConnectedShare {
         val client = SMBClient(SmbConnectionSupport.config(profile))
         try {
             val connection = client.connect(profile.server, profile.port)
@@ -422,7 +428,8 @@ class SmbSourceProvider(
         }
     }
 
-    private fun <T> withShare(shareName: String, block: (DiskShare) -> T): T = connect(shareName).use { block(it.share) }
+    private fun <T> withShare(shareName: String, block: (DiskShare) -> T): T =
+        connectedShares.acquire(shareName).use { block(it.value.share) }
 
     private suspend fun <T> retryNetwork(block: () -> T): T = withContext(Dispatchers.IO) {
         var last: SourceException? = null
@@ -434,6 +441,7 @@ class SmbSourceProvider(
                 val mapped = mapSmbError(error)
                 last = mapped
                 if (!mapped.retryable || attempt == MAX_ATTEMPTS - 1) throw mapped
+                connectedShares.invalidateAll()
                 delay(RETRY_DELAYS_MS[attempt])
             }
         }
@@ -524,7 +532,7 @@ private class ConnectedShare(
 private class SmbReadStream(
     input: InputStream,
     private val file: SmbFile,
-    private val connected: ConnectedShare,
+    private val connected: SharedCloseableCache.Lease<ConnectedShare>,
 ) : FilterInputStream(input) {
     override fun close() {
         try {
@@ -555,7 +563,7 @@ private class SmbAtomicWriteSession(
     override val plannedFinalName: String,
     private val finalPath: String,
     private val replacedRef: EntryRef?,
-    private val connected: ConnectedShare,
+    private val connected: SharedCloseableCache.Lease<ConnectedShare>,
     private val file: SmbFile,
 ) : AtomicWriteSession {
     override val replacementBackupName: String? = null
