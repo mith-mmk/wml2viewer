@@ -7,7 +7,7 @@ plugins {
 }
 
 // Android NDK r27c.
-def androidNdkVersion = '27.2.12479018'
+def androidNdkVersion = '27.3.13750724'
 
 android {
     namespace 'io.github.mith_mmk.wml2viewer'

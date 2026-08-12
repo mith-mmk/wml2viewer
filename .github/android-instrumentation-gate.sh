@@ -41,7 +41,7 @@ adb logcat -c || test_status=1
 
 leak_sentinel="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 echo "::add-mask::$leak_sentinel"
-if ! ./gradlew connectedDebugAndroidTest --no-daemon \
+if ! bash ./gradlew connectedDebugAndroidTest --no-daemon \
   -Pandroid.testInstrumentationRunnerArguments.secretLeakSentinel="$leak_sentinel"; then
   test_status=1
 fi
