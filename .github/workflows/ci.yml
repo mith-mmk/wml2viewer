@@ -119,7 +119,7 @@ jobs:
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
       - name: set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
@@ -206,7 +206,7 @@ jobs:
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
       - name: set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
@@ -276,6 +276,15 @@ jobs:
           --tests io.github.mith_mmk.wml2viewer.platform.smb.SmbSambaIntegrationTest
           -x buildRustDebug --no-daemon
 
+      - name: report Samba integration diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          if [ -d android/app/build/test-results/testDebugUnitTest ]; then
+            find android/app/build/test-results/testDebugUnitTest -type f -name '*.xml' -exec cat {} +
+          fi
+          docker logs --tail 200 wml2viewer-samba 2>&1 || true
+
       - name: stop Samba test server and clear generated data
         if: always()
         shell: bash
@@ -319,7 +328,7 @@ jobs:
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
       - name: set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
