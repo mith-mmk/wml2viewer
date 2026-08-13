@@ -301,6 +301,25 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertFalse(first.contains("example.png"))
     }
 
+    func testLocalRenameKeepsResourceIdentityWhenProviderVendsOne() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wml2viewer-identity-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let original = root.appendingPathComponent("before.png")
+        let renamed = root.appendingPathComponent("after.png")
+        try Data([0]).write(to: original)
+        let before = DocumentEntryIdentity.opaqueIdentifier(for: original)
+        try FileManager.default.moveItem(at: original, to: renamed)
+        let after = DocumentEntryIdentity.opaqueIdentifier(for: renamed)
+        let hasResourceID = (try? renamed.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier) != nil
+        if hasResourceID {
+            XCTAssertEqual(before, after)
+        } else {
+            XCTAssertNotEqual(before, after)
+        }
+    }
+
     func testWideIPadPinsConfiguredFilmstripButPhoneAndNarrowPadUseSheet() {
         XCTAssertTrue(ViewerResponsiveLayout.pinsFilmstrip(isPad: true, width: 1_024, enabled: true))
         XCTAssertFalse(ViewerResponsiveLayout.pinsFilmstrip(isPad: true, width: 899, enabled: true))
