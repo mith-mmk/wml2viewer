@@ -14,7 +14,7 @@
 | FILE-04 | listed file | `.wmltxt`の包含folder要求とrelative containment | `.wmltxt`をself-contained archiveから分離し、包含folder許可後に相対entryを正規化・symlink containment検証してsourceへ接続。manifestの外部変更・復元も対応 |
 | CODEC-01 | capability | 実fixtureによる起動時ImageIO probe | `ImageIOCodecRouter.capabilityProbe()`が起動時にUTI広告と生成fixtureのencode/decodeを確認し、成功形式だけを返す。単体テストで候補集合と一致を検証。 |
 | CODEC-02 | animation fallback | OSがposter化した時の内部fallback、`OS_ONLY`明示error | GIF/APNG/WebPのcontainer markerとImageIO frame countを照合し、poster化を`osAnimationUnsupported`として内部codecへfallback。OS_ONLYはローカライズ済みエラー。52件の単体テストで検証。 |
-| EXPORT-01 | export形式 | 利用可能なPNG/JPEG/WebP lossy/losslessだけ提示 | PNG + share sheetを実装。形式選択・encoder probeは残差分だが、Exportsの24時間超一時ファイルは生成前にcleanupする |
+| EXPORT-01 | export形式 | 利用可能なPNG/JPEG/WebP lossy/losslessだけ提示 | `ImageIOCodecRouter.availableExportFormats`で実encoderをprobeし、quick menuから形式を選択。PNG/JPEG/WebPは成功したencoderだけ提示し、24時間超のexport tempを生成前にcleanupする。53件の単体テストで回帰。 |
 | CACHE-01 | materialize policy | auto容量、LRU、lease、最低空き1GiB、backup除外 | 選択項目のみ64MiB上限とLRU eviction、起動時の孤児materialized file掃除を実装。動的空き容量・lease・最低空き1GiBは実機容量依存の残差分 |
 | UI-03 | iPhone landscape | 上部chromeを隠す | 設定値だけで制御し、orientation連動は未実装 |
 | LIFE-01 | memory warning | current spread以外を解放 | UIApplication memory warning observerでthumbnail・in-flight decodeをpurgeし、表示中spreadと入力を維持 |
