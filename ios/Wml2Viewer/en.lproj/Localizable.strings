@@ -12,6 +12,9 @@
 "Page spacing" = "Page spacing";
 "Open Files" = "Open Files";
 "Retry" = "Retry";
+"Navigate to the folder you want to browse, then tap Open." = "Navigate to the folder you want to browse, then tap Open.";
+"To continue from the selected file, keep its containing folder open and tap Open." = "To continue from the selected file, keep its containing folder open and tap Open.";
+"Export" = "Export";
 "The listed file is invalid" = "The listed file is invalid";
 "A listed file entry is outside the selected folder" = "A listed file entry is outside the selected folder";
 "No document" = "No document";

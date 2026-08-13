@@ -12,6 +12,9 @@
 "Page spacing" = "見開き間隔";
 "Open Files" = "ファイルを開く";
 "Retry" = "再試行";
+"Navigate to the folder you want to browse, then tap Open." = "閲覧するフォルダへ移動し、「開く」をタップしてください。";
+"To continue from the selected file, keep its containing folder open and tap Open." = "選択したファイルから続けて閲覧するには、そのファイルを含むフォルダを表示したまま「開く」をタップしてください。";
+"Export" = "書き出す";
 "The listed file is invalid" = "リストファイルが不正です";
 "A listed file entry is outside the selected folder" = "リスト項目が選択フォルダの外にあります";
 "No document" = "書類がありません";
