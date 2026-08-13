@@ -874,6 +874,16 @@ final class ViewerModelTests: XCTestCase {
     }
 
     @MainActor
+    func testSceneBackgroundStopsDeferredWorkAndActivationRestoresIt() {
+        let store = ViewerStore()
+        store.handleScenePhase(.background)
+        XCTAssertEqual(store.currentScenePhase, .background)
+
+        store.handleScenePhase(.active)
+        XCTAssertEqual(store.currentScenePhase, .active)
+    }
+
+    @MainActor
     func testFolderPickerIsQueuedUntilPrimaryPickerDismisses() async {
         let store = ViewerStore()
         let selected = URL(fileURLWithPath: "/provider/folder/002.png")

@@ -264,6 +264,7 @@ struct ContentView: View {
         .environment(\.locale, store.config.locale)
         .preferredColorScheme(store.config.theme.colorScheme)
         .onChange(of: scenePhase) { _, phase in
+            store.handleScenePhase(phase)
             if phase == .active { Task { await store.reconcileExternalChanges() } }
         }
     }

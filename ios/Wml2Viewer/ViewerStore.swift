@@ -59,6 +59,10 @@ final class ViewerStore: ObservableObject {
     private var listedManifestItem: PageItem?
     private var loadTask: Task<Void, Never>?
     private var animationTask: Task<Void, Never>?
+    private var animationFrames: [AnimationFrame] = []
+    private var animationFrameGeneration = 0
+    private var animationFrameViewport = 0
+    private var animationFrameSpreadPosition = 0
     private var sourceOpenTask: Task<Void, Never>?
     private var sourceOpenCancellation: DocumentSourceCancellation?
     private var sourceOpenOperationID: UUID?
@@ -72,6 +76,8 @@ final class ViewerStore: ObservableObject {
     private var folderAuthorizationContext: FolderAuthorizationContext?
     private var activeBookmark: ActiveBookmark?
     private var thumbnailRequests: Set<String> = []
+    private var thumbnailTasks: [String: Task<Void, Never>] = [:]
+    private(set) var currentScenePhase: ScenePhase = .active
     private var failedFolderPageIDs: Set<String> = []
     private var folderTraversalDirection: FolderTraversalDirection = .forward
     private var flowToFinishAfterDismissal: UUID?
@@ -97,6 +103,7 @@ final class ViewerStore: ObservableObject {
     deinit {
         sourceOpenCancellation?.cancel()
         sourceOpenTask?.cancel()
+        thumbnailTasks.values.forEach { $0.cancel() }
         if let memoryWarningObserver {
             NotificationCenter.default.removeObserver(memoryWarningObserver)
         }
@@ -900,7 +907,44 @@ final class ViewerStore: ObservableObject {
 
     func toggleAnimation() {
         animationEnabled.toggle()
-        if !animationEnabled { animationTask?.cancel() } else { loadCurrent() }
+        if !animationEnabled {
+            animationTask?.cancel()
+            animationTask = nil
+        } else if !animationFrames.isEmpty {
+            startAnimation(
+                animationFrames,
+                generation: animationFrameGeneration,
+                viewport: animationFrameViewport,
+                spreadPosition: animationFrameSpreadPosition
+            )
+        } else {
+            loadCurrent()
+        }
+    }
+
+    /// Stops work that is safe to defer while the scene is not visible. The
+    /// current decoded spread remains published, while thumbnail and
+    /// animation tasks are cancelled and can be recreated after activation.
+    func handleScenePhase(_ phase: ScenePhase) {
+        currentScenePhase = phase
+        switch phase {
+        case .active:
+            guard animationEnabled, animationFrames.count > 1 else { return }
+            startAnimation(
+                animationFrames,
+                generation: animationFrameGeneration,
+                viewport: animationFrameViewport,
+                spreadPosition: animationFrameSpreadPosition
+            )
+        case .inactive, .background:
+            thumbnailTasks.values.forEach { $0.cancel() }
+            thumbnailTasks.removeAll()
+            thumbnailRequests.removeAll()
+            animationTask?.cancel()
+            animationTask = nil
+        @unknown default:
+            break
+        }
     }
 
     func toggleGrayscale() {
@@ -1027,14 +1071,18 @@ final class ViewerStore: ObservableObject {
     }
 
     func requestThumbnail(for item: PageItem) {
-        guard thumbnails[item.id] == nil,
+        guard currentScenePhase == .active,
+              thumbnails[item.id] == nil,
               !thumbnailRequests.contains(item.id),
               let pageIndex = pages.firstIndex(where: { $0.id == item.id }) else { return }
         thumbnailRequests.insert(item.id)
         let generation = sourceGeneration
-        Task { [weak self] in
+        let task = Task { [weak self] in
             guard let self else { return }
-            defer { self.thumbnailRequests.remove(item.id) }
+            defer {
+                self.thumbnailRequests.remove(item.id)
+                self.thumbnailTasks[item.id] = nil
+            }
             do {
                 let decoded: CGImage
                 if let archive = self.nativeArchive,
@@ -1069,6 +1117,7 @@ final class ViewerStore: ObservableObject {
                 // A failed thumbnail must not remove the page or block navigation.
             }
         }
+        thumbnailTasks[item.id] = task
     }
 
     func update(_ config: MobileConfigV1) {
@@ -1462,6 +1511,7 @@ final class ViewerStore: ObservableObject {
     private func loadCurrent() {
         loadTask?.cancel()
         animationTask?.cancel()
+        animationFrames.removeAll(keepingCapacity: false)
         guard let source, pages.indices.contains(currentIndex) else {
             image = nil; spreadImages = []; touchReady = false; return
         }
@@ -1883,8 +1933,12 @@ final class ViewerStore: ObservableObject {
     }
 
     private func startAnimation(_ frames: [AnimationFrame], generation: Int, viewport: Int, spreadPosition: Int) {
-        guard animationEnabled, frames.count > 1 else { return }
+        animationFrames = frames
+        animationFrameGeneration = generation
+        animationFrameViewport = viewport
+        animationFrameSpreadPosition = spreadPosition
         animationTask?.cancel()
+        guard animationEnabled, currentScenePhase == .active, frames.count > 1 else { return }
         animationTask = Task { [weak self] in
             var index = 0
             while !Task.isCancelled {

@@ -25,8 +25,8 @@
 
 今回のSimulator結果:
 
-- iPhone 17 Pro: Swift unit 59 passed、UI 21 passed、iPad専用1 skipped、0 failures
-- iPad Pro 13-inch: Swift unit 59 passed、focused UI 4 passed、0 failures
+- iPhone 17 Pro: Swift unit 60 passed、UI 21 passed、iPad専用1 skipped、0 failures
+- iPad Pro 13-inch: Swift unit 60 passed、focused UI 4 passed、0 failures
 - 見開き中央pixel、0pt/設定値のlayout算術、日本語「見開き間隔」、Files picker、ZIP/LZH/MAGを同じsuiteで回帰
 
 最新のiPhone Simulator focused UIでは、folderの左右移動・filmstrip、空ZIP後の復帰、設定画面の3件を連続実行し、3/3 passed。英日String Catalogと`.strings`のkey集合は77件で一致する。
@@ -34,7 +34,7 @@
 設定カテゴリ統合後のiPhone Japanese UI test（設定表示・見開き間隔）は1/1 passed。
 ジェスチャー仲裁の依存関係（pinch > pan > swipe > long press > double tap > single zone tap）を明示した後、同じiPhone focused UI 3件とDocument Browser管理導線1件がそれぞれ成功した。device向けarm64 Debug buildも成功した。
 
-3x3の既定割当を`TouchMapConfig`として`MobileConfigV1`へ追加し、Androidと同じ安全な`ViewerAction`集合（前後、先頭/末尾、zoom、fit、animation、grayscale、manga、Files、設定、filmstrip、quick menu、export、reload、disabled）を設定画面から変更できるようにした。double tap / long pressも同じdispatcherへ接続し、旧設定JSONは既定値へ移行する。追加Swift unit 3件を含むViewerModelTests 59件、iPhoneの3x3前後/filmstrip・エラー復帰・日本語UI 4件が0 failuresで通過した。
+3x3の既定割当を`TouchMapConfig`として`MobileConfigV1`へ追加し、Androidと同じ安全な`ViewerAction`集合（前後、先頭/末尾、zoom、fit、animation、grayscale、manga、Files、設定、filmstrip、quick menu、export、reload、disabled）を設定画面から変更できるようにした。double tap / long pressも同じdispatcherへ接続し、旧設定JSONは既定値へ移行する。追加Swift unit 3件を含むViewerModelTests 60件、iPhoneの3x3前後/filmstrip・エラー復帰・日本語UI 4件が0 failuresで通過した。scene backgroundでthumbnail/animationを停止し、active復帰で再開するlifecycle unitも追加した。
 
 ## 2026-08-14 実機Provider受入追記
 
