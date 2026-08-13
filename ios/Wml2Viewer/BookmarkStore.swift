@@ -43,10 +43,15 @@ actor BookmarkStore {
 
 actor ConfigStore {
     private let fileURL: URL
+    private var latestSaveSequence: UInt64 = 0
 
     init(fileManager: FileManager = .default) {
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         fileURL = appSupport.appendingPathComponent("mobile-config-v1.json")
+    }
+
+    init(fileURL: URL) {
+        self.fileURL = fileURL
     }
 
     func load() -> MobileConfigV1 {
@@ -57,7 +62,8 @@ actor ConfigStore {
         return config
     }
 
-    func save(_ config: MobileConfigV1) throws {
+    func save(_ config: MobileConfigV1, sequence: UInt64) throws {
+        guard sequence >= latestSaveSequence else { return }
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(config)
@@ -68,5 +74,6 @@ actor ConfigStore {
         } else {
             try FileManager.default.moveItem(at: temporary, to: fileURL)
         }
+        latestSaveSequence = sequence
     }
 }

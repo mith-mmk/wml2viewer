@@ -65,6 +65,7 @@ final class ViewerStore: ObservableObject {
     private var thumbnailRequests: Set<String> = []
     private var flowToFinishAfterDismissal: UUID?
     private var lastPresentedPickerID: UUID?
+    private var configSaveSequence: UInt64 = 0
     private let filesLog = Logger(
         subsystem: "io.github.mith-mmk.wml2viewer",
         category: "FilesOpenFlow"
@@ -602,7 +603,9 @@ final class ViewerStore: ObservableObject {
         let readingChanged = config.mangaEnabled != self.config.mangaEnabled ||
             config.mangaRTL != self.config.mangaRTL || config.coverAlone != self.config.coverAlone
         self.config = config
-        Task { try? await configStore.save(config) }
+        configSaveSequence &+= 1
+        let saveSequence = configSaveSequence
+        Task { try? await configStore.save(config, sequence: saveSequence) }
         if readingChanged { loadCurrent() }
     }
 

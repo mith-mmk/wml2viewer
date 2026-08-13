@@ -60,6 +60,25 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertEqual(MangaPageSpacing.clamp(.infinity), MangaPageSpacing.defaultPoints)
     }
 
+    func testConfigStoreRejectsLateOlderSpacingSave() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".test-config-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ConfigStore(
+            fileURL: directory.appendingPathComponent("mobile-config-v1.json")
+        )
+        var latest = MobileConfigV1()
+        latest.mangaPageSpacing = 12
+        var stale = MobileConfigV1()
+        stale.mangaPageSpacing = 4
+
+        try await store.save(latest, sequence: 2)
+        try await store.save(stale, sequence: 1)
+
+        let restored = await store.load()
+        XCTAssertEqual(restored.mangaPageSpacing, 12)
+    }
+
     #if DEBUG
     func testProviderAcceptanceRequiresRealFolderNavigationAndFilmstripEvidence() {
         var report = ProviderAcceptanceReport(token: "acceptance-token", provider: .iCloud)
