@@ -18,7 +18,7 @@
 | CACHE-01 | materialize policy | auto容量、LRU、lease、最低空き1GiB、backup除外 | 選択項目のみ64MiB上限とLRU eviction、起動時の孤児materialized file掃除を実装。動的空き容量・lease・最低空き1GiBは実機容量依存の残差分 |
 | UI-03 | iPhone landscape | 上部chromeを隠す | 設定値だけで制御し、orientation連動は未実装 |
 | LIFE-01 | memory warning | current spread以外を解放 | UIApplication memory warning observerでthumbnail・in-flight decodeをpurgeし、表示中spreadと入力を維持 |
-| LIFE-02 | 外部rename | opaque IDで現在項目を維持 | pathをIDにしているためrenameは消失扱いとなり、sort上の最寄りへ移動する |
+| LIFE-02 | 外部rename | opaque IDで現在項目を維持 | `fileResourceIdentifier`をopaque IDへハッシュし、resource identifierを返すlocal/providerではrename後も維持する回帰を追加。identifierを返さないProviderは名前fallbackのため実機確認が必要 |
 
 今回のSimulator結果:
 
