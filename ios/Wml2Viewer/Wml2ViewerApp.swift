@@ -118,8 +118,13 @@ struct ContentView: View {
             Button(String(localized: store.grayscaleEnabled ? "Color image" : "Grayscale image")) {
                 store.toggleGrayscale()
             }
-            Button(String(localized: "Export")) { store.prepareExport() }
-                .disabled(store.image == nil)
+            Menu(String(localized: "Export")) {
+                ForEach(ImageIOCodecRouter.availableExportFormats) { format in
+                    Button(format.localizedLabel) {
+                        store.prepareExport(format: format)
+                    }
+                }
+            }
             Button(String(localized: "Cancel"), role: .cancel) {}
         }
         .sheet(item: $store.exportItem, onDismiss: { store.finishExport() }) { item in

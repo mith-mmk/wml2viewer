@@ -64,3 +64,7 @@
 "Routing" = "Routing";
 "System" = "System";
 "Touch" = "Touch";
+"Export PNG" = "Export PNG";
+"Export JPEG" = "Export JPEG";
+"Export WebP (lossy)" = "Export WebP (lossy)";
+"Export WebP (lossless)" = "Export WebP (lossless)";

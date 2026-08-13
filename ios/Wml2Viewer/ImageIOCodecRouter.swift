@@ -102,12 +102,51 @@ struct MobileFileTypePolicy: Sendable {
 }
 
 enum ImageIOCodecRouter {
+    enum ExportFormat: String, CaseIterable, Identifiable {
+        case png
+        case jpeg
+        case webpLossy
+        case webpLossless
+
+        var id: String { rawValue }
+
+        var fileExtension: String {
+            switch self {
+            case .png: "png"
+            case .jpeg: "jpg"
+            case .webpLossy, .webpLossless: "webp"
+            }
+        }
+
+        var type: UTType {
+            switch self {
+            case .png: .png
+            case .jpeg: .jpeg
+            case .webpLossy, .webpLossless: UTType(filenameExtension: "webp") ?? .data
+            }
+        }
+
+        var localizedLabel: String {
+            switch self {
+            case .png: String(localized: "Export PNG")
+            case .jpeg: String(localized: "Export JPEG")
+            case .webpLossy: String(localized: "Export WebP (lossy)")
+            case .webpLossless: String(localized: "Export WebP (lossless)")
+            }
+        }
+    }
+
     static let mobileProbeCandidates: Set<String> = [
         "avif", "bmp", "dng", "gif", "heic", "heif", "ico", "jpeg", "jpg", "png", "webp",
     ]
 
     static let supportedImageExtensions: Set<String> = {
         capabilityProbe()
+    }()
+
+    static let availableExportFormats: [ExportFormat] = {
+        guard let image = probeImage() else { return [] }
+        return ExportFormat.allCases.filter { encodedFixture(image: image, type: $0.type) != nil }
     }()
 
     /// Probe ImageIO against an actual generated image instead of trusting
@@ -152,6 +191,17 @@ enum ImageIOCodecRouter {
     }
 
     private static func encodedFixture(image: CGImage, type: UTType) -> Data? {
+        encode(image, type: type)
+    }
+
+    static func encode(_ image: CGImage, format: ExportFormat) throws -> Data {
+        guard let data = encode(image, type: format.type) else {
+            throw DocumentSourceError.unsupportedItem
+        }
+        return data
+    }
+
+    private static func encode(_ image: CGImage, type: UTType) -> Data? {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             data, type.identifier as CFString, 1, nil

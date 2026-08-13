@@ -554,6 +554,15 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertFalse(ImageIOCodecRouter.encodedAnimationHint(Data("static".utf8)))
     }
 
+    func testAvailableExportFormatsAreImageIODecodable() throws {
+        XCTAssertTrue(ImageIOCodecRouter.availableExportFormats.contains(.png))
+        XCTAssertTrue(ImageIOCodecRouter.availableExportFormats.contains(.jpeg))
+        XCTAssertTrue(ImageIOCodecRouter.availableExportFormats.allSatisfy {
+            ImageIOCodecRouter.mobileProbeCandidates.contains($0.fileExtension)
+                || $0.fileExtension == "jpg"
+        })
+    }
+
     func testMobileFileTypePolicyMatchesAndroidSupportedSet() throws {
         let osExtensions: Set<String> = ["avif", "dng", "heic", "heif"]
         let policy = MobileFileTypePolicy(

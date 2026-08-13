@@ -12,6 +12,7 @@ final class ViewerStore: ObservableObject {
     struct ExportItem: Identifiable {
         let id = UUID()
         let url: URL
+        let format: ImageIOCodecRouter.ExportFormat
     }
 
     private struct AnimationFrame {
@@ -878,7 +879,7 @@ final class ViewerStore: ObservableObject {
         return CIContext(options: nil).createCGImage(output, from: output.extent) ?? image
     }
 
-    func prepareExport() {
+    func prepareExport(format: ImageIOCodecRouter.ExportFormat = .png) {
         guard let image else { return }
         do {
             let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -895,13 +896,12 @@ final class ViewerStore: ObservableObject {
                     try? FileManager.default.removeItem(at: oldURL)
                 }
             }
-            let url = directory.appendingPathComponent("page-\(UUID().uuidString).png")
-            guard let destination = CGImageDestinationCreateWithURL(
-                url as CFURL, UTType.png.identifier as CFString, 1, nil
-            ) else { throw DocumentSourceError.unsupportedItem }
-            CGImageDestinationAddImage(destination, image, nil)
-            guard CGImageDestinationFinalize(destination) else { throw DocumentSourceError.unsupportedItem }
-            exportItem = ExportItem(url: url)
+            let url = directory.appendingPathComponent(
+                "page-\(UUID().uuidString).\(format.fileExtension)"
+            )
+            let data = try ImageIOCodecRouter.encode(image, format: format)
+            try data.write(to: url, options: .atomic)
+            exportItem = ExportItem(url: url, format: format)
         } catch {
             errorMessage = error.localizedDescription
         }

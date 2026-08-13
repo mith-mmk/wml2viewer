@@ -64,3 +64,7 @@
 "Routing" = "経路";
 "System" = "システム";
 "Touch" = "タッチ";
+"Export PNG" = "PNGで書き出す";
+"Export JPEG" = "JPEGで書き出す";
+"Export WebP (lossy)" = "WebP（非可逆）で書き出す";
+"Export WebP (lossless)" = "WebP（可逆）で書き出す";
