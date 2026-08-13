@@ -294,7 +294,7 @@ final class ViewerStore: ObservableObject {
             source = fixture
             try await open(source: fixture, preferredIndex: 0)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = DocumentSourceError.normalized(error).localizedDescription
         }
     }
 
@@ -577,7 +577,7 @@ final class ViewerStore: ObservableObject {
                     folderAuthorizationContext = nil
                 }
                 sourceConnectionState = .retryableError
-                errorMessage = error.localizedDescription
+                errorMessage = DocumentSourceError.normalized(error).localizedDescription
                 // A failed folder snapshot or an unsupported picker result
                 // must never leave the gesture surface in its pre-open
                 // loading state. Keep the previous source (if any) and make
@@ -799,7 +799,7 @@ final class ViewerStore: ObservableObject {
             } catch {
                 guard self.sourceOpenOperationID == operationID else { return }
                 self.sourceConnectionState = .retryableError
-                self.errorMessage = error.localizedDescription
+                self.errorMessage = DocumentSourceError.normalized(error).localizedDescription
                 self.isLoading = false
                 self.touchReady = true
                 #if DEBUG
@@ -1094,7 +1094,26 @@ final class ViewerStore: ObservableObject {
         } catch {
             sourceConnectionState = .retryableError
             touchReady = true
-            errorMessage = error.localizedDescription
+            errorMessage = DocumentSourceError.normalized(error).localizedDescription
+        }
+    }
+
+    /// Retries the current provider-backed source without discarding the
+    /// selected folder or single-file state. If no source remains, fall back
+    /// to the OS picker so the user can re-authorize or choose another item.
+    func retryCurrentSource() {
+        errorMessage = nil
+        sourceNoticeMessage = nil
+        guard source != nil else {
+            requestFilePicker()
+            return
+        }
+        if nativeArchive != nil {
+            loadCurrent()
+            return
+        }
+        Task { [weak self] in
+            await self?.reconcileExternalChanges()
         }
     }
 

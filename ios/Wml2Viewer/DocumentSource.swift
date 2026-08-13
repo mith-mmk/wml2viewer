@@ -317,7 +317,7 @@ enum DocumentEntryMatcher {
     }
 }
 
-enum DocumentSourceError: LocalizedError {
+enum DocumentSourceError: LocalizedError, Equatable {
     case unsupportedItem
     case osAnimationUnsupported
     case unsupportedFileType(String)
@@ -329,6 +329,9 @@ enum DocumentSourceError: LocalizedError {
     case noOtherSupportedItems
     case invalidListedFile
     case listedEntryOutsideFolder
+    case providerOffline
+    case providerAuthenticationRequired
+    case providerUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -353,7 +356,46 @@ enum DocumentSourceError: LocalizedError {
         case .noOtherSupportedItems: String(localized: "No other supported files were found in the selected folder")
         case .invalidListedFile: String(localized: "The listed file is invalid")
         case .listedEntryOutsideFolder: String(localized: "A listed file entry is outside the selected folder")
+        case .providerOffline:
+            String(localized: "This file provider is offline. Check the connection and try again.")
+        case .providerAuthenticationRequired:
+            String(localized: "Sign in to this file provider, then try again.")
+        case .providerUnavailable:
+            String(localized: "This file provider is temporarily unavailable. Try again or choose another source.")
         }
+    }
+
+    /// Converts provider/network errors into stable, actionable messages.
+    /// File Provider implementations differ in their underlying Cocoa and
+    /// URL errors, so the UI must not expose provider-specific raw text.
+    static func normalized(_ error: Error) -> Error {
+        if error is DocumentSourceError { return error }
+        let nsError = error as NSError
+        if nsError.domain == "NSFileProviderErrorDomain" {
+            switch nsError.code {
+            case -1000: // NSFileProviderErrorNotAuthenticated
+                return Self.providerAuthenticationRequired
+            case -1004: // NSFileProviderErrorServerUnreachable
+                return Self.providerOffline
+            case -2001, -2002, -2011, -2012, -2013:
+                return Self.providerUnavailable
+            default:
+                break
+            }
+        }
+        if nsError.domain == NSURLErrorDomain {
+            switch nsError.code {
+            case NSURLErrorNotConnectedToInternet,
+                 NSURLErrorNetworkConnectionLost,
+                 NSURLErrorTimedOut,
+                 NSURLErrorCannotFindHost,
+                 NSURLErrorCannotConnectToHost:
+                return Self.providerOffline
+            default:
+                break
+            }
+        }
+        return error
     }
 }
 

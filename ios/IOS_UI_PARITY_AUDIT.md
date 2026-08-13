@@ -19,6 +19,7 @@
 | UI-03 | iPhone landscape | 上部chromeを隠す | viewerは常設top chromeを持たず、portrait/landscapeとも画像面と3x3入力を主領域にする。横向きでアイコンが再出現しないことをiPhone回転UI testで検証。 |
 | LIFE-01 | memory warning | current spread以外を解放 | UIApplication memory warning observerでthumbnail・in-flight decodeをpurgeし、表示中spreadと入力を維持 |
 | LIFE-02 | 外部rename | opaque IDで現在項目を維持 | `fileResourceIdentifier`をopaque IDへハッシュし、resource identifierを返すlocal/providerではrename後も維持する回帰を追加。identifierを返さないProviderは名前fallbackのため実機確認が必要 |
+| ERROR-01 | Provider failure UX | offline / 認証切れ / 一時停止を再試行可能な状態で表示 | File ProviderとURLの代表的なエラーコードを安定した英日メッセージへ正規化し、現在sourceの「再試行」とFiles再選択を常に提示。単体テストを追加。実Providerが返す個別コードの実機確認は受入時に行う |
 
 今回のSimulator結果:
 

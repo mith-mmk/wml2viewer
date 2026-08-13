@@ -190,6 +190,9 @@ struct ContentView: View {
                         .accessibilityLabel(error)
                         .accessibilityAddTraits(.isStaticText)
                         .accessibilityIdentifier("viewer.error")
+                    Button(String(localized: "Retry")) { store.retryCurrentSource() }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("viewer.error.retry")
                     Button(String(localized: "Open Files")) { store.requestFilePicker() }
                         .buttonStyle(.borderedProminent)
                         .accessibilityIdentifier("viewer.error.openFiles")

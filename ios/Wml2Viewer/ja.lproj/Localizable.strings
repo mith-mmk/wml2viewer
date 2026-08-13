@@ -11,6 +11,7 @@
 "Manga mode" = "マンガモード";
 "Page spacing" = "見開き間隔";
 "Open Files" = "ファイルを開く";
+"Retry" = "再試行";
 "The listed file is invalid" = "リストファイルが不正です";
 "A listed file entry is outside the selected folder" = "リスト項目が選択フォルダの外にあります";
 "No document" = "書類がありません";
@@ -42,6 +43,9 @@
 "The document is no longer available" = "書類を利用できなくなりました";
 "Select the containing folder for this listed file" = "この一覧ファイルを含むフォルダを選択してください";
 "The selected folder does not contain the opened file" = "選択したフォルダに開いたファイルがありません";
+"This file provider is offline. Check the connection and try again." = "ファイル提供元がオフラインです。接続を確認して再試行してください。";
+"Sign in to this file provider, then try again." = "ファイル提供元にサインインしてから再試行してください。";
+"This file provider is temporarily unavailable. Try again or choose another source." = "ファイル提供元を一時的に利用できません。再試行するか、別の場所を選択してください。";
 "No other supported files were found in the selected folder" = "選択したフォルダに他の対応ファイルがありません";
 "No supported files were found in the selected folder" = "選択したフォルダに対応ファイルがありません";
 "Quick menu" = "クイックメニュー";

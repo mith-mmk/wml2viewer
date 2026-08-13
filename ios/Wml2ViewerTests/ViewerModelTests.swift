@@ -21,6 +21,26 @@ final class ViewerModelTests: XCTestCase {
         )
     }
 
+    func testProviderErrorsBecomeActionableLocalizedStates() {
+        let auth = NSError(domain: "NSFileProviderErrorDomain", code: -1000)
+        XCTAssertEqual(
+            DocumentSourceError.normalized(auth) as? DocumentSourceError,
+            .providerAuthenticationRequired
+        )
+        let offline = NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet)
+        XCTAssertEqual(
+            DocumentSourceError.normalized(offline) as? DocumentSourceError,
+            .providerOffline
+        )
+        let unavailable = NSError(domain: "NSFileProviderErrorDomain", code: -2012)
+        XCTAssertEqual(
+            DocumentSourceError.normalized(unavailable) as? DocumentSourceError,
+            .providerUnavailable
+        )
+        let existing = DocumentSourceError.noSupportedItems
+        XCTAssertTrue(DocumentSourceError.normalized(existing) is DocumentSourceError)
+    }
+
     func testSpreadLayoutJoinsPagesAtBindingWhenSpacingIsZero() throws {
         let rects = SpreadLayout.pageRects(
             imageSizes: [CGSize(width: 600, height: 900), CGSize(width: 600, height: 900)],
