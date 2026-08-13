@@ -1,5 +1,7 @@
 import CryptoKit
+import CoreGraphics
 import Foundation
+import ImageIO
 import UniformTypeIdentifiers
 
 protocol DocumentSource: Sendable {
@@ -10,6 +12,19 @@ protocol DocumentSource: Sendable {
 
     func snapshot() async throws -> SourceSnapshot
     func read(_ item: PageItem) async throws -> Data
+    func stat(_ item: PageItem) async throws -> DocumentEntryStat
+    func coordinatedRead(_ item: PageItem) async throws -> Data
+    func materialize(_ item: PageItem) async throws -> URL
+    func thumbnail(_ item: PageItem, maximumPixelSize: Int) async throws -> CGImage?
+    func refresh() async throws -> SourceSnapshot
+}
+
+struct DocumentEntryStat: Sendable, Equatable {
+    let displayName: String
+    let isDirectory: Bool?
+    let isRegularFile: Bool?
+    let byteSize: Int64?
+    let contentTypeIdentifier: String?
 }
 
 struct SourceSnapshot: Sendable, Equatable {
@@ -22,6 +37,10 @@ struct SourceSnapshot: Sendable, Equatable {
 extension DocumentSource {
     func list() async throws -> [PageItem] {
         try await snapshot().entries
+    }
+
+    func refresh() async throws -> SourceSnapshot {
+        try await snapshot()
     }
 }
 
@@ -72,6 +91,47 @@ struct SecurityScopedDocumentSource: DocumentSource, @unchecked Sendable {
                 try Data(contentsOf: coordinatedURL, options: [.mappedIfSafe])
             }
         }
+    }
+
+    func stat(_ item: PageItem) async throws -> DocumentEntryStat {
+        try await withSecurityScope {
+            try await coordinatedRead(at: item.url) { coordinatedURL in
+                let values = try coordinatedURL.resourceValues(forKeys: [
+                    .nameKey, .isDirectoryKey, .isRegularFileKey, .fileSizeKey, .contentTypeKey,
+                ])
+                return DocumentEntryStat(
+                    displayName: values.name ?? item.displayName,
+                    isDirectory: values.isDirectory,
+                    isRegularFile: values.isRegularFile,
+                    byteSize: values.fileSize.map(Int64.init),
+                    contentTypeIdentifier: values.contentType?.identifier
+                )
+            }
+        }
+    }
+
+    func coordinatedRead(_ item: PageItem) async throws -> Data {
+        try await read(item)
+    }
+
+    func materialize(_ item: PageItem) async throws -> URL {
+        let data = try await coordinatedRead(item)
+        return try await MaterializeCache.shared.materialize(
+            data,
+            suggestedExtension: item.url.pathExtension.lowercased()
+        )
+    }
+
+    func thumbnail(_ item: PageItem, maximumPixelSize: Int) async throws -> CGImage? {
+        let data = try await coordinatedRead(item)
+        guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, maximumPixelSize),
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: false,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary)
     }
 
     private func withSecurityScope<T: Sendable>(

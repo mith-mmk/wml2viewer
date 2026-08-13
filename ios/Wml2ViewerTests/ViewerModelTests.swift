@@ -390,6 +390,14 @@ final class ViewerModelTests: XCTestCase {
         ), 1)
         let selectedData = try await source.read(items[1])
         XCTAssertEqual(selectedData, Data([1, 2, 3]))
+        let stat = try await source.stat(items[1])
+        XCTAssertEqual(stat.displayName, "002.png")
+        XCTAssertEqual(stat.byteSize, 3)
+        let materialized = try await source.materialize(items[1])
+        defer { try? FileManager.default.removeItem(at: materialized) }
+        XCTAssertEqual(try Data(contentsOf: materialized), selectedData)
+        let thumbnail = try await source.thumbnail(items[1], maximumPixelSize: 64)
+        XCTAssertNil(thumbnail)
     }
 
     func testDoubleTapFitOverrideAlternatesWithoutChangingConfiguredFit() {
