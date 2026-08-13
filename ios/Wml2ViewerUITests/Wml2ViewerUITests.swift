@@ -288,7 +288,11 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
         surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.6)
-        let chooseFolder = app.buttons["quickMenu.folder"]
+        // iOS 26 exposes the confirmation-dialog button both as its SwiftUI
+        // wrapper and as the underlying button. Select the first accessible
+        // match so the test verifies the product flow instead of failing on
+        // the duplicated accessibility node.
+        let chooseFolder = app.buttons.matching(identifier: "quickMenu.folder").firstMatch
         XCTAssertTrue(chooseFolder.waitForExistence(timeout: 5))
         chooseFolder.tap()
 
