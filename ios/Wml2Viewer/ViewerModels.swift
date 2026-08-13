@@ -69,13 +69,31 @@ struct SourceOpeningProgress: Equatable {
 }
 
 enum SelectedDocumentPolicy {
-    static func validate(name: String, isFolder: Bool) throws {
+    static func validate(
+        name: String,
+        isFolder: Bool,
+        declaredMime: String? = nil
+    ) throws {
         guard !isFolder else { return }
-        guard MobileFileTypePolicy.shared.isSupported(name) else {
+        guard MobileFileTypePolicy.shared.isSupported(name, declaredMime: declaredMime) else {
             throw DocumentSourceError.unsupportedFileType(
                 URL(fileURLWithPath: name).pathExtension
             )
         }
+    }
+
+    /// File Providers may return an extensionless item whose UTType is known
+    /// only through resource values. Use that declaration while the picker
+    /// security scope is still alive instead of rejecting a valid image by
+    /// filename alone.
+    static func validate(url: URL, isFolder: Bool) throws {
+        let declaredMime = try? url.resourceValues(forKeys: [.contentTypeKey])
+            .contentType?.preferredMIMEType
+        try validate(
+            name: url.lastPathComponent,
+            isFolder: isFolder,
+            declaredMime: declaredMime
+        )
     }
 }
 

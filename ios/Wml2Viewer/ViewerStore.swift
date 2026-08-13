@@ -459,7 +459,7 @@ final class ViewerStore: ObservableObject {
                 let isFolder = presentation.request.selectionIsFolder(
                     resourceIsDirectory: resourceIsDirectory
                 )
-                try SelectedDocumentPolicy.validate(name: url.lastPathComponent, isFolder: isFolder)
+                try SelectedDocumentPolicy.validate(url: url, isFolder: isFolder)
                 self.sourceOpeningProgress = SourceOpeningProgress(
                     isFolder: isFolder,
                     processedItemCount: 0,
@@ -735,7 +735,7 @@ final class ViewerStore: ObservableObject {
                 try Task.checkCancellation()
                 try cancellation.checkCancellation()
                 guard self.sourceOpenOperationID == operationID else { return }
-                try SelectedDocumentPolicy.validate(name: url.lastPathComponent, isFolder: isFolder)
+                try SelectedDocumentPolicy.validate(url: url, isFolder: isFolder)
                 self.errorMessage = nil
                 self.sourceNoticeMessage = nil
                 self.sourceOpeningProgress = SourceOpeningProgress(
@@ -1106,7 +1106,7 @@ final class ViewerStore: ObservableObject {
         cancellation: DocumentSourceCancellation? = nil,
         progress: (@Sendable (_ processed: Int, _ total: Int) -> Void)? = nil
     ) async throws -> SourceSnapshot {
-        try SelectedDocumentPolicy.validate(name: url.lastPathComponent, isFolder: isFolder)
+        try SelectedDocumentPolicy.validate(url: url, isFolder: isFolder)
         try cancellation?.checkCancellation()
         let bookmark = try await Task.detached(priority: .userInitiated) {
             let scoped = url.startAccessingSecurityScopedResource()

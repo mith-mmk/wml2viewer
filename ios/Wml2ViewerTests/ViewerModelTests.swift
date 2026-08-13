@@ -378,6 +378,11 @@ final class ViewerModelTests: XCTestCase {
     func testSelectedDocumentPolicySeparatesSupportedFileFromUnsupportedExtension() throws {
         XCTAssertNoThrow(try SelectedDocumentPolicy.validate(name: "page.png", isFolder: false))
         XCTAssertNoThrow(try SelectedDocumentPolicy.validate(name: "book.LZH", isFolder: false))
+        XCTAssertNoThrow(
+            try SelectedDocumentPolicy.validate(
+                name: "extensionless-item", isFolder: false, declaredMime: "image/png"
+            )
+        )
         XCTAssertNoThrow(try SelectedDocumentPolicy.validate(name: "Any Folder", isFolder: true))
         XCTAssertThrowsError(
             try SelectedDocumentPolicy.validate(name: "manual.pdf", isFolder: false)
