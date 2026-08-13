@@ -31,6 +31,13 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>public.image</string>
+				<string>io.github.mith-mmk.wml2viewer.mag</string>
+				<string>io.github.mith-mmk.wml2viewer.mki</string>
+				<string>io.github.mith-mmk.wml2viewer.pcd</string>
+				<string>io.github.mith-mmk.wml2viewer.pi</string>
+				<string>io.github.mith-mmk.wml2viewer.pic</string>
+				<string>io.github.mith-mmk.wml2viewer.vsp</string>
+				<string>io.github.mith-mmk.wml2viewer.dib</string>
 				<string>com.pkware.zip-archive</string>
 				<string>io.github.mith-mmk.wml2viewer.lha</string>
 				<string>io.github.mith-mmk.wml2viewer.wmltxt</string>
@@ -44,6 +51,48 @@
 			<key>UTTypeDescription</key><string>LHA archive</string>
 			<key>UTTypeConformsTo</key><array><string>public.archive</string></array>
 			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>lha</string><string>lzh</string></array></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.mag</string>
+			<key>UTTypeDescription</key><string>MAG image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>mag</string></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.mki</string>
+			<key>UTTypeDescription</key><string>MAKI image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>mki</string></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.pcd</string>
+			<key>UTTypeDescription</key><string>Photo CD image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>pcd</string></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.pi</string>
+			<key>UTTypeDescription</key><string>PI image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>pi</string></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.pic</string>
+			<key>UTTypeDescription</key><string>PIC image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>pic</string></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.vsp</string>
+			<key>UTTypeDescription</key><string>VSP image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>vsp</string></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.dib</string>
+			<key>UTTypeDescription</key><string>DIB image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>dib</string></dict>
 		</dict>
 	</array>
 	<key>UTExportedTypeDeclarations</key>
