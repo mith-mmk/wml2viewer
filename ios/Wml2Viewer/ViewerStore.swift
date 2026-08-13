@@ -5,6 +5,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import CoreImage
 import OSLog
+import UIKit
 
 @MainActor
 final class ViewerStore: ObservableObject {
@@ -67,10 +68,29 @@ final class ViewerStore: ObservableObject {
     private var flowToFinishAfterDismissal: UUID?
     private var lastPresentedPickerID: UUID?
     private var configSaveSequence: UInt64 = 0
+    private var memoryWarningObserver: NSObjectProtocol?
     private let filesLog = Logger(
         subsystem: "io.github.mith-mmk.wml2viewer",
         category: "FilesOpenFlow"
     )
+
+    init() {
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.purgeNonCurrentDecodedState()
+            }
+        }
+    }
+
+    deinit {
+        if let memoryWarningObserver {
+            NotificationCenter.default.removeObserver(memoryWarningObserver)
+        }
+    }
 
     #if DEBUG
     private var uiTestPickerInitialDirectoryURL: URL?
@@ -536,6 +556,17 @@ final class ViewerStore: ObservableObject {
             let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("Exports", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let now = Date()
+            for oldURL in try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                let modified = try? oldURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+                if let modified, now.timeIntervalSince(modified) > 24 * 60 * 60 {
+                    try? FileManager.default.removeItem(at: oldURL)
+                }
+            }
             let url = directory.appendingPathComponent("page-\(UUID().uuidString).png")
             guard let destination = CGImageDestinationCreateWithURL(
                 url as CFURL, UTType.png.identifier as CFString, 1, nil
@@ -551,6 +582,16 @@ final class ViewerStore: ObservableObject {
     func finishExport() {
         if let url = exportItem?.url { try? FileManager.default.removeItem(at: url) }
         exportItem = nil
+    }
+
+    private func purgeNonCurrentDecodedState() {
+        thumbnails.removeAll(keepingCapacity: false)
+        thumbnailRequests.removeAll(keepingCapacity: false)
+        // Keep the visible image/spread interactive. In-flight work is
+        // generation-guarded and will repopulate only after a fresh request.
+        loadTask?.cancel()
+        animationTask?.cancel()
+        touchReady = !pages.isEmpty
     }
 
     func previous() {
