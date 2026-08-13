@@ -212,6 +212,32 @@ jobs:
             ios/build-rust.sh iphoneos arm64
       - name: build iOS Simulator tests
         run: xcodebuild -project ios/Wml2Viewer.xcodeproj -scheme Wml2Viewer -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -configuration Debug -derivedDataPath "$RUNNER_TEMP/.test-xcode-simulator" CODE_SIGNING_ALLOWED=NO build-for-testing
+      - name: run iPhone and iPad Simulator tests
+        shell: bash
+        run: |
+          set -eu
+          iphone_id="$(xcrun simctl list devices available | grep iPhone | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -n 1)"
+          ipad_id="$(xcrun simctl list devices available | grep iPad | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -n 1)"
+          test -n "$iphone_id"
+          test -n "$ipad_id"
+          xcodebuild -project ios/Wml2Viewer.xcodeproj \
+            -scheme Wml2Viewer \
+            -destination "platform=iOS Simulator,id=$iphone_id" \
+            -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/.test-xcode-simulator" \
+            CODE_SIGNING_ALLOWED=NO test-without-building
+          xcodebuild -project ios/Wml2Viewer.xcodeproj \
+            -scheme Wml2Viewer \
+            -destination "platform=iOS Simulator,id=$ipad_id" \
+            -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/.test-xcode-simulator" \
+            CODE_SIGNING_ALLOWED=NO test-without-building
+      - name: upload iOS Simulator app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wml2viewer-ios-simulator
+          path: ${{ runner.temp }}/.test-xcode-simulator/Build/Products/Debug-iphonesimulator/Wml2Viewer.app
+          if-no-files-found: error
       - name: verify iOS C ABI header
         run: clang -fsyntax-only -x c -std=c17 -Wall -Wextra -Werror crates/wml2viewer-ios/include/wml2viewer_ios.h
 
