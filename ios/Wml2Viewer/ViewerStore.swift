@@ -36,6 +36,7 @@ final class ViewerStore: ObservableObject {
     @Published var pendingPicker: PickerPresentation?
     @Published private(set) var filesOpenPhase: FilesOpenFlowPhase = .idle
     @Published private(set) var sourceConnectionState: SourceConnectionState = .empty
+    @Published private(set) var sourceOpeningProgress: SourceOpeningProgress?
     @Published private(set) var thumbnails: [String: CGImage] = [:]
     @Published var zoom: CGFloat = 1
     @Published var pan: CGSize = .zero
@@ -56,6 +57,11 @@ final class ViewerStore: ObservableObject {
     private var listedManifestItem: PageItem?
     private var loadTask: Task<Void, Never>?
     private var animationTask: Task<Void, Never>?
+    private var sourceOpenTask: Task<Void, Never>?
+    private var sourceOpenCancellation: DocumentSourceCancellation?
+    private var sourceOpenOperationID: UUID?
+    private var sourceOpenPickerContext: (flowID: UUID, presentationID: UUID)?
+    private var pickerDismissalWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var sourceGeneration = 0
     private var viewportGeneration = 0
     private var viewportSize: CGSize = .zero
@@ -87,6 +93,8 @@ final class ViewerStore: ObservableObject {
     }
 
     deinit {
+        sourceOpenCancellation?.cancel()
+        sourceOpenTask?.cancel()
         if let memoryWarningObserver {
             NotificationCenter.default.removeObserver(memoryWarningObserver)
         }
@@ -195,12 +203,18 @@ final class ViewerStore: ObservableObject {
         let errorFixture = environment["WML2VIEWER_UI_TEST_FIXTURE_UNSUPPORTED"] == "1"
         let archiveFormat = environment["WML2VIEWER_UI_TEST_FIXTURE_ARCHIVE"]
         let pickerFolderName = environment["WML2VIEWER_UI_TEST_PICKER_FOLDER_NAME"]
+        let pickerIncludesUnsupported = environment[
+            "WML2VIEWER_UI_TEST_PICKER_UNSUPPORTED_FILE"
+        ] == "1"
         guard folderFixture || errorFixture || archiveFormat != nil || pickerFolderName != nil else {
             return
         }
         do {
             if let pickerFolderName {
-                try installUITestPickerFixture(named: pickerFolderName)
+                try installUITestPickerFixture(
+                    named: pickerFolderName,
+                    includesUnsupportedFile: pickerIncludesUnsupported
+                )
                 return
             }
             let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -260,7 +274,10 @@ final class ViewerStore: ObservableObject {
         [0x50, 0xC8, 0x78, 0xFF],
     ]
 
-    private func installUITestPickerFixture(named folderName: String) throws {
+    private func installUITestPickerFixture(
+        named folderName: String,
+        includesUnsupportedFile: Bool
+    ) throws {
         guard !folderName.isEmpty,
               folderName != ".",
               folderName != "..",
@@ -281,6 +298,12 @@ final class ViewerStore: ObservableObject {
         for (index, color) in Self.uiTestFixtureColors.enumerated() {
             let url = directory.appendingPathComponent(String(format: "page-%02d.png", index + 1))
             try Self.writeUITestPNG(color: color, to: url)
+        }
+        if includesUnsupportedFile {
+            try Data("unsupported fixture".utf8).write(
+                to: directory.appendingPathComponent("unsupported.pdf"),
+                options: .atomic
+            )
         }
         uiTestPickerInitialDirectoryURL = documents
         uiTestPickerFixtureReady = true
@@ -354,8 +377,8 @@ final class ViewerStore: ObservableObject {
             if presentation.request == .containingFolder,
                folderAuthorizationContext != nil {
                 folderAuthorizationContext = nil
-                errorMessage = DocumentSourceError.folderRequired.localizedDescription
-                sourceConnectionState = .retryableError
+                errorMessage = nil
+                sourceNoticeMessage = String(localized: "Folder selection was cancelled. The selected file remains open by itself.")
             } else {
                 Task { await reconcileExternalChanges() }
             }
@@ -365,13 +388,52 @@ final class ViewerStore: ObservableObject {
             )
             return
         }
-        Task { @MainActor in
+        let operationID = UUID()
+        let cancellation = DocumentSourceCancellation()
+        sourceOpenOperationID = operationID
+        sourceOpenCancellation = cancellation
+        sourceOpenPickerContext = (presentation.flowID, presentation.id)
+        sourceOpenTask = Task { @MainActor [weak self] in
+            guard let self else { return }
             do {
                 let url = try result.get()
-                let resourceIsDirectory = Self.isDirectoryURL(url)
+                self.errorMessage = nil
+                self.sourceNoticeMessage = nil
+                self.sourceOpeningProgress = SourceOpeningProgress(
+                    isFolder: presentation.request == .containingFolder,
+                    processedItemCount: 0,
+                    totalItemCount: nil
+                )
+                // A full-screen document picker covers the app's progress UI.
+                // Wait for UIKit/SwiftUI dismissal before touching a provider;
+                // otherwise a slow File Provider looks frozen and Cancel is
+                // unreachable behind the picker scene.
+                await self.waitForPickerDismissal(presentation.id)
+                try Task.checkCancellation()
+                try cancellation.checkCancellation()
+                guard self.sourceOpenOperationID == operationID else { return }
+                let resourceIsDirectory = await Task.detached(priority: .userInitiated) {
+                    Self.isDirectoryURL(url)
+                }.value
+                try Task.checkCancellation()
+                try cancellation.checkCancellation()
+                guard self.sourceOpenOperationID == operationID else { return }
                 let isFolder = presentation.request.selectionIsFolder(
                     resourceIsDirectory: resourceIsDirectory
                 )
+                try SelectedDocumentPolicy.validate(name: url.lastPathComponent, isFolder: isFolder)
+                self.sourceOpeningProgress = SourceOpeningProgress(
+                    isFolder: isFolder,
+                    processedItemCount: 0,
+                    totalItemCount: nil
+                )
+                #if DEBUG
+                if let delay = ProcessInfo.processInfo.environment[
+                    "WML2VIEWER_UI_TEST_SOURCE_OPENING_DELAY_NANOSECONDS"
+                ].flatMap(UInt64.init), delay > 0 {
+                    try await Task.sleep(nanoseconds: delay)
+                }
+                #endif
                 let authorization = presentation.request == .containingFolder
                     ? folderAuthorizationContext : nil
                 if presentation.request == .containingFolder {
@@ -382,8 +444,22 @@ final class ViewerStore: ObservableObject {
                     isFolder: isFolder,
                     preferredOpaqueEntryID: authorization?.selectedOpaqueEntryID,
                     preferredFileName: authorization?.selectedFileName,
-                    requiresPreferredItem: authorization != nil
+                    requiresPreferredItem: authorization != nil,
+                    cancellation: cancellation,
+                    progress: { [weak self] processed, total in
+                        Task { @MainActor in
+                            guard let self,
+                                  self.sourceOpenOperationID == operationID,
+                                  var progress = self.sourceOpeningProgress else { return }
+                            progress.processedItemCount = processed
+                            progress.totalItemCount = total
+                            self.sourceOpeningProgress = progress
+                        }
+                    }
                 )
+                try Task.checkCancellation()
+                try cancellation.checkCancellation()
+                guard self.sourceOpenOperationID == operationID else { return }
                 if let authorization,
                    presentation.request == .containingFolder,
                    MobileFileTypePolicy.shared.isListedFile(authorization.selectedFileName),
@@ -424,7 +500,16 @@ final class ViewerStore: ObservableObject {
                         presentationID: presentation.id
                     )
                 }
+                finishSourceOpening(operationID: operationID)
+            } catch is CancellationError {
+                guard self.sourceOpenOperationID == operationID else { return }
+                finishCancelledSourceOpening(
+                    operationID: operationID,
+                    flowID: presentation.flowID,
+                    presentationID: presentation.id
+                )
             } catch {
+                guard self.sourceOpenOperationID == operationID else { return }
                 if presentation.request == .containingFolder {
                     folderAuthorizationContext = nil
                 }
@@ -438,12 +523,61 @@ final class ViewerStore: ObservableObject {
                     flowID: presentation.flowID,
                     presentationID: presentation.id
                 )
+                finishSourceOpening(operationID: operationID)
             }
         }
     }
 
+    func cancelSourceOpening() {
+        guard sourceOpenOperationID != nil else { return }
+        let pickerContext = sourceOpenPickerContext
+        sourceOpenOperationID = nil
+        sourceOpenCancellation?.cancel()
+        sourceOpenTask?.cancel()
+        sourceOpenTask = nil
+        sourceOpenCancellation = nil
+        sourceOpenPickerContext = nil
+        sourceOpeningProgress = nil
+        folderAuthorizationContext = nil
+        errorMessage = nil
+        sourceNoticeMessage = pages.isEmpty
+            ? String(localized: "Opening was cancelled.")
+            : String(localized: "Opening was cancelled. The current document remains open.")
+        touchReady = true
+        if let pickerContext {
+            finishFlowWhenDismissed(
+                flowID: pickerContext.flowID,
+                presentationID: pickerContext.presentationID
+            )
+        }
+        filesLog.info("source opening cancelled by user")
+    }
+
+    private func finishCancelledSourceOpening(
+        operationID: UUID,
+        flowID: UUID,
+        presentationID: UUID
+    ) {
+        sourceNoticeMessage = pages.isEmpty
+            ? String(localized: "Opening was cancelled.")
+            : String(localized: "Opening was cancelled. The current document remains open.")
+        touchReady = true
+        finishFlowWhenDismissed(flowID: flowID, presentationID: presentationID)
+        finishSourceOpening(operationID: operationID)
+    }
+
+    private func finishSourceOpening(operationID: UUID) {
+        guard sourceOpenOperationID == operationID else { return }
+        sourceOpenOperationID = nil
+        sourceOpenTask = nil
+        sourceOpenCancellation = nil
+        sourceOpenPickerContext = nil
+        sourceOpeningProgress = nil
+    }
+
     func pickerDidDismiss(_ presentationID: UUID) {
         let next = pickerFlow.didDismiss(presentationID)
+        pickerDismissalWaiters.removeValue(forKey: presentationID)?.resume()
         if let next {
             pendingPicker = next
             lastPresentedPickerID = next.id
@@ -453,6 +587,17 @@ final class ViewerStore: ObservableObject {
             pickerFlow.finish(flowID: flowID)
         }
         syncPickerPhase()
+    }
+
+    private func waitForPickerDismissal(_ presentationID: UUID) async {
+        if pickerFlow.activePresentationID == presentationID,
+           pickerFlow.activePresentationWasDismissed {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            pickerDismissalWaiters[presentationID]?.resume()
+            pickerDismissalWaiters[presentationID] = continuation
+        }
     }
 
     func pickerCoverDidDismiss() {
@@ -761,15 +906,29 @@ final class ViewerStore: ObservableObject {
         isFolder: Bool,
         preferredOpaqueEntryID: String? = nil,
         preferredFileName: String? = nil,
-        requiresPreferredItem: Bool = false
+        requiresPreferredItem: Bool = false,
+        cancellation: DocumentSourceCancellation? = nil,
+        progress: (@Sendable (_ processed: Int, _ total: Int) -> Void)? = nil
     ) async throws -> SourceSnapshot {
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let bookmark = try url.bookmarkData(options: [.suitableForBookmarkFile], includingResourceValuesForKeys: nil, relativeTo: nil)
+        try SelectedDocumentPolicy.validate(name: url.lastPathComponent, isFolder: isFolder)
+        try cancellation?.checkCancellation()
+        let bookmark = try await Task.detached(priority: .userInitiated) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            return try url.bookmarkData(
+                options: [.suitableForBookmarkFile],
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+        }.value
+        try cancellation?.checkCancellation()
         let newSource = SecurityScopedDocumentSource(sourceID: UUID(), displayName: url.lastPathComponent, rootURL: url, isFolder: isFolder)
         let snapshot: SourceSnapshot
         do {
-            snapshot = try await newSource.snapshot()
+            snapshot = try await newSource.snapshot(
+                cancellation: cancellation,
+                progress: progress
+            )
         } catch {
             let cocoaError = error as NSError
             filesLog.error(
@@ -802,6 +961,7 @@ final class ViewerStore: ObservableObject {
         } else {
             preferredIndex = 0
         }
+        try cancellation?.checkCancellation()
         try commitOpen(source: newSource, listedPages: listedPages, preferredIndex: preferredIndex)
         if let previous = activeBookmark, previous.sourceID != newSource.sourceID {
             try? await bookmarks.remove(sourceID: previous.sourceID)
@@ -872,7 +1032,7 @@ final class ViewerStore: ObservableObject {
         Task { try? await bookmarks.upsert(record) }
     }
 
-    private static func isDirectoryURL(_ url: URL) -> Bool {
+    nonisolated private static func isDirectoryURL(_ url: URL) -> Bool {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         var isDirectory = ObjCBool(false)
@@ -887,7 +1047,7 @@ final class ViewerStore: ObservableObject {
         )
     }
 
-    static func isDirectoryResource(
+    nonisolated static func isDirectoryResource(
         isDirectory: Bool?,
         contentType: UTType?,
         hasDirectoryPath: Bool
@@ -1169,13 +1329,34 @@ final class ViewerStore: ObservableObject {
                     self.touchReady = true
                     self.image = nil
                     self.spreadImages = []
-                    self.errorMessage = error.localizedDescription
+                    self.errorMessage = Self.userFacingDecodeError(
+                        error,
+                        displayName: item.displayName
+                    ).localizedDescription
                     #if DEBUG
                     self.providerAcceptance?.recoverableError(inputReady: self.interactionReady)
                     #endif
                 }
             }
         }
+    }
+
+    private static func userFacingDecodeError(
+        _ error: Error,
+        displayName: String
+    ) -> Error {
+        if let documentError = error as? DocumentSourceError {
+            switch documentError {
+            case .unsupportedItem:
+                return DocumentSourceError.unreadableDocument(displayName)
+            default:
+                return documentError
+            }
+        }
+        if error is NativeBridgeError {
+            return DocumentSourceError.unreadableDocument(displayName)
+        }
+        return error
     }
 
     private func plannedIndices() -> [Int] {

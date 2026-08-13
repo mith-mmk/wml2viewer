@@ -269,6 +269,50 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertFalse(MobileFileTypePolicy.shared.isSelfContainedArchive("book.wmltxt"))
     }
 
+    func testSelectedDocumentPolicySeparatesSupportedFileFromUnsupportedExtension() throws {
+        XCTAssertNoThrow(try SelectedDocumentPolicy.validate(name: "page.png", isFolder: false))
+        XCTAssertNoThrow(try SelectedDocumentPolicy.validate(name: "book.LZH", isFolder: false))
+        XCTAssertNoThrow(try SelectedDocumentPolicy.validate(name: "Any Folder", isFolder: true))
+        XCTAssertThrowsError(
+            try SelectedDocumentPolicy.validate(name: "manual.pdf", isFolder: false)
+        ) { error in
+            guard let documentError = error as? DocumentSourceError,
+                  case .unsupportedFileType(let fileExtension) = documentError else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertEqual(fileExtension, "pdf")
+            XCTAssertTrue(error.localizedDescription.localizedCaseInsensitiveContains("PDF"))
+            XCTAssertTrue(error.localizedDescription.contains("ZIP/LHA/LZH"))
+        }
+    }
+
+    func testSourceOpeningProgressReportsCountAndCancellationStopsSnapshot() async throws {
+        let progress = SourceOpeningProgress(
+            isFolder: true,
+            processedItemCount: 32,
+            totalItemCount: 100
+        )
+        XCTAssertTrue(progress.detail.contains("32"))
+        XCTAssertTrue(progress.detail.contains("100"))
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".test-wml2viewer-cancel-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data([0]).write(to: root.appendingPathComponent("page.png"))
+        let source = SecurityScopedDocumentSource(
+            sourceID: UUID(), displayName: "cancel fixture", rootURL: root, isFolder: true
+        )
+        let cancellation = DocumentSourceCancellation()
+        cancellation.cancel()
+        do {
+            _ = try await source.snapshot(cancellation: cancellation)
+            XCTFail("cancelled snapshot unexpectedly succeeded")
+        } catch is CancellationError {
+            XCTAssertTrue(cancellation.isCancelled)
+        }
+    }
+
     func testWmltxtResolverNormalizesEntriesAndRejectsEscape() throws {
         let manifest = Data("#!WMLViewer2 ListedFile\n# comment\nchapter\\001.png\n./chapter/002.png\n".utf8)
         XCTAssertEqual(
@@ -546,8 +590,11 @@ final class ViewerModelTests: XCTestCase {
 
         XCTAssertEqual(store.pages, originalPages)
         XCTAssertTrue(store.touchReady)
-        XCTAssertEqual(store.errorMessage, DocumentSourceError.folderRequired.localizedDescription)
-        XCTAssertEqual(store.sourceConnectionState, .retryableError)
+        XCTAssertNil(store.errorMessage)
+        XCTAssertEqual(
+            store.sourceNoticeMessage,
+            String(localized: "Folder selection was cancelled. The selected file remains open by itself.")
+        )
         store.pickerDidDismiss(presentation.id)
         XCTAssertEqual(store.filesOpenPhase, .idle)
     }

@@ -27,6 +27,17 @@
 "Theme" = "テーマ";
 "Thumbnail" = "サムネイル";
 "Unsupported document" = "対応していない書類です";
+"Unsupported file type. Choose an image, ZIP/LHA/LZH archive, or WMLTXT file." = "このファイル形式には対応していません。画像、ZIP/LHA/LZH書庫、またはWMLTXTファイルを選択してください。";
+"Unsupported file type “.%@”. Choose an image, ZIP/LHA/LZH archive, or WMLTXT file." = "ファイル形式「.%@」には対応していません。画像、ZIP/LHA/LZH書庫、またはWMLTXTファイルを選択してください。";
+"Could not display “%@”. The file may be damaged or use an unsupported variant." = "「%@」を表示できませんでした。ファイルが破損しているか、未対応の形式である可能性があります。";
+"Scanning folder…" = "フォルダを読み込み中…";
+"Opening file…" = "ファイルを読み込み中…";
+"Reading the folder contents. This may take a while for cloud or network folders." = "フォルダの内容を確認しています。クラウドやネットワーク上では時間がかかることがあります。";
+"Reading the selected file." = "選択したファイルを読み込んでいます。";
+"Checking files: %lld of %lld" = "ファイルを確認中：%2$lld件中%1$lld件";
+"Folder selection was cancelled. The selected file remains open by itself." = "フォルダ選択をキャンセルしました。選択したファイルだけを表示します。";
+"Opening was cancelled." = "読み込みをキャンセルしました。";
+"Opening was cancelled. The current document remains open." = "読み込みをキャンセルしました。現在の書類はそのまま表示します。";
 "The document is no longer available" = "書類を利用できなくなりました";
 "Select the containing folder for this listed file" = "この一覧ファイルを含むフォルダを選択してください";
 "The selected folder does not contain the opened file" = "選択したフォルダに開いたファイルがありません";

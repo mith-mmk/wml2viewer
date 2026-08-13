@@ -159,6 +159,8 @@ struct ContentView: View {
                 HStack(spacing: 12) {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.callout)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(error)
                         .accessibilityAddTraits(.isStaticText)
                         .accessibilityIdentifier("viewer.error")
                     Button(String(localized: "Open Files")) { store.requestFilePicker() }
@@ -181,6 +183,36 @@ struct ContentView: View {
                     .padding(.bottom, 24)
                     .accessibilityAddTraits(.isStaticText)
                     .accessibilityIdentifier("viewer.sourceNotice")
+            }
+        }
+        .overlay {
+            if let progress = store.sourceOpeningProgress {
+                ZStack {
+                    Color.black.opacity(0.42)
+                        .ignoresSafeArea()
+                    VStack(spacing: 14) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text(progress.title)
+                            .font(.headline)
+                        Text(progress.detail)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button(String(localized: "Cancel"), role: .cancel) {
+                            store.cancelSourceOpening()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("sourceOpening.cancel")
+                    }
+                    .padding(24)
+                    .frame(maxWidth: 420)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+                    .padding()
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("sourceOpening.progress")
+                }
+                .transition(.opacity)
             }
         }
         #if DEBUG

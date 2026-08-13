@@ -34,6 +34,47 @@ struct SourceSnapshot: Sendable, Equatable {
     var supportedItemCount: Int { entries.count }
 }
 
+/// Cooperative cancellation shared with `NSFileCoordinator`. Cancelling a
+/// source opening must return control to the viewer even when a File Provider
+/// is still resolving a large directory or a remote placeholder.
+final class DocumentSourceCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    private var coordinator: NSFileCoordinator?
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let coordinator = coordinator
+        lock.unlock()
+        coordinator?.cancel()
+    }
+
+    func checkCancellation() throws {
+        if isCancelled { throw CancellationError() }
+    }
+
+    fileprivate func register(_ coordinator: NSFileCoordinator) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !cancelled else { return false }
+        self.coordinator = coordinator
+        return true
+    }
+
+    fileprivate func unregister() {
+        lock.lock()
+        coordinator = nil
+        lock.unlock()
+    }
+}
+
 extension DocumentSource {
     func list() async throws -> [PageItem] {
         try await snapshot().entries
@@ -51,9 +92,21 @@ struct SecurityScopedDocumentSource: DocumentSource, @unchecked Sendable {
     let isFolder: Bool
 
     func snapshot() async throws -> SourceSnapshot {
-        try await withSecurityScope {
+        try await snapshot(cancellation: nil)
+    }
+
+    func snapshot(
+        cancellation: DocumentSourceCancellation?,
+        progress: (@Sendable (_ processed: Int, _ total: Int) -> Void)? = nil
+    ) async throws -> SourceSnapshot {
+        try cancellation?.checkCancellation()
+        return try await withSecurityScope {
             if isFolder {
-                return try await coordinatedRead(at: rootURL) { coordinatedRoot in
+                return try await coordinatedRead(
+                    at: rootURL,
+                    cancellation: cancellation
+                ) { coordinatedRoot in
+                    try cancellation?.checkCancellation()
                     let keys: Set<URLResourceKey> = [
                         .isRegularFileKey, .isDirectoryKey, .nameKey, .contentTypeKey,
                     ]
@@ -62,17 +115,33 @@ struct SecurityScopedDocumentSource: DocumentSource, @unchecked Sendable {
                         includingPropertiesForKeys: Array(keys),
                         options: [.skipsHiddenFiles]
                     )
-                    let entries = urls.compactMap(Self.pageItem(for:)).sorted {
+                    progress?(0, urls.count)
+                    var entries: [PageItem] = []
+                    entries.reserveCapacity(urls.count)
+                    for (index, url) in urls.enumerated() {
+                        try cancellation?.checkCancellation()
+                        if let item = Self.pageItem(for: url) { entries.append(item) }
+                        if index == urls.count - 1 || (index + 1).isMultiple(of: 32) {
+                            progress?(index + 1, urls.count)
+                        }
+                    }
+                    try cancellation?.checkCancellation()
+                    entries.sort {
                         $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
                     }
+                    try cancellation?.checkCancellation()
                     return SourceSnapshot(
                         entries: entries,
                         enumeratedItemCount: urls.count
                     )
                 }
             }
-            return try await coordinatedRead(at: rootURL) { coordinatedURL in
-                SourceSnapshot(
+            return try await coordinatedRead(
+                at: rootURL,
+                cancellation: cancellation
+            ) { coordinatedURL in
+                try cancellation?.checkCancellation()
+                return SourceSnapshot(
                     entries: [PageItem(
                         id: DocumentEntryIdentity.opaqueIdentifier(for: coordinatedURL),
                         url: coordinatedURL,
@@ -144,14 +213,24 @@ struct SecurityScopedDocumentSource: DocumentSource, @unchecked Sendable {
 
     private func coordinatedRead<T: Sendable>(
         at url: URL,
+        cancellation: DocumentSourceCancellation? = nil,
         operation: @escaping @Sendable (URL) throws -> T
     ) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in
             let coordinator = NSFileCoordinator(filePresenter: nil)
+            guard cancellation?.register(coordinator) != false else {
+                continuation.resume(throwing: CancellationError())
+                return
+            }
             let intent = NSFileAccessIntent.readingIntent(with: url, options: .withoutChanges)
             let queue = OperationQueue()
             queue.qualityOfService = .userInitiated
             coordinator.coordinate(with: [intent], queue: queue) { error in
+                cancellation?.unregister()
+                if cancellation?.isCancelled == true {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
                 if let error {
                     continuation.resume(throwing: error)
                     return
@@ -236,6 +315,8 @@ enum DocumentEntryMatcher {
 
 enum DocumentSourceError: LocalizedError {
     case unsupportedItem
+    case unsupportedFileType(String)
+    case unreadableDocument(String)
     case folderRequired
     case selectedFileNotFound
     case permissionDenied
@@ -247,6 +328,18 @@ enum DocumentSourceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupportedItem: String(localized: "Unsupported document")
+        case .unsupportedFileType(let fileExtension):
+            fileExtension.isEmpty
+                ? String(localized: "Unsupported file type. Choose an image, ZIP/LHA/LZH archive, or WMLTXT file.")
+                : String(
+                    format: String(localized: "Unsupported file type “.%@”. Choose an image, ZIP/LHA/LZH archive, or WMLTXT file."),
+                    fileExtension.uppercased()
+                )
+        case .unreadableDocument(let displayName):
+            String(
+                format: String(localized: "Could not display “%@”. The file may be damaged or use an unsupported variant."),
+                displayName
+            )
         case .folderRequired: String(localized: "Select the containing folder for this listed file")
         case .selectedFileNotFound: String(localized: "The selected folder does not contain the opened file")
         case .permissionDenied: String(localized: "The document is no longer available")

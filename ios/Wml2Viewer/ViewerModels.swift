@@ -46,6 +46,39 @@ enum SourceConnectionState: Equatable {
     case retryableError
 }
 
+struct SourceOpeningProgress: Equatable {
+    let isFolder: Bool
+    var processedItemCount: Int
+    var totalItemCount: Int?
+
+    var title: String {
+        isFolder ? String(localized: "Scanning folder…") : String(localized: "Opening file…")
+    }
+
+    var detail: String {
+        guard let totalItemCount, totalItemCount > 0 else {
+            return isFolder
+                ? String(localized: "Reading the folder contents. This may take a while for cloud or network folders.")
+                : String(localized: "Reading the selected file.")
+        }
+        return String(
+            format: String(localized: "Checking files: %lld of %lld"),
+            Int64(processedItemCount), Int64(totalItemCount)
+        )
+    }
+}
+
+enum SelectedDocumentPolicy {
+    static func validate(name: String, isFolder: Bool) throws {
+        guard !isFolder else { return }
+        guard MobileFileTypePolicy.shared.isSupported(name) else {
+            throw DocumentSourceError.unsupportedFileType(
+                URL(fileURLWithPath: name).pathExtension
+            )
+        }
+    }
+}
+
 /// Serializes UIKit picker completion, SwiftUI dismissal, and a possible
 /// containing-folder follow-up. Every presentation has a unique token, so a
 /// delayed File Provider callback cannot complete a newer flow.

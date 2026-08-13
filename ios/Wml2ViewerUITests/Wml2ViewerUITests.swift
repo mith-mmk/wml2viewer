@@ -190,6 +190,75 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(lastPage.waitForExistence(timeout: 10))
     }
 
+    func testOSPickerUnsupportedFileExplainsTheRejectedType() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_LANGUAGE"] = "en"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_PICKER_FOLDER_NAME"] = PickerFixture.folderName
+        app.launchEnvironment["WML2VIEWER_UI_TEST_PICKER_UNSUPPORTED_FILE"] = "1"
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["uiTest.pickerFixtureReady"].waitForExistence(timeout: 10))
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+
+        let folder = app.cells.matching(
+            NSPredicate(format: "identifier == %@", "\(PickerFixture.folderName), Folder")
+        ).firstMatch
+        XCTAssertTrue(folder.waitForExistence(timeout: 15), pickerFailureDescription(app))
+        folder.tap()
+        let unsupported = app.cells.matching(
+            NSPredicate(format: "identifier == 'unsupported, pdf'")
+        ).firstMatch
+        XCTAssertTrue(unsupported.waitForExistence(timeout: 10), pickerFailureDescription(app))
+        unsupported.tap()
+        let open = app.buttons.matching(
+            NSPredicate(format: "label == 'Open' OR label == '開く'")
+        ).firstMatch
+        if open.waitForExistence(timeout: 2) { open.tap() }
+
+        let error = app.descendants(matching: .any)["viewer.error"]
+        XCTAssertTrue(error.waitForExistence(timeout: 15), pickerFailureDescription(app))
+        XCTAssertTrue(error.label.localizedCaseInsensitiveContains("PDF"))
+        XCTAssertTrue(error.label.localizedCaseInsensitiveContains("ZIP/LHA/LZH"))
+        XCTAssertTrue(surface.isHittable)
+    }
+
+    func testFolderScanShowsCancellableProgressAndReturnsControl() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_LANGUAGE"] = "en"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_PICKER_FOLDER_NAME"] = PickerFixture.folderName
+        app.launchEnvironment["WML2VIEWER_UI_TEST_SOURCE_OPENING_DELAY_NANOSECONDS"] = "10000000000"
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["uiTest.pickerFixtureReady"].waitForExistence(timeout: 10))
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        let folder = app.cells.matching(
+            NSPredicate(format: "identifier == %@", "\(PickerFixture.folderName), Folder")
+        ).firstMatch
+        XCTAssertTrue(folder.waitForExistence(timeout: 15), pickerFailureDescription(app))
+        folder.tap()
+        let open = app.buttons.matching(
+            NSPredicate(format: "label == 'Open' OR label == '開く'")
+        ).firstMatch
+        if open.waitForExistence(timeout: 2) { open.tap() }
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["sourceOpening.progress"].waitForExistence(timeout: 10),
+            pickerFailureDescription(app)
+        )
+        let cancel = app.buttons["sourceOpening.cancel"]
+        XCTAssertTrue(cancel.isHittable)
+        cancel.tap()
+        XCTAssertFalse(app.descendants(matching: .any)["sourceOpening.progress"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.sourceNotice"].waitForExistence(timeout: 5))
+        XCTAssertTrue(surface.isHittable)
+    }
+
     func testQuickMenuKeepsDocumentBrowserAsFileManagementAction() throws {
         let app = XCUIApplication()
         app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
