@@ -9,7 +9,7 @@
 | ID | 残る差分 | `ios.md`要件 | 現状 / 必要な検証 |
 | --- | --- | --- | --- |
 | FILE-01 | Browser lifecycle | 閉じた時にsource再列挙 | 選択・folder picker取消は接続済み。Document Browser自体のprovider固有dismissは実機検証が必要 |
-| FILE-02 | DocumentSource | `EntryRef`と`list/stat/open/materialize/thumbnail`、URL非公開 | 現在は`list/read`と内部`URL`。opaque entry ID、thumbnail、stat契約が未実装 |
+| FILE-02 | DocumentSource | `EntryRef`と`list/stat/open/materialize/thumbnail`、URL非公開 | `list/stat/coordinatedRead/materialize/thumbnail/refresh`の読取契約を実装。URLはsecurity-scope内部に限定し、UI/Rustへ公開しない。 |
 | FILE-03 | bookmark | stale / 失効 / 未接続を再試行可能なempty stateへ | stale/失効・load失敗をretryable stateへ遷移し、設定変更・current indexをatomic bookmarkへ継続保存。実Providerの再認証は実機検証が必要 |
 | FILE-04 | listed file | `.wmltxt`の包含folder要求とrelative containment | `.wmltxt`をself-contained archiveから分離し、包含folder許可後に相対entryを正規化・symlink containment検証してsourceへ接続。manifestの外部変更・復元も対応 |
 | CODEC-01 | capability | 実fixtureによる起動時ImageIO probe | `supports`が固定UTI表のまま |
