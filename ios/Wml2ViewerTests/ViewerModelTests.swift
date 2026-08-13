@@ -281,6 +281,53 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertTrue(flow.beginResultProcessing(folder))
     }
 
+    func testFilesOpenFlowRejectsDuplicateContainingFolderFollowUp() {
+        var flow = FilesOpenFlowMachine()
+        let primary = try! XCTUnwrap(flow.begin(.openTarget))
+        XCTAssertTrue(flow.beginResultProcessing(primary))
+
+        XCTAssertNil(flow.queueFollowUp(
+            .containingFolder,
+            initialDirectoryURL: URL(fileURLWithPath: "/provider/folder")
+        ))
+        XCTAssertNil(flow.queueFollowUp(
+            .containingFolder,
+            initialDirectoryURL: URL(fileURLWithPath: "/provider/folder")
+        ))
+
+        let folder = try! XCTUnwrap(flow.didDismiss(primary.id))
+        XCTAssertTrue(flow.beginResultProcessing(folder))
+        XCTAssertNil(flow.didDismiss(folder.id), "a duplicate callback must not queue a third picker")
+    }
+
+    func testFolderPickerGuidanceExplainsAutomaticSecondPicker() {
+        let selectedFileFollowUp = PickerPresentation(
+            id: UUID(),
+            flowID: UUID(),
+            request: .containingFolder,
+            initialDirectoryURL: URL(fileURLWithPath: "/provider/folder")
+        )
+        let standaloneFolderPicker = PickerPresentation(
+            id: UUID(),
+            flowID: UUID(),
+            request: .containingFolder,
+            initialDirectoryURL: nil
+        )
+        let primary = PickerPresentation(
+            id: UUID(),
+            flowID: UUID(),
+            request: .openTarget,
+            initialDirectoryURL: nil
+        )
+
+        let followUpMessage = PickerFolderGuidance.message(for: selectedFileFollowUp)
+        let standaloneMessage = PickerFolderGuidance.message(for: standaloneFolderPicker)
+        XCTAssertNotNil(followUpMessage)
+        XCTAssertNotNil(standaloneMessage)
+        XCTAssertNotEqual(followUpMessage, standaloneMessage)
+        XCTAssertNil(PickerFolderGuidance.message(for: primary))
+    }
+
     func testFilesOpenFlowPresentsArchiveWithoutContainingFolderFollowUp() {
         for name in ["book.zip", "book.lha", "book.lzh"] {
             XCTAssertTrue(MobileFileTypePolicy.shared.isSelfContainedArchive(name))

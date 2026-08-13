@@ -113,7 +113,13 @@ struct FilesOpenFlowMachine {
         _ request: PickerRequest,
         initialDirectoryURL: URL?
     ) -> PickerPresentation? {
-        guard let flowID else { return nil }
+        // Only the primary result may schedule one follow-up. Rejecting a
+        // duplicate here prevents a delayed decode/provider callback from
+        // presenting a third picker after the folder picker is dismissed.
+        guard let flowID,
+              case .processing(let activeRequest) = phase,
+              activeRequest != .containingFolder,
+              queuedRequest == nil else { return nil }
         if activePresentationWasDismissed {
             return present(request, initialDirectoryURL: initialDirectoryURL, flowID: flowID)
         }
@@ -161,6 +167,15 @@ enum ContainingFolderAuthorizationPolicy {
         isSelfContainedArchive: Bool
     ) -> Bool {
         !isFolder && isSupported && !isSelfContainedArchive
+    }
+}
+
+enum PickerFolderGuidance {
+    static func message(for presentation: PickerPresentation) -> String? {
+        guard presentation.request == .containingFolder else { return nil }
+        return presentation.initialDirectoryURL == nil
+            ? String(localized: "Navigate to the folder you want to browse, then tap Open.")
+            : String(localized: "To continue from the selected file, keep its containing folder open and tap Open.")
     }
 }
 

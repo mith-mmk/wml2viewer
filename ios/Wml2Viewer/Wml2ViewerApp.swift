@@ -145,10 +145,26 @@ struct ContentView: View {
                         .padding()
                     }
                 } else {
-                    SystemDocumentPicker(
-                        presentation: presentation
-                    ) { result in
-                        store.finishPicker(presentation, result)
+                    ZStack(alignment: .bottom) {
+                        SystemDocumentPicker(
+                            presentation: presentation
+                        ) { result in
+                            store.finishPicker(presentation, result)
+                        }
+                        if let guidance = PickerFolderGuidance.message(for: presentation) {
+                            Label(guidance, systemImage: "folder.badge.questionmark")
+                                .font(.callout)
+                                .multilineTextAlignment(.leading)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                                .shadow(radius: 4, y: 2)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 92)
+                                .allowsHitTesting(false)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityIdentifier("documentPicker.folderGuidance")
+                        }
                     }
                 }
             }
