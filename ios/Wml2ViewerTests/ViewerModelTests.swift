@@ -125,6 +125,7 @@ final class ViewerModelTests: XCTestCase {
 
     func testProviderAcceptanceTracksInteractiveErrorRecoverySeparately() {
         var report = ProviderAcceptanceReport(token: "error-token", provider: .smb)
+        report.recordPickerRequested()
         report.recordRecoverableError(inputReady: true)
         XCTAssertTrue(report.recoverableErrorObserved)
         XCTAssertTrue(report.inputReadyAfterError)
@@ -133,6 +134,32 @@ final class ViewerModelTests: XCTestCase {
         report.recordDecodeReady(pageCount: 2)
         XCTAssertTrue(report.recoveredAfterError)
         XCTAssertEqual(report.status, "in-progress")
+    }
+
+    func testProviderAcceptanceIgnoresRestoredSourceBeforeFilesIsRequested() {
+        var report = ProviderAcceptanceReport(token: "fresh-token", provider: .local)
+
+        // These are the exact events emitted when the app restores an old
+        // single-file bookmark before the operator touches the Files entry.
+        report.recordDecodeReady(pageCount: 1)
+        report.recordNavigation(from: 0, to: 0)
+        report.recordFilmstripOpened()
+        report.recordThumbnailDecoded()
+
+        XCTAssertEqual(report.sequence, 0)
+        XCTAssertEqual(report.decodedPageCount, 0)
+        XCTAssertFalse(report.filmstripOpened)
+        XCTAssertFalse(report.thumbnailDecoded)
+        XCTAssertEqual(report.status, "in-progress")
+
+        report.recordPickerRequested()
+        report.recordFolderSnapshot(enumerated: 3, supported: 3)
+        report.recordDecodeReady(pageCount: 3)
+        report.recordNavigation(from: 0, to: 1)
+        report.recordNavigation(from: 1, to: 0)
+        report.recordFilmstripOpened()
+        report.recordThumbnailDecoded()
+        XCTAssertEqual(report.status, "passed")
     }
     #endif
 

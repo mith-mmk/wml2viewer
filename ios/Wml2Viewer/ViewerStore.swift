@@ -70,6 +70,7 @@ final class ViewerStore: ObservableObject {
     private var folderAuthorizationContext: FolderAuthorizationContext?
     private var activeBookmark: ActiveBookmark?
     private var thumbnailRequests: Set<String> = []
+    private var failedFolderPageIDs: Set<String> = []
     private var flowToFinishAfterDismissal: UUID?
     private var configSaveSequence: UInt64 = 0
     private var memoryWarningObserver: NSObjectProtocol?
@@ -102,6 +103,7 @@ final class ViewerStore: ObservableObject {
     private var uiTestPickerInitialDirectoryURL: URL?
     private var uiTestForceSpread = false
     private let providerAcceptance = ProviderAcceptanceRecorder.fromProcessArguments()
+    private var providerAcceptanceStarted = false
     #endif
 
     var isPickerPresented: Bool { filesOpenPhase.blocksViewerInput }
@@ -121,6 +123,13 @@ final class ViewerStore: ObservableObject {
     func restoreLastSource() async {
         config = await configStore.load()
         #if DEBUG
+        // A physical-provider acceptance run must start from an empty source.
+        // Restoring a previously opened single file can otherwise produce a
+        // decode event before Files was opened and makes an untouched device
+        // look as though the acceptance flow had partially progressed.
+        if providerAcceptance != nil {
+            return
+        }
         if ProcessInfo.processInfo.environment["WML2VIEWER_UI_TEST_NO_RESTORE"] == "1" {
             return
         }
@@ -170,6 +179,13 @@ final class ViewerStore: ObservableObject {
     }
 
     #if DEBUG
+    func startProviderAcceptanceIfNeeded() {
+        guard providerAcceptance != nil,
+              !providerAcceptanceStarted else { return }
+        providerAcceptanceStarted = true
+        requestFilePicker()
+    }
+
     func applyUITestOverrides() {
         if let language = ProcessInfo.processInfo.environment["WML2VIEWER_UI_TEST_LANGUAGE"] {
             config.language = language
@@ -204,7 +220,10 @@ final class ViewerStore: ObservableObject {
         let pickerIncludesUnsupported = environment[
             "WML2VIEWER_UI_TEST_PICKER_UNSUPPORTED_FILE"
         ] == "1"
-        guard folderFixture || errorFixture || archiveFormat != nil || pickerFolderName != nil else {
+        let folderIncludesEmptyArchive = environment[
+            "WML2VIEWER_UI_TEST_FOLDER_EMPTY_ARCHIVE"
+        ] == "1"
+        guard folderFixture || errorFixture || archiveFormat != nil || pickerFolderName != nil || folderIncludesEmptyArchive else {
             return
         }
         do {
@@ -255,6 +274,16 @@ final class ViewerStore: ObservableObject {
             for (index, color) in (folderFixture ? colors : []).enumerated() {
                 let url = directory.appendingPathComponent(String(format: "page-%02d.png", index + 1))
                 try Self.writeUITestPNG(color: color, to: url)
+            }
+            if folderIncludesEmptyArchive {
+                // A valid empty ZIP is a supported container but has no
+                // displayable entries. It must not strand a folder source on
+                // a blank page; the viewer should advance to the next image.
+                let emptyZip = Data(base64Encoded: "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==")!
+                try emptyZip.write(
+                    to: directory.appendingPathComponent("00-empty.zip"),
+                    options: .atomic
+                )
             }
             let fixture = SecurityScopedDocumentSource(
                 sourceID: UUID(), displayName: "UI fixture", rootURL: directory, isFolder: true
@@ -1311,6 +1340,7 @@ final class ViewerStore: ObservableObject {
         listedManifestItem = nil
         sourceGeneration += 1
         portraitByPageID.removeAll()
+        failedFolderPageIDs.removeAll()
         thumbnails.removeAll()
         thumbnailRequests.removeAll()
         let generation = sourceGeneration
@@ -1345,10 +1375,18 @@ final class ViewerStore: ObservableObject {
                               self.pages.indices.contains(plannedIndex) else { continue }
                         let archiveIndex = self.archiveEntryIndices[plannedIndex]
                         let entry = self.pages[plannedIndex]
-                        decodedByIndex[plannedIndex] = try self.decodeArchiveFrames(
-                            archive: archive, session: session, index: archiveIndex,
-                            entryName: entry.displayName
-                        )
+                        do {
+                            decodedByIndex[plannedIndex] = try self.decodeArchiveFrames(
+                                archive: archive, session: session, index: archiveIndex,
+                                entryName: entry.displayName
+                            )
+                        } catch {
+                            // Prefetch/spread companions are opportunistic. A
+                            // damaged neighbour must not turn the current valid
+                            // page into a decode failure; it will report/skip
+                            // when the user actually navigates to that entry.
+                            if plannedIndex == index { throw error }
+                        }
                     }
                     guard !Task.isCancelled else { return }
                     await MainActor.run {
@@ -1402,8 +1440,17 @@ final class ViewerStore: ObservableObject {
                             self.sourceConnectionState = .archive(entries: listedEntries.entries.count)
                             self.persistCurrentLocation()
                         } catch {
-                            self.errorMessage = error.localizedDescription
-                            self.touchReady = true
+                            if !self.skipFailedFolderPage(
+                                item: item,
+                                index: index,
+                                generation: generation
+                            ) {
+                                self.errorMessage = Self.userFacingDecodeError(
+                                    error,
+                                    displayName: item.displayName
+                                ).localizedDescription
+                                self.touchReady = true
+                            }
                         }
                     }
                     return
@@ -1419,11 +1466,20 @@ final class ViewerStore: ObservableObject {
                     for plannedIndex in planned {
                         guard let self, self.pages.indices.contains(plannedIndex) else { continue }
                         let plannedItem = self.pages[plannedIndex]
-                        let data = try await source.read(plannedItem)
-                        decodedByIndex[plannedIndex] = try await self.decodeDocumentFrames(
-                            data: data,
-                            item: plannedItem
-                        )
+                        // Archives are standalone sources, never image frames
+                        // in the surrounding folder's spread or prefetch.
+                        // Trying to decode ZIP bytes as an image made an empty
+                        // neighbouring archive blank an otherwise valid page.
+                        guard !plannedItem.isArchive else { continue }
+                        do {
+                            let data = try await source.read(plannedItem)
+                            decodedByIndex[plannedIndex] = try await self.decodeDocumentFrames(
+                                data: data,
+                                item: plannedItem
+                            )
+                        } catch {
+                            if plannedIndex == index { throw error }
+                        }
                     }
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
@@ -1471,12 +1527,53 @@ final class ViewerStore: ObservableObject {
                         error,
                         displayName: item.displayName
                     ).localizedDescription
+                    _ = self.skipFailedFolderPage(
+                        item: item,
+                        index: index,
+                        generation: generation
+                    )
                     #if DEBUG
                     self.providerAcceptance?.recoverableError(inputReady: self.interactionReady)
                     #endif
                 }
             }
         }
+    }
+
+    /// A folder is a continuous source: one damaged image or empty archive
+    /// must not strand the viewer on a blank page. Skip each failed entry at
+    /// most once, preserving the source and keeping the picker/settings
+    /// gestures available. Single-file sources still show the precise error.
+    @discardableResult
+    private func skipFailedFolderPage(
+        item: PageItem,
+        index: Int,
+        generation: Int
+    ) -> Bool {
+        guard source?.isFolder == true,
+              sourceGeneration == generation,
+              pages.count > 1,
+              pages.indices.contains(index) else { return false }
+        failedFolderPageIDs.insert(item.id)
+        let candidates = pages.indices.filter { candidate in
+            !failedFolderPageIDs.contains(pages[candidate].id)
+        }
+        guard let next = candidates
+            .sorted(by: { lhs, rhs in
+                let lhsDistance = (lhs - index + pages.count) % pages.count
+                let rhsDistance = (rhs - index + pages.count) % pages.count
+                return lhsDistance < rhsDistance
+            })
+            .first else {
+            return false
+        }
+        sourceNoticeMessage = DocumentSourceError.unreadableDocument(item.displayName).localizedDescription
+        errorMessage = nil
+        currentIndex = next
+        touchReady = false
+        persistCurrentLocation()
+        loadCurrent()
+        return true
     }
 
     private static func userFacingDecodeError(

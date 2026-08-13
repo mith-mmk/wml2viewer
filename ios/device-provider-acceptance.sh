@@ -113,7 +113,27 @@ case "$mode" in
 
     plutil -p "$result_file"
     if [ "$status" != "passed" ]; then
-      echo "Acceptance is incomplete. Complete folder display, forward/back navigation, filmstrip, and thumbnail loading on the device, then collect again." >&2
+      picker_requested="$(plutil -extract pickerRequested raw -o - "$result_file")"
+      folder_supported="$(plutil -extract folderSupportedItemCount raw -o - "$result_file")"
+      moved_forward="$(plutil -extract movedForward raw -o - "$result_file")"
+      moved_backward="$(plutil -extract movedBackward raw -o - "$result_file")"
+      filmstrip_opened="$(plutil -extract filmstripOpened raw -o - "$result_file")"
+      thumbnail_decoded="$(plutil -extract thumbnailDecoded raw -o - "$result_file")"
+      if [ "$picker_requested" != "true" ]; then
+        echo "Acceptance did not start: this session observed no Files picker request." >&2
+        echo "Relaunch the armed build; it should present Files automatically." >&2
+      elif [ "$folder_supported" -lt 2 ]; then
+        echo "Files opened, but no folder with at least two supported items was committed." >&2
+        echo "Choose the folder itself, or choose one image and then authorize its containing folder." >&2
+      elif [ "$moved_forward" != "true" ] || [ "$moved_backward" != "true" ]; then
+        echo "The folder is connected, but forward and backward page movement is incomplete." >&2
+      elif [ "$filmstrip_opened" != "true" ]; then
+        echo "Page movement passed, but the filmstrip has not been opened." >&2
+      elif [ "$thumbnail_decoded" != "true" ]; then
+        echo "The filmstrip opened, but no thumbnail decode was observed yet." >&2
+      else
+        echo "Acceptance is incomplete; inspect the report fields above." >&2
+      fi
       exit 1
     fi
 

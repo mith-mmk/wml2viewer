@@ -19,6 +19,7 @@ struct Wml2ViewerApp: App {
                     #if DEBUG
                     store.applyUITestOverrides()
                     await store.installUITestFixtureIfRequested()
+                    store.startProviderAcceptanceIfNeeded()
                     #endif
                 }
                 .onOpenURL { store.openExternalURL($0) }

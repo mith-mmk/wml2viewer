@@ -48,34 +48,40 @@ struct ProviderAcceptanceReport: Codable, Equatable {
     }
 
     mutating func recordFolderSnapshot(enumerated: Int, supported: Int) {
+        guard pickerRequested else { return }
         folderEnumeratedItemCount = max(0, enumerated)
         folderSupportedItemCount = max(0, supported)
         advance()
     }
 
     mutating func recordDecodeReady(pageCount: Int) {
+        guard pickerRequested else { return }
         decodedPageCount = max(decodedPageCount, max(0, pageCount))
         if recoverableErrorObserved { recoveredAfterError = true }
         advance()
     }
 
     mutating func recordNavigation(from: Int, to: Int) {
+        guard pickerRequested else { return }
         if to > from { movedForward = true }
         if to < from { movedBackward = true }
         advance()
     }
 
     mutating func recordFilmstripOpened() {
+        guard pickerRequested else { return }
         filmstripOpened = true
         advance()
     }
 
     mutating func recordThumbnailDecoded() {
+        guard pickerRequested else { return }
         thumbnailDecoded = true
         advance()
     }
 
     mutating func recordRecoverableError(inputReady: Bool) {
+        guard pickerRequested else { return }
         recoverableErrorObserved = true
         inputReadyAfterError = inputReadyAfterError || inputReady
         advance()
@@ -83,7 +89,8 @@ struct ProviderAcceptanceReport: Codable, Equatable {
 
     private mutating func advance() {
         sequence &+= 1
-        status = folderSupportedItemCount >= 2 &&
+        status = pickerRequested &&
+            folderSupportedItemCount >= 2 &&
             decodedPageCount >= 1 &&
             movedForward && movedBackward &&
             filmstripOpened && thumbnailDecoded

@@ -347,6 +347,21 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["filmstrip.thumbnail.0"].waitForExistence(timeout: 10))
     }
 
+    func testEmptyArchiveInFolderIsSkippedAndNextImageOpens() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_FIXTURE_FOLDER"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_FOLDER_EMPTY_ARCHIVE"] = "1"
+        app.launch()
+
+        let image = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier == 'viewer.currentImage' AND label == 'page-01.png'")
+        ).firstMatch
+        XCTAssertTrue(image.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.otherElements["viewer.touchSurface"].isHittable)
+        XCTAssertFalse(app.descendants(matching: .any)["viewer.error"].exists)
+    }
+
     func testMangaSpreadDefaultHasNoBlackBindingGap() throws {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
