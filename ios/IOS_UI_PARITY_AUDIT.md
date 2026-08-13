@@ -22,9 +22,28 @@
 
 今回のSimulator結果:
 
-- iPhone 17 Pro: unit/UI 49 passed、0 failures、iPad専用1 skipped
-- iPad Pro 13-inch: unit/UI 50 passed、0 failures
+- iPhone 17 Pro: Swift unit 55 passed、UI 21 passed、iPad専用1 skipped、0 failures
+- iPad Pro 13-inch: Swift unit 55 passed、focused UI 4 passed、0 failures
 - 見開き中央pixel、0pt/設定値のlayout算術、日本語「見開き間隔」、Files picker、ZIP/LZH/MAGを同じsuiteで回帰
+
+## 2026-08-14 実機Provider受入追記
+
+`ios/device-provider-acceptance.sh` のarm/collectを、実機 iPad A16 で
+local、iCloud、third-party、SMBの各Providerについて個別に実行した。4件とも
+`status=passed` で、folder列挙、対応項目数、thumbnail、filmstrip、前後移動を確認した。
+local/iCloud/third-partyでは復帰可能エラー後の再表示も確認し、SMBではエラーなしの
+正常経路を確認した。レポートにはURL、path、file名、bookmark、credentialを保存していない。
+
+| Provider | 列挙 | 対応 | 前後移動 | filmstrip | thumbnail | 結果 |
+| --- | ---: | ---: | --- | --- | --- | --- |
+| local | 49 | 6 | 成功 | 成功 | 成功 | passed |
+| iCloud | 49 | 6 | 成功 | 成功 | 成功 | passed |
+| third-party | 49 | 6 | 成功 | 成功 | 成功 | passed |
+| SMB | 25 | 8 | 成功 | 成功 | 成功 | passed |
+
+空ZIPを含むfolderで、失敗項目を方向に応じてスキップし、前後移動後に
+エラー表示と入力ロックが解除される回帰UI testも通過した。現在の作業ツリーは
+製品変更なし（ユーザー所有の`.DS_Store`のみ未追跡）である。
 
 以下の表は初回監査時点の失敗を残す履歴である。
 
