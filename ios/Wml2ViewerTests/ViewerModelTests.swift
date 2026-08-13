@@ -661,6 +661,22 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: third.path))
     }
 
+    func testAutomaticMaterializeLimitPreservesReserveAndBounds() {
+        let oneGiB = Int64(1_024 * 1_024 * 1_024)
+        XCTAssertEqual(
+            MaterializeCache.automaticLimitBytes(freeBytes: 10 * oneGiB),
+            Int(1 * oneGiB)
+        )
+        XCTAssertEqual(
+            MaterializeCache.automaticLimitBytes(freeBytes: 100 * oneGiB),
+            Int(2 * oneGiB)
+        )
+        XCTAssertEqual(
+            MaterializeCache.automaticLimitBytes(freeBytes: 2 * oneGiB),
+            256 * 1_048_576
+        )
+    }
+
     func testDoubleTapFitOverrideAlternatesWithoutChangingConfiguredFit() {
         let configured = DisplayFit.width
         let first = FitOverridePolicy.next(current: configured)

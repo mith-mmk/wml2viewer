@@ -124,6 +124,7 @@ final class ViewerStore: ObservableObject {
 
     func restoreLastSource() async {
         config = await configStore.load()
+        await MaterializeCache.shared.setTotalLimit(config.cacheLimitBytes.map(Int.init))
         #if DEBUG
         // A physical-provider acceptance run must start from an empty source.
         // Restoring a previously opened single file can otherwise produce a
