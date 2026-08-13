@@ -535,6 +535,12 @@ final class ViewerModelTests: XCTestCase {
         }
     }
 
+    func testImageIOCapabilityProbeOnlyReturnsCandidateTypes() {
+        let probed = ImageIOCodecRouter.capabilityProbe()
+        XCTAssertTrue(probed.isSubset(of: ImageIOCodecRouter.mobileProbeCandidates))
+        XCTAssertEqual(probed, ImageIOCodecRouter.supportedImageExtensions)
+    }
+
     func testMobileFileTypePolicyMatchesAndroidSupportedSet() throws {
         let osExtensions: Set<String> = ["avif", "dng", "heic", "heif"]
         let policy = MobileFileTypePolicy(

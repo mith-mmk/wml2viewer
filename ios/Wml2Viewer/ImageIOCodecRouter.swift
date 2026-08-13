@@ -102,21 +102,54 @@ struct MobileFileTypePolicy: Sendable {
 }
 
 enum ImageIOCodecRouter {
-    private static let mobileCandidateExtensions: Set<String> = ["avif", "dng", "heic", "heif"]
+    static let mobileProbeCandidates: Set<String> = [
+        "avif", "bmp", "dng", "gif", "heic", "heif", "ico", "jpeg", "jpg", "png", "webp",
+    ]
 
     static let supportedImageExtensions: Set<String> = {
+        capabilityProbe()
+    }()
+
+    /// Probe ImageIO against an actual generated image instead of trusting
+    /// the static UTI table alone. Decode-only formats remain eligible when
+    /// ImageIO advertises them but has no encoder.
+    static func capabilityProbe() -> Set<String> {
         let identifiers = (CGImageSourceCopyTypeIdentifiers() as? [String]) ?? []
         let availableTypes = identifiers.compactMap(UTType.init)
-        return Set(mobileCandidateExtensions.filter { candidateExtension in
-            guard let candidateType = UTType(filenameExtension: candidateExtension) else {
-                return false
+        return Set(mobileProbeCandidates.filter { candidateExtension in
+            guard let candidateType = UTType(filenameExtension: candidateExtension),
+                  availableTypes.contains(where: {
+                      candidateType == $0 || candidateType.conforms(to: $0)
+                          || $0.conforms(to: candidateType)
+                  }),
+                  let image = probeImage() else { return false }
+            if let data = encodedFixture(image: image, type: candidateType) {
+                return CGImageSourceCreateWithData(data as CFData, nil) != nil
             }
-            return availableTypes.contains { availableType in
-                candidateType == availableType || candidateType.conforms(to: availableType)
-                    || availableType.conforms(to: candidateType)
-            }
+            return candidateExtension == "avif" || candidateExtension == "dng"
         })
-    }()
+    }
+
+    private static func probeImage() -> CGImage? {
+        guard let context = CGContext(
+            data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.setFillColor(CGColor(red: 0.1, green: 0.6, blue: 0.9, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        return context.makeImage()
+    }
+
+    private static func encodedFixture(image: CGImage, type: UTType) -> Data? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data, type.identifier as CFString, 1, nil
+        ) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
+    }
 
     static func decodeOrder(routing: String) -> [CodecBackend] {
         CodecRouting(configValue: routing).decodeOrder
