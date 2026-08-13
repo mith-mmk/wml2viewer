@@ -661,6 +661,57 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertNil(ExternalPageReconciler.index(oldIndex: 0, oldID: "a", refreshedIDs: []))
     }
 
+    func testFailedFolderPageSkipPreservesForwardAndBackwardDirection() {
+        let failed: Set<Int> = [1, 2]
+        XCTAssertEqual(
+            FolderPageFailureNavigator.replacementIndex(
+                failedIndex: 1,
+                pageCount: 5,
+                failedIndices: failed,
+                direction: .forward
+            ),
+            3
+        )
+        XCTAssertEqual(
+            FolderPageFailureNavigator.replacementIndex(
+                failedIndex: 2,
+                pageCount: 5,
+                failedIndices: failed,
+                direction: .backward
+            ),
+            0
+        )
+    }
+
+    func testFailedFolderPageAtBoundaryFallsBackWithoutWrapping() {
+        XCTAssertEqual(
+            FolderPageFailureNavigator.replacementIndex(
+                failedIndex: 0,
+                pageCount: 4,
+                failedIndices: [0],
+                direction: .backward
+            ),
+            1
+        )
+        XCTAssertEqual(
+            FolderPageFailureNavigator.replacementIndex(
+                failedIndex: 3,
+                pageCount: 4,
+                failedIndices: [3],
+                direction: .forward
+            ),
+            2
+        )
+        XCTAssertNil(
+            FolderPageFailureNavigator.replacementIndex(
+                failedIndex: 0,
+                pageCount: 2,
+                failedIndices: [0, 1],
+                direction: .backward
+            )
+        )
+    }
+
     @MainActor
     func testViewerStoreConnectsRTLSpreadPlannerToCurrentPages() {
         let store = ViewerStore()
@@ -678,6 +729,20 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertEqual(store.currentIndex, 2)
         store.previous()
         XCTAssertEqual(store.currentIndex, 1)
+    }
+
+    @MainActor
+    func testViewerNavigationClearsPriorFailureMessages() {
+        let store = ViewerStore()
+        store.installTestPages(count: 3)
+        store.errorMessage = "failed page"
+        store.sourceNoticeMessage = "skipped page"
+
+        store.previous()
+
+        XCTAssertNil(store.errorMessage)
+        XCTAssertNil(store.sourceNoticeMessage)
+        XCTAssertEqual(store.currentIndex, 0)
     }
 
     @MainActor

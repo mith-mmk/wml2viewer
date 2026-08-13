@@ -198,6 +198,37 @@ enum ExternalPageReconciler {
     }
 }
 
+enum FolderTraversalDirection {
+    case forward
+    case backward
+}
+
+/// Resolves a failed/previously failed folder entry without changing the
+/// source order. Search continues in the direction requested by the user; at
+/// an edge it falls back toward the page they came from instead of wrapping
+/// to the opposite end of the folder.
+enum FolderPageFailureNavigator {
+    static func replacementIndex(
+        failedIndex: Int,
+        pageCount: Int,
+        failedIndices: Set<Int>,
+        direction: FolderTraversalDirection
+    ) -> Int? {
+        guard pageCount > 0, (0..<pageCount).contains(failedIndex) else { return nil }
+        let primary: [Int]
+        let fallback: [Int]
+        switch direction {
+        case .forward:
+            primary = Array((failedIndex + 1)..<pageCount)
+            fallback = failedIndex > 0 ? Array(stride(from: failedIndex - 1, through: 0, by: -1)) : []
+        case .backward:
+            primary = failedIndex > 0 ? Array(stride(from: failedIndex - 1, through: 0, by: -1)) : []
+            fallback = Array((failedIndex + 1)..<pageCount)
+        }
+        return (primary + fallback).first { !failedIndices.contains($0) }
+    }
+}
+
 /// Keeps UIKit picker delegate callbacks idempotent. Some providers dismiss while
 /// also completing an outstanding callback; the SwiftUI presentation must only be
 /// torn down once.

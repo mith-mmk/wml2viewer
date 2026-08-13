@@ -71,6 +71,7 @@ final class ViewerStore: ObservableObject {
     private var activeBookmark: ActiveBookmark?
     private var thumbnailRequests: Set<String> = []
     private var failedFolderPageIDs: Set<String> = []
+    private var folderTraversalDirection: FolderTraversalDirection = .forward
     private var flowToFinishAfterDismissal: UUID?
     private var configSaveSequence: UInt64 = 0
     private var memoryWarningObserver: NSObjectProtocol?
@@ -827,8 +828,14 @@ final class ViewerStore: ObservableObject {
 
     func next() {
         guard !pages.isEmpty else { return }
+        clearTransientSourceMessagesForNavigation()
         let previousIndex = currentIndex
-        currentIndex = readingPlan?.nextAnchorIndex ?? min(currentIndex + 1, pages.count - 1)
+        folderTraversalDirection = .forward
+        let proposedIndex = readingPlan?.nextAnchorIndex ?? min(currentIndex + 1, pages.count - 1)
+        currentIndex = resolvedFolderNavigationIndex(
+            proposedIndex,
+            direction: .forward
+        )
         #if DEBUG
         providerAcceptance?.navigated(from: previousIndex, to: currentIndex)
         #endif
@@ -917,8 +924,14 @@ final class ViewerStore: ObservableObject {
 
     func previous() {
         guard !pages.isEmpty else { return }
+        clearTransientSourceMessagesForNavigation()
         let previousIndex = currentIndex
-        currentIndex = readingPlan?.previousAnchorIndex ?? max(currentIndex - 1, 0)
+        folderTraversalDirection = .backward
+        let proposedIndex = readingPlan?.previousAnchorIndex ?? max(currentIndex - 1, 0)
+        currentIndex = resolvedFolderNavigationIndex(
+            proposedIndex,
+            direction: .backward
+        )
         #if DEBUG
         providerAcceptance?.navigated(from: previousIndex, to: currentIndex)
         #endif
@@ -940,10 +953,17 @@ final class ViewerStore: ObservableObject {
 
     func select(index: Int) {
         guard pages.indices.contains(index) else { return }
+        clearTransientSourceMessagesForNavigation()
+        folderTraversalDirection = index < currentIndex ? .backward : .forward
         currentIndex = index
         showFilmstrip = false
         loadCurrent()
         persistCurrentLocation()
+    }
+
+    private func clearTransientSourceMessagesForNavigation() {
+        errorMessage = nil
+        sourceNoticeMessage = nil
     }
 
     func thumbnail(for item: PageItem) -> CGImage? {
@@ -1349,6 +1369,7 @@ final class ViewerStore: ObservableObject {
         sourceGeneration += 1
         portraitByPageID.removeAll()
         failedFolderPageIDs.removeAll()
+        folderTraversalDirection = .forward
         thumbnails.removeAll()
         thumbnailRequests.removeAll()
         let generation = sourceGeneration
@@ -1369,6 +1390,7 @@ final class ViewerStore: ObservableObject {
         let index = currentIndex
         let generation = sourceGeneration
         let viewport = viewportGeneration
+        let traversalDirection = folderTraversalDirection
         touchReady = false
         isLoading = true
         loadTask = Task { [weak self] in
@@ -1451,7 +1473,8 @@ final class ViewerStore: ObservableObject {
                             if !self.skipFailedFolderPage(
                                 item: item,
                                 index: index,
-                                generation: generation
+                                generation: generation,
+                                direction: traversalDirection
                             ) {
                                 self.errorMessage = Self.userFacingDecodeError(
                                     error,
@@ -1538,7 +1561,8 @@ final class ViewerStore: ObservableObject {
                     _ = self.skipFailedFolderPage(
                         item: item,
                         index: index,
-                        generation: generation
+                        generation: generation,
+                        direction: traversalDirection
                     )
                     #if DEBUG
                     self.providerAcceptance?.recoverableError(inputReady: self.interactionReady)
@@ -1556,25 +1580,23 @@ final class ViewerStore: ObservableObject {
     private func skipFailedFolderPage(
         item: PageItem,
         index: Int,
-        generation: Int
+        generation: Int,
+        direction: FolderTraversalDirection
     ) -> Bool {
         guard source?.isFolder == true,
               sourceGeneration == generation,
               pages.count > 1,
               pages.indices.contains(index) else { return false }
         failedFolderPageIDs.insert(item.id)
-        let candidates = pages.indices.filter { candidate in
-            !failedFolderPageIDs.contains(pages[candidate].id)
-        }
-        guard let next = candidates
-            .sorted(by: { lhs, rhs in
-                let lhsDistance = (lhs - index + pages.count) % pages.count
-                let rhsDistance = (rhs - index + pages.count) % pages.count
-                return lhsDistance < rhsDistance
-            })
-            .first else {
-            return false
-        }
+        let failedIndices = Set(pages.indices.filter {
+            failedFolderPageIDs.contains(pages[$0].id)
+        })
+        guard let next = FolderPageFailureNavigator.replacementIndex(
+            failedIndex: index,
+            pageCount: pages.count,
+            failedIndices: failedIndices,
+            direction: direction
+        ) else { return false }
         sourceNoticeMessage = DocumentSourceError.unreadableDocument(item.displayName).localizedDescription
         errorMessage = nil
         currentIndex = next
@@ -1582,6 +1604,26 @@ final class ViewerStore: ObservableObject {
         persistCurrentLocation()
         loadCurrent()
         return true
+    }
+
+    private func resolvedFolderNavigationIndex(
+        _ proposedIndex: Int,
+        direction: FolderTraversalDirection
+    ) -> Int {
+        guard source?.isFolder == true,
+              pages.indices.contains(proposedIndex),
+              failedFolderPageIDs.contains(pages[proposedIndex].id) else {
+            return proposedIndex
+        }
+        let failedIndices = Set(pages.indices.filter {
+            failedFolderPageIDs.contains(pages[$0].id)
+        })
+        return FolderPageFailureNavigator.replacementIndex(
+            failedIndex: proposedIndex,
+            pageCount: pages.count,
+            failedIndices: failedIndices,
+            direction: direction
+        ) ?? currentIndex
     }
 
     private static func userFacingDecodeError(

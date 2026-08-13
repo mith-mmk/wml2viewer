@@ -384,6 +384,17 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(image.waitForExistence(timeout: 15))
         XCTAssertTrue(app.otherElements["viewer.touchSurface"].isHittable)
         XCTAssertFalse(app.descendants(matching: .any)["viewer.error"].exists)
+
+        // The empty ZIP sorts before page-01. Going backward must keep the
+        // viewer interactive on page-01 instead of reopening the failed entry
+        // or wrapping to the last page.
+        app.windows.firstMatch.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)
+        ).tap()
+        XCTAssertTrue(image.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.otherElements["viewer.touchSurface"].isHittable)
+        XCTAssertFalse(app.descendants(matching: .any)["viewer.error"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["viewer.sourceNotice"].exists)
     }
 
     func testMangaSpreadDefaultHasNoBlackBindingGap() throws {
