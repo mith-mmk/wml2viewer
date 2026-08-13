@@ -1667,7 +1667,7 @@ final class ViewerStore: ObservableObject {
         if error is NativeBridgeError {
             return DocumentSourceError.unreadableDocument(displayName)
         }
-        return error
+        return DocumentSourceError.normalized(error)
     }
 
     private func plannedIndices() -> [Int] {
