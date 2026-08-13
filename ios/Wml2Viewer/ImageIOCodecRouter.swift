@@ -116,28 +116,38 @@ enum ImageIOCodecRouter {
     static func capabilityProbe() -> Set<String> {
         let identifiers = (CGImageSourceCopyTypeIdentifiers() as? [String]) ?? []
         let availableTypes = identifiers.compactMap(UTType.init)
+        let destinationIdentifiers =
+            (CGImageDestinationCopyTypeIdentifiers() as? [String]) ?? []
+        let destinationTypes = destinationIdentifiers.compactMap(UTType.init)
         return Set(mobileProbeCandidates.filter { candidateExtension in
             guard let candidateType = UTType(filenameExtension: candidateExtension),
                   availableTypes.contains(where: {
                       candidateType == $0 || candidateType.conforms(to: $0)
                           || $0.conforms(to: candidateType)
-                  }),
-                  let image = probeImage() else { return false }
+                  }) else { return false }
+            let hasEncoder = destinationTypes.contains(where: {
+                candidateType == $0 || candidateType.conforms(to: $0)
+                    || $0.conforms(to: candidateType)
+            })
+            guard hasEncoder, let image = probeImage() else {
+                // A decoder-only type is still useful when ImageIO advertises it.
+                return candidateExtension == "avif" || candidateExtension == "dng"
+            }
             if let data = encodedFixture(image: image, type: candidateType) {
                 return CGImageSourceCreateWithData(data as CFData, nil) != nil
             }
-            return candidateExtension == "avif" || candidateExtension == "dng"
+            return false
         })
     }
 
     private static func probeImage() -> CGImage? {
         guard let context = CGContext(
-            data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8,
+            data: nil, width: 16, height: 16, bitsPerComponent: 8, bytesPerRow: 64,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
         context.setFillColor(CGColor(red: 0.1, green: 0.6, blue: 0.9, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
         return context.makeImage()
     }
 
