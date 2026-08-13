@@ -10,8 +10,8 @@
 | --- | --- | --- | --- |
 | FILE-01 | Browser lifecycle | 閉じた時にsource再列挙 | 選択・folder picker取消は接続済み。Document Browser自体のprovider固有dismissは実機検証が必要 |
 | FILE-02 | DocumentSource | `EntryRef`と`list/stat/open/materialize/thumbnail`、URL非公開 | 現在は`list/read`と内部`URL`。opaque entry ID、thumbnail、stat契約が未実装 |
-| FILE-03 | bookmark | stale / 失効 / 未接続を再試行可能なempty stateへ | restore errorを黙って終了し、current indexも継続保存していない |
-| FILE-04 | listed file | `.wmltxt`の包含folder要求とrelative containment | 単一file選択時の兄弟参照案内・範囲外参照拒否が未実装 |
+| FILE-03 | bookmark | stale / 失効 / 未接続を再試行可能なempty stateへ | stale/失効・load失敗をretryable stateへ遷移し、設定変更・current indexをatomic bookmarkへ継続保存。実Providerの再認証は実機検証が必要 |
+| FILE-04 | listed file | `.wmltxt`の包含folder要求とrelative containment | `.wmltxt`をself-contained archiveから分離し、包含folder許可後に相対entryを正規化・symlink containment検証してsourceへ接続。manifestの外部変更・復元も対応 |
 | CODEC-01 | capability | 実fixtureによる起動時ImageIO probe | `supports`が固定UTI表のまま |
 | CODEC-02 | animation fallback | OSがposter化した時の内部fallback、`OS_ONLY`明示error | frame列挙はあるが、poster化検出と専用errorが未実装 |
 | EXPORT-01 | export形式 | 利用可能なPNG/JPEG/WebP lossy/losslessだけ提示 | PNG + share sheetのみ。形式選択、encoder probe、期限付きtemp cleanupが未実装 |
