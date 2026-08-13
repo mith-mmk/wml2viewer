@@ -1,7 +1,26 @@
 import XCTest
+import UniformTypeIdentifiers
 @testable import Wml2Viewer
 
 final class ViewerModelTests: XCTestCase {
+    @MainActor
+    func testPlaceholderFolderUsesDeclaredFolderTypeWhenDirectoryFlagIsMissing() {
+        XCTAssertTrue(
+            ViewerStore.isDirectoryResource(
+                isDirectory: nil,
+                contentType: .folder,
+                hasDirectoryPath: false
+            )
+        )
+        XCTAssertFalse(
+            ViewerStore.isDirectoryResource(
+                isDirectory: nil,
+                contentType: .png,
+                hasDirectoryPath: false
+            )
+        )
+    }
+
     func testSpreadLayoutJoinsPagesAtBindingWhenSpacingIsZero() throws {
         let rects = SpreadLayout.pageRects(
             imageSizes: [CGSize(width: 600, height: 900), CGSize(width: 600, height: 900)],

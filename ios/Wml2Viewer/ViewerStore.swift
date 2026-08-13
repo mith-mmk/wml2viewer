@@ -879,7 +879,24 @@ final class ViewerStore: ObservableObject {
         if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
             return isDirectory.boolValue
         }
-        return (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true || url.hasDirectoryPath
+        let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .contentTypeKey])
+        return Self.isDirectoryResource(
+            isDirectory: values?.isDirectory,
+            contentType: values?.contentType,
+            hasDirectoryPath: url.hasDirectoryPath
+        )
+    }
+
+    static func isDirectoryResource(
+        isDirectory: Bool?,
+        contentType: UTType?,
+        hasDirectoryPath: Bool
+    ) -> Bool {
+        // Remote File Providers may return a placeholder URL for which
+        // fileExists is false and isDirectory is nil. The declared UTType is
+        // the remaining authoritative classification; do not treat such a
+        // folder as a single unsupported file.
+        isDirectory == true || contentType?.conforms(to: .folder) == true || hasDirectoryPath
     }
 
     private func open(
