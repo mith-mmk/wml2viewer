@@ -6,9 +6,20 @@ archs="${2:-arm64}"
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
 
 cargo_bin="$(command -v cargo || true)"
-[ -n "$cargo_bin" ] || { echo "cargo not found" >&2; exit 127; }
+if [ -z "$cargo_bin" ]; then
+  cargo_home="${CARGO_HOME:-${HOME:?}/.cargo}"
+  [ -x "$cargo_home/bin/cargo" ] && cargo_bin="$cargo_home/bin/cargo"
+fi
+[ -n "$cargo_bin" ] || { echo "cargo not found; install Rust with rustup" >&2; exit 127; }
 
-if ! cargo metadata --manifest-path "$project_root/Cargo.toml" --no-deps --format-version 1 | grep -q 'wml2viewer-ios'; then
+rustup_bin="$(command -v rustup || true)"
+if [ -z "$rustup_bin" ]; then
+  cargo_home="${CARGO_HOME:-${HOME:?}/.cargo}"
+  [ -x "$cargo_home/bin/rustup" ] && rustup_bin="$cargo_home/bin/rustup"
+fi
+[ -n "$rustup_bin" ] || { echo "rustup not found; install the required Apple targets" >&2; exit 127; }
+
+if ! "$cargo_bin" metadata --manifest-path "$project_root/Cargo.toml" --no-deps --format-version 1 | grep -q 'wml2viewer-ios'; then
   echo "wml2viewer-ios package is missing" >&2
   exit 2
 fi
@@ -25,7 +36,7 @@ for arch in $archs; do
     *) echo "unsupported Apple architecture: $platform/$arch" >&2; exit 2 ;;
   esac
 
-  if ! rustup target list --installed | grep -qx "$target"; then
+  if ! "$rustup_bin" target list --installed | grep -qx "$target"; then
     echo "Rust target is not installed: $target (run: rustup target add $target)" >&2
     exit 2
   fi

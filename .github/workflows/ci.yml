@@ -208,6 +208,8 @@ jobs:
           sh -n ios/device-signing.sh
           sh -n ios/device-smoke.sh
           sh -n ios/device-provider-acceptance.sh
+          env PATH=/usr/bin:/bin:/usr/sbin:/sbin BUILT_PRODUCTS_DIR="$RUNNER_TEMP/.test-xcode-path" \
+            ios/build-rust.sh iphoneos arm64
       - name: build iOS Simulator tests
         run: xcodebuild -project ios/Wml2Viewer.xcodeproj -scheme Wml2Viewer -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -configuration Debug -derivedDataPath "$RUNNER_TEMP/.test-xcode-simulator" CODE_SIGNING_ALLOWED=NO build-for-testing
       - name: verify iOS C ABI header
