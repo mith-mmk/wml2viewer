@@ -1440,6 +1440,7 @@ final class ViewerStore: ObservableObject {
                         self.isLoading = false
                         self.touchReady = true
                         self.errorMessage = nil
+                        self.sourceNoticeMessage = nil
                         #if DEBUG
                         self.providerAcceptance?.decodeReady(pageCount: self.pages.count)
                         #endif
@@ -1534,6 +1535,7 @@ final class ViewerStore: ObservableObject {
                     self.isLoading = false
                     self.touchReady = true
                     self.errorMessage = nil
+                    self.sourceNoticeMessage = nil
                     #if DEBUG
                     self.providerAcceptance?.decodeReady(pageCount: self.pages.count)
                     #endif
