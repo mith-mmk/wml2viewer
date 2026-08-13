@@ -278,6 +278,26 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(surface.isHittable)
     }
 
+    func testFolderPickerExplainsWhyOpenMustBeTappedAgain() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_LANGUAGE"] = "en"
+        app.launch()
+
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.6)
+        let chooseFolder = app.buttons["quickMenu.folder"]
+        XCTAssertTrue(chooseFolder.waitForExistence(timeout: 5))
+        chooseFolder.tap()
+
+        let guidance = app.descendants(matching: .any)["documentPicker.folderGuidance"]
+        XCTAssertTrue(guidance.waitForExistence(timeout: 10), pickerFailureDescription(app))
+        XCTAssertTrue(guidance.label.localizedCaseInsensitiveContains("Open"))
+        XCTAssertFalse(surface.isHittable)
+    }
+
     func testRotationKeepsViewerControlsInteractive() throws {
         let app = XCUIApplication()
         app.launch()
