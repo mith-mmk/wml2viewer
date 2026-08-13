@@ -4,7 +4,7 @@
 
 ## 2026-08-13 最終監査
 
-初回監査で判明した日本語、3×3、gesture、animation、見開き、grayscale、基本export、foreground再列挙は実装済みである。今回さらに、picker完了のexactly-once化、Document Browserの全画面表示、security scope内の`NSFileCoordinator`読取、picker取消後の再列挙、広いiPadの固定filmstrip、codec routingの実decode順への接続を行った。
+初回監査で判明した日本語、3×3、gesture、animation、見開き、grayscale、基本export、foreground再列挙は実装済みである。今回さらに、picker完了のexactly-once化、Document Browserの全画面表示、security scope内の`NSFileCoordinator`読取、picker取消後の再列挙、広いiPadの固定filmstrip、codec routingの実decode順への接続を行った。描画はSwiftUI `Canvas`へ移行し、見開きは共通倍率で隣接描画する。既定0ptの綴じ目はiPhone/iPadのpixel回帰、0～64ptの設定値はlayout算術と設定移行testで検証する。
 
 | ID | 残る差分 | `ios.md`要件 | 現状 / 必要な検証 |
 | --- | --- | --- | --- |
@@ -16,17 +16,15 @@
 | CODEC-02 | animation fallback | OSがposter化した時の内部fallback、`OS_ONLY`明示error | frame列挙はあるが、poster化検出と専用errorが未実装 |
 | EXPORT-01 | export形式 | 利用可能なPNG/JPEG/WebP lossy/losslessだけ提示 | PNG + share sheetのみ。形式選択、encoder probe、期限付きtemp cleanupが未実装 |
 | CACHE-01 | materialize policy | auto容量、LRU、lease、最低空き1GiB、backup除外 | 選択項目のみ64MiB上限は実装。残りは未実装 |
-| UI-01 | 描画 | SwiftUI `Canvas` | 現在は`Image(CGImage)`の`HStack` |
-| UI-02 | filmstrip | thumbnail、hidden時生成停止 | iPad固定表示とpage選択は実装。thumbnailは未実装 |
 | UI-03 | iPhone landscape | 上部chromeを隠す | 設定値だけで制御し、orientation連動は未実装 |
 | LIFE-01 | memory warning | current spread以外を解放 | observer / purge処理が未実装 |
 | LIFE-02 | 外部rename | opaque IDで現在項目を維持 | pathをIDにしているためrenameは消失扱いとなり、sort上の最寄りへ移動する |
 
 今回のSimulator結果:
 
-- iPhone unit: 15 tests、0 failures
-- iPad Pro 13-inch: pinned filmstrip UI test、pass
-- iPhone: Document Browser presentation + 日本語settings UI、2 tests、0 failures
+- iPhone 17 Pro: unit/UI 49 passed、0 failures、iPad専用1 skipped
+- iPad Pro 13-inch: unit/UI 50 passed、0 failures
+- 見開き中央pixel、0pt/設定値のlayout算術、日本語「見開き間隔」、Files picker、ZIP/LZH/MAGを同じsuiteで回帰
 
 以下の表は初回監査時点の失敗を残す履歴である。
 

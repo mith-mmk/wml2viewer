@@ -2,6 +2,102 @@ import XCTest
 @testable import Wml2Viewer
 
 final class ViewerModelTests: XCTestCase {
+    func testSpreadLayoutJoinsPagesAtBindingWhenSpacingIsZero() throws {
+        let rects = SpreadLayout.pageRects(
+            imageSizes: [CGSize(width: 600, height: 900), CGSize(width: 600, height: 900)],
+            surfaceSize: CGSize(width: 1_400, height: 900),
+            fit: .contain,
+            spacing: 0
+        )
+        XCTAssertEqual(rects.count, 2)
+        XCTAssertEqual(rects[0].maxX, rects[1].minX, accuracy: 0.001)
+        XCTAssertEqual(rects[0].width, 600, accuracy: 0.001)
+        XCTAssertEqual(rects[0].minX, 100, accuracy: 0.001)
+        XCTAssertEqual(rects[1].maxX, 1_300, accuracy: 0.001)
+    }
+
+    func testSpreadLayoutAppliesOnlyConfiguredBindingSpacing() throws {
+        let rects = SpreadLayout.pageRects(
+            imageSizes: [CGSize(width: 600, height: 900), CGSize(width: 600, height: 900)],
+            surfaceSize: CGSize(width: 1_400, height: 900),
+            fit: .contain,
+            spacing: 24
+        )
+        XCTAssertEqual(rects.count, 2)
+        XCTAssertEqual(rects[1].minX - rects[0].maxX, 24, accuracy: 0.001)
+        XCTAssertEqual(rects[0].minX, 88, accuracy: 0.001)
+        XCTAssertEqual(rects[1].maxX, 1_312, accuracy: 0.001)
+    }
+
+    func testSpreadLayoutUsesOneScaleForDifferentPageSizes() throws {
+        let rects = SpreadLayout.pageRects(
+            imageSizes: [CGSize(width: 400, height: 800), CGSize(width: 600, height: 1_000)],
+            surfaceSize: CGSize(width: 1_200, height: 1_000),
+            fit: .contain,
+            spacing: 0
+        )
+        XCTAssertEqual(rects[0].width, 400, accuracy: 0.001)
+        XCTAssertEqual(rects[0].height, 800, accuracy: 0.001)
+        XCTAssertEqual(rects[1].width, 600, accuracy: 0.001)
+        XCTAssertEqual(rects[1].height, 1_000, accuracy: 0.001)
+        XCTAssertEqual(rects[0].maxX, rects[1].minX, accuracy: 0.001)
+        XCTAssertEqual(rects[0].midY, rects[1].midY, accuracy: 0.001)
+    }
+
+    func testMangaPageSpacingDefaultsAndClampsDuringConfigMigration() throws {
+        let legacy = try JSONDecoder().decode(
+            MobileConfigV1.self,
+            from: Data(#"{"schemaVersion":1}"#.utf8)
+        )
+        XCTAssertEqual(legacy.mangaPageSpacing, 0)
+
+        let oversized = try JSONDecoder().decode(
+            MobileConfigV1.self,
+            from: Data(#"{"schemaVersion":1,"mangaPageSpacing":999}"#.utf8)
+        )
+        XCTAssertEqual(oversized.mangaPageSpacing, MangaPageSpacing.maximumPoints)
+        XCTAssertEqual(MangaPageSpacing.clamp(-20), MangaPageSpacing.minimumPoints)
+        XCTAssertEqual(MangaPageSpacing.clamp(.infinity), MangaPageSpacing.defaultPoints)
+    }
+
+    #if DEBUG
+    func testProviderAcceptanceRequiresRealFolderNavigationAndFilmstripEvidence() {
+        var report = ProviderAcceptanceReport(token: "acceptance-token", provider: .iCloud)
+        XCTAssertEqual(report.status, "in-progress")
+
+        report.recordPickerRequested()
+        report.recordFolderSnapshot(enumerated: 5, supported: 3)
+        report.recordDecodeReady(pageCount: 3)
+        report.recordNavigation(from: 0, to: 1)
+        report.recordFilmstripOpened()
+        report.recordThumbnailDecoded()
+        XCTAssertEqual(report.status, "in-progress", "forward-only navigation is insufficient")
+
+        report.recordNavigation(from: 1, to: 0)
+        XCTAssertEqual(report.status, "passed")
+        XCTAssertEqual(report.provider, .iCloud)
+        XCTAssertEqual(report.folderSupportedItemCount, 3)
+        XCTAssertGreaterThan(report.sequence, 0)
+
+        let encoded = try! JSONEncoder().encode(report)
+        XCTAssertEqual(try! JSONDecoder().decode(ProviderAcceptanceReport.self, from: encoded), report)
+        let keys = Set((try! JSONSerialization.jsonObject(with: encoded) as! [String: Any]).keys)
+        XCTAssertTrue(keys.isDisjoint(with: ["url", "path", "fileName", "bookmark", "credential"]))
+    }
+
+    func testProviderAcceptanceTracksInteractiveErrorRecoverySeparately() {
+        var report = ProviderAcceptanceReport(token: "error-token", provider: .smb)
+        report.recordRecoverableError(inputReady: true)
+        XCTAssertTrue(report.recoverableErrorObserved)
+        XCTAssertTrue(report.inputReadyAfterError)
+        XCTAssertFalse(report.recoveredAfterError)
+
+        report.recordDecodeReady(pageCount: 2)
+        XCTAssertTrue(report.recoveredAfterError)
+        XCTAssertEqual(report.status, "in-progress")
+    }
+    #endif
+
     func testConfigRoundTrip() throws {
         struct Config: Codable, Equatable { var schemaVersion = 1; var rememberLastLocation = true }
         let config = Config()

@@ -278,6 +278,37 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["filmstrip.thumbnail.0"].waitForExistence(timeout: 10))
     }
 
+    func testMangaSpreadDefaultHasNoBlackBindingGap() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_FIXTURE_FOLDER"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_MANGA"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_FORCE_SPREAD"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_MANGA_PAGE_SPACING"] = "0"
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.currentImage"].waitForExistence(timeout: 15))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(
+            app.descendants(matching: .any)["uiTest.mangaSpreadReady"]
+                .waitForExistence(timeout: 15)
+        )
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+        let screenshot = XCUIScreen.main.screenshot().image
+        let leftOfBinding = try pixelRGBA(
+            in: screenshot,
+            at: CGPoint(x: surface.frame.midX - 3, y: surface.frame.midY)
+        )
+        let rightOfBinding = try pixelRGBA(
+            in: screenshot,
+            at: CGPoint(x: surface.frame.midX + 3, y: surface.frame.midY)
+        )
+        XCTAssertGreaterThan(Int(leftOfBinding[0]) + Int(leftOfBinding[1]) + Int(leftOfBinding[2]), 100)
+        XCTAssertGreaterThan(Int(rightOfBinding[0]) + Int(rightOfBinding[1]) + Int(rightOfBinding[2]), 100)
+    }
+
     func testJapaneseSystemLanguageUsesJapaneseStrings() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-AppleLanguages", "(ja)", "-AppleLocale", "ja_JP"]
@@ -290,6 +321,9 @@ final class Wml2ViewerUITests: XCTestCase {
         let panel = app.descendants(matching: .any)["settings.panel"]
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
         XCTAssertEqual(panel.value as? String, "表示")
+        let spacing = app.steppers["settings.mangaPageSpacing"]
+        XCTAssertTrue(spacing.waitForExistence(timeout: 5))
+        XCTAssertTrue(spacing.label.contains("見開き間隔"))
     }
 
     func testWideIPadShowsPinnedFilmstripWithoutOpeningSheet() throws {
@@ -380,5 +414,27 @@ final class Wml2ViewerUITests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
         return "UIDocumentPicker hierarchy:\n\(app.debugDescription)"
+    }
+
+    private func pixelRGBA(in image: UIImage, at point: CGPoint) throws -> [UInt8] {
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let scaleX = CGFloat(cgImage.width) / image.size.width
+        let scaleY = CGFloat(cgImage.height) / image.size.height
+        let pixelX = min(max(Int(point.x * scaleX), 0), cgImage.width - 1)
+        let pixelY = min(max(Int(point.y * scaleY), 0), cgImage.height - 1)
+        let crop = try XCTUnwrap(cgImage.cropping(to: CGRect(x: pixelX, y: pixelY, width: 1, height: 1)))
+        var rgba = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &rgba,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue |
+                CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return rgba
     }
 }

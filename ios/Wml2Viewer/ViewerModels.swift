@@ -221,6 +221,7 @@ struct MobileConfigV1: Codable, Equatable {
     var mangaRTL = true
     var coverAlone = true
     var prefetchSpreads = 1
+    var mangaPageSpacing = MangaPageSpacing.defaultPoints
     var theme: ThemeMode = .cinematicDark
     var language = "system"
     var rememberLastLocation = true
@@ -238,7 +239,7 @@ struct MobileConfigV1: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, fit, showTopChrome, showFilmstrip, keepScreenOn, mangaEnabled, mangaRTL,
-             coverAlone, prefetchSpreads, theme, language, rememberLastLocation, cacheLimitBytes,
+             coverAlone, prefetchSpreads, mangaPageSpacing, theme, language, rememberLastLocation, cacheLimitBytes,
              codecRouting, touchZonesEnabled, swipeEnabled, pinchZoomEnabled, panEnabled,
              longPressQuickMenuEnabled
     }
@@ -256,6 +257,10 @@ struct MobileConfigV1: Codable, Equatable {
         mangaRTL = try c.decodeIfPresent(Bool.self, forKey: .mangaRTL) ?? true
         coverAlone = try c.decodeIfPresent(Bool.self, forKey: .coverAlone) ?? true
         prefetchSpreads = try c.decodeIfPresent(Int.self, forKey: .prefetchSpreads) ?? 1
+        mangaPageSpacing = MangaPageSpacing.clamp(
+            try c.decodeIfPresent(Double.self, forKey: .mangaPageSpacing)
+                ?? MangaPageSpacing.defaultPoints
+        )
         theme = try c.decodeIfPresent(ThemeMode.self, forKey: .theme) ?? .cinematicDark
         language = try c.decodeIfPresent(String.self, forKey: .language) ?? "system"
         rememberLastLocation = try c.decodeIfPresent(Bool.self, forKey: .rememberLastLocation) ?? true

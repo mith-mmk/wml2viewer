@@ -72,6 +72,8 @@ final class ViewerStore: ObservableObject {
 
     #if DEBUG
     private var uiTestPickerInitialDirectoryURL: URL?
+    private var uiTestForceSpread = false
+    private let providerAcceptance = ProviderAcceptanceRecorder.fromProcessArguments()
     #endif
 
     var isPickerPresented: Bool { filesOpenPhase.blocksViewerInput }
@@ -130,7 +132,20 @@ final class ViewerStore: ObservableObject {
         if let routing = ProcessInfo.processInfo.environment["WML2VIEWER_UI_TEST_CODEC_ROUTING"] {
             config.codecRouting = routing
         }
+        if ProcessInfo.processInfo.environment["WML2VIEWER_UI_TEST_MANGA"] == "1" {
+            config.mangaEnabled = true
+            config.coverAlone = false
+        }
+        uiTestForceSpread = ProcessInfo.processInfo.environment[
+            "WML2VIEWER_UI_TEST_FORCE_SPREAD"
+        ] == "1"
+        if let value = ProcessInfo.processInfo.environment["WML2VIEWER_UI_TEST_MANGA_PAGE_SPACING"],
+           let spacing = Double(value) {
+            config.mangaPageSpacing = MangaPageSpacing.clamp(spacing)
+        }
     }
+
+    var uiTestMangaSpreadReady: Bool { displaySpreadImages.count == 2 && touchReady }
 
     func installUITestFixtureIfRequested() async {
         let environment = ProcessInfo.processInfo.environment
@@ -278,6 +293,9 @@ final class ViewerStore: ObservableObject {
         pendingPicker = presentation
         lastPresentedPickerID = presentation.id
         syncPickerPhase()
+        #if DEBUG
+        if request != .manageFiles { providerAcceptance?.pickerRequested() }
+        #endif
     }
 
     func finishPicker(
@@ -288,6 +306,9 @@ final class ViewerStore: ObservableObject {
         pendingPicker = nil
         syncPickerPhase()
         guard let result else {
+            #if DEBUG
+            providerAcceptance?.pickerCancelled()
+            #endif
             if presentation.request == .containingFolder,
                folderAuthorizationContext != nil {
                 folderAuthorizationContext = nil
@@ -324,6 +345,9 @@ final class ViewerStore: ObservableObject {
                 filesLog.info(
                     "source committed: folder=\(isFolder, privacy: .public) enumerated=\(snapshot.enumeratedItemCount, privacy: .public) supported=\(snapshot.supportedItemCount, privacy: .public)"
                 )
+                #if DEBUG
+                if isFolder { providerAcceptance?.folderCommitted(snapshot) }
+                #endif
                 if isFolder, snapshot.supportedItemCount == 1 {
                     sourceNoticeMessage = DocumentSourceError.noOtherSupportedItems.localizedDescription
                 }
@@ -349,6 +373,9 @@ final class ViewerStore: ObservableObject {
                 }
                 sourceConnectionState = .retryableError
                 errorMessage = error.localizedDescription
+                #if DEBUG
+                providerAcceptance?.recoverableError(inputReady: interactionReady)
+                #endif
                 filesLog.error("source open failed in phase \(String(describing: presentation.request), privacy: .public)")
                 finishFlowWhenDismissed(
                     flowID: presentation.flowID,
@@ -398,6 +425,9 @@ final class ViewerStore: ObservableObject {
                 let values = try url.resourceValues(forKeys: [.isDirectoryKey])
                 let isFolder = values.isDirectory == true
                 let snapshot = try await accept(url: url, isFolder: isFolder)
+                #if DEBUG
+                if isFolder { providerAcceptance?.folderCommitted(snapshot) }
+                #endif
                 if ContainingFolderAuthorizationPolicy.shouldRequest(
                     isFolder: isFolder,
                     isSupported: MobileFileTypePolicy.shared.isSupported(url.lastPathComponent),
@@ -410,13 +440,20 @@ final class ViewerStore: ObservableObject {
             } catch {
                 sourceConnectionState = .retryableError
                 errorMessage = error.localizedDescription
+                #if DEBUG
+                providerAcceptance?.recoverableError(inputReady: interactionReady)
+                #endif
             }
         }
     }
 
     func next() {
         guard !pages.isEmpty else { return }
+        let previousIndex = currentIndex
         currentIndex = readingPlan?.nextAnchorIndex ?? min(currentIndex + 1, pages.count - 1)
+        #if DEBUG
+        providerAcceptance?.navigated(from: previousIndex, to: currentIndex)
+        #endif
         loadCurrent()
         persistCurrentLocation()
     }
@@ -481,9 +518,20 @@ final class ViewerStore: ObservableObject {
 
     func previous() {
         guard !pages.isEmpty else { return }
+        let previousIndex = currentIndex
         currentIndex = readingPlan?.previousAnchorIndex ?? max(currentIndex - 1, 0)
+        #if DEBUG
+        providerAcceptance?.navigated(from: previousIndex, to: currentIndex)
+        #endif
         loadCurrent()
         persistCurrentLocation()
+    }
+
+    func openFilmstrip() {
+        showFilmstrip = true
+        #if DEBUG
+        providerAcceptance?.filmstripOpened()
+        #endif
     }
 
     var pagePositionAccessibilityValue: String {
@@ -539,6 +587,9 @@ final class ViewerStore: ObservableObject {
                 guard !Task.isCancelled,
                       generation == self.sourceGeneration else { return }
                 self.thumbnails[item.id] = Self.scaleThumbnail(decoded, maximumPixelSize: 160)
+                #if DEBUG
+                self.providerAcceptance?.thumbnailDecoded()
+                #endif
             } catch {
                 // A failed thumbnail must not remove the page or block navigation.
             }
@@ -546,6 +597,8 @@ final class ViewerStore: ObservableObject {
     }
 
     func update(_ config: MobileConfigV1) {
+        var config = config
+        config.mangaPageSpacing = MangaPageSpacing.clamp(config.mangaPageSpacing)
         let readingChanged = config.mangaEnabled != self.config.mangaEnabled ||
             config.mangaRTL != self.config.mangaRTL || config.coverAlone != self.config.coverAlone
         self.config = config
@@ -823,6 +876,9 @@ final class ViewerStore: ObservableObject {
                         self.isLoading = false
                         self.touchReady = true
                         self.errorMessage = nil
+                        #if DEBUG
+                        self.providerAcceptance?.decodeReady(pageCount: self.pages.count)
+                        #endif
                         let position = visual.firstIndex(of: index) ?? 0
                         self.startAnimation(currentFrames, generation: generation, viewport: viewport, spreadPosition: position)
                     }
@@ -867,6 +923,9 @@ final class ViewerStore: ObservableObject {
                     self.isLoading = false
                     self.touchReady = true
                     self.errorMessage = nil
+                    #if DEBUG
+                    self.providerAcceptance?.decodeReady(pageCount: self.pages.count)
+                    #endif
                     let position = visual.firstIndex(of: index) ?? 0
                     self.startAnimation(currentFrames, generation: generation, viewport: viewport, spreadPosition: position)
                 }
@@ -885,6 +944,9 @@ final class ViewerStore: ObservableObject {
                     self.image = nil
                     self.spreadImages = []
                     self.errorMessage = error.localizedDescription
+                    #if DEBUG
+                    self.providerAcceptance?.recoverableError(inputReady: self.interactionReady)
+                    #endif
                 }
             }
         }
@@ -898,9 +960,14 @@ final class ViewerStore: ObservableObject {
         let nativePages = pages.enumerated().map { index, page in
             NativeReadingPage(sourceID: 1, portrait: portraitByPageID[page.id] ?? true, cover: index == 0)
         }
+        #if DEBUG
+        let layout: NativeReadingLayout = uiTestForceSpread ? .spread : .auto
+        #else
+        let layout: NativeReadingLayout = .auto
+        #endif
         let plan = NativeReadingPlanner.plan(
             pages: nativePages, currentIndex: currentIndex,
-            landscape: viewportSize.width > viewportSize.height, layout: .auto,
+            landscape: viewportSize.width > viewportSize.height, layout: layout,
             direction: config.mangaRTL ? .rightToLeft : .leftToRight,
             coverAlone: config.coverAlone, maximumPrefetchSpreads: config.prefetchSpreads
         )

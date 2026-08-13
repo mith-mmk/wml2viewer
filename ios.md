@@ -292,6 +292,7 @@ SwiftUIが画面と描画を所有し、gesture arbitrationには薄い`UIViewRe
 - reading direction: RTL / LTR
 - cover alone: ON
 - divider: OFF
+- page spacing: 0pt（0～64ptで設定可能）
 - prefetch spreads: 1
 
 動作:
@@ -304,6 +305,7 @@ SwiftUIが画面と描画を所有し、gesture arbitrationには薄い`UIViewRe
 - source先頭pageはcover alone有効時に単独表示する
 - RTLのnavigation順と物理的な左右表示順を分ける
 - 回転後は現在のlogical pageを含むcanonical spreadを再構成する
+- 2ページは個別の半画面へfitせず、一つのspread canvasへ共通倍率で隣接描画する。中央の空きは`page spacing`だけとし、既定値0ptでは綴じ目を接触させる
 
 見開き、前後anchor、visual order、prefetchは`wml2viewer-core`のreading plannerを唯一の実装とし、Swiftで同じ算術を再実装しない。
 
@@ -672,6 +674,8 @@ iPhoneとiPadで次を確認する。
 - export先としてlocal / cloud / SMBを選択
 
 provider固有操作、SMB、cloud latencyはSimulator CIだけで合格としない。
+
+実機のfolder連続閲覧はDEBUG限定の受入レポートでも証跡化する。`ios/device-provider-acceptance.sh arm DEVICE_ID PROVIDER`で`local`、`icloud`、`third-party`、`smb`のセッションを個別に開始し、実機で2件以上を含むfolderを開いて前後移動とfilmstrip表示を行った後、`collect`で結果を回収する。レポートはProviderラベル、列挙件数、対応件数、decode・前後移動・filmstrip・thumbnail・error復帰の成否だけを保持し、URL、path、file名、bookmark、credentialを保存しない。Release buildにはこの診断経路を含めない。
 
 ### 16.5 回帰
 

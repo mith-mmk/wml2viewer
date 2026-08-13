@@ -21,6 +21,19 @@ struct SettingsView: View {
                 Section(String(localized: "Manga", locale: store.config.locale)) {
                     Toggle(String(localized: "Manga mode", locale: store.config.locale), isOn: Binding(get: { store.config.mangaEnabled }, set: { var c = store.config; c.mangaEnabled = $0; store.update(c) }))
                     Toggle(String(localized: "Right to left", locale: store.config.locale), isOn: Binding(get: { store.config.mangaRTL }, set: { var c = store.config; c.mangaRTL = $0; store.update(c) }))
+                    Stepper(
+                        "\(String(localized: "Page spacing", locale: store.config.locale)): \(Int(store.config.mangaPageSpacing)) pt",
+                        value: Binding(
+                            get: { Int(store.config.mangaPageSpacing) },
+                            set: { value in
+                                var config = store.config
+                                config.mangaPageSpacing = MangaPageSpacing.clamp(Double(value))
+                                store.update(config)
+                            }
+                        ),
+                        in: Int(MangaPageSpacing.minimumPoints)...Int(MangaPageSpacing.maximumPoints)
+                    )
+                    .accessibilityIdentifier("settings.mangaPageSpacing")
                 }
                 Section(String(localized: "Touch", locale: store.config.locale)) {
                     Toggle(String(localized: "3×3 touch zones", locale: store.config.locale), isOn: Binding(get: { store.config.touchZonesEnabled }, set: { var c = store.config; c.touchZonesEnabled = $0; store.update(c) }))

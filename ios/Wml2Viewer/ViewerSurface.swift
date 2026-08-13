@@ -12,18 +12,29 @@ struct ViewerSurface: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 if !store.displaySpreadImages.isEmpty {
-                    HStack(spacing: 0) {
-                        ForEach(Array(store.displaySpreadImages.enumerated()), id: \.offset) { _, image in
-                            Image(decorative: image, scale: 1, orientation: .up)
-                                .resizable()
-                                .aspectRatio(contentMode: runtimeFit == nil ? fitMode : (runtimeFit == .original ? .fit : .fill))
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Canvas { context, size in
+                        let images = store.displaySpreadImages
+                        let rects = SpreadLayout.pageRects(
+                            imageSizes: images.map {
+                                CGSize(width: $0.width, height: $0.height)
+                            },
+                            surfaceSize: size,
+                            fit: runtimeFit ?? store.config.fit,
+                            spacing: images.count > 1
+                                ? CGFloat(store.config.mangaPageSpacing) : 0
+                        )
+                        for (image, rect) in zip(images, rects) {
+                            context.draw(
+                                Image(decorative: image, scale: 1, orientation: .up),
+                                in: rect
+                            )
                         }
                     }
-                        .scaleEffect(store.zoom * gestureScale)
-                        .offset(store.pan)
-                        .accessibilityLabel(store.pages.indices.contains(store.currentIndex) ? store.pages[store.currentIndex].displayName : String(localized: "Image"))
-                        .accessibilityIdentifier("viewer.currentImage")
+                    .scaleEffect(store.zoom * gestureScale)
+                    .offset(store.pan)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(store.pages.indices.contains(store.currentIndex) ? store.pages[store.currentIndex].displayName : String(localized: "Image"))
+                    .accessibilityIdentifier("viewer.currentImage")
                 } else if store.isLoading {
                     ProgressView().tint(.white)
                 } else {
@@ -58,7 +69,7 @@ struct ViewerSurface: View {
                         case .next: store.next()
                         case .openFiler: store.requestFilePicker()
                         case .settings: store.showSettings = true
-                        case .filmstrip: store.showFilmstrip = true
+                        case .filmstrip: store.openFilmstrip()
                         case nil: break
                         }
                     },
@@ -74,13 +85,6 @@ struct ViewerSurface: View {
         }
         .onChange(of: store.currentIndex) { _, _ in runtimeFit = nil }
         .toolbar(.hidden, for: .navigationBar)
-    }
-
-    private var fitMode: ContentMode {
-        switch runtimeFit ?? store.config.fit {
-        case .contain, .original: .fit
-        case .width, .height: .fill
-        }
     }
 
 }

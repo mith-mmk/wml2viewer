@@ -10,6 +10,7 @@ fi
 
 script_directory="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 project_root="$(CDPATH= cd -- "$script_directory/.." && pwd)"
+. "$script_directory/device-signing.sh"
 work_directory="$project_root/.test-ios-device-smoke"
 derived_data="$work_directory/DerivedData"
 bundle_id="io.github.mith-mmk.wml2viewer"
@@ -21,21 +22,7 @@ device_token="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 mkdir -p "$work_directory"
 rm -f "$result_file" "$profile_plist"
 
-development_team="${DEVELOPMENT_TEAM:-}"
-if [ -z "$development_team" ]; then
-  profile_root="${HOME:?}/Library/Developer/Xcode/UserData/Provisioning Profiles"
-  for profile in "$profile_root"/*.mobileprovision; do
-    [ -f "$profile" ] || continue
-    security cms -D -i "$profile" > "$profile_plist" 2>/dev/null || continue
-    application_identifier="$(plutil -extract Entitlements.application-identifier raw -o - "$profile_plist" 2>/dev/null || true)"
-    case "$application_identifier" in
-      *."$bundle_id")
-        development_team="$(plutil -extract TeamIdentifier.0 raw -o - "$profile_plist")"
-        break
-        ;;
-    esac
-  done
-fi
+development_team="$(find_development_team "$bundle_id" "$profile_plist" || true)"
 
 if [ -z "$development_team" ]; then
   echo "No provisioning profile for $bundle_id was found." >&2

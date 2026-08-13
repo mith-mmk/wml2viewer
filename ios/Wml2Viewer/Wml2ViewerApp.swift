@@ -109,7 +109,7 @@ struct ContentView: View {
                 .accessibilityIdentifier("quickMenu.folder")
             Button(String(localized: "Manage Files")) { store.requestFileManagement() }
                 .accessibilityIdentifier("quickMenu.manageFiles")
-            Button(String(localized: "Pages")) { store.showFilmstrip = true }
+            Button(String(localized: "Pages")) { store.openFilmstrip() }
                 .accessibilityIdentifier("quickMenu.pages")
             Button(String(localized: store.animationEnabled ? "Pause animation" : "Play animation")) {
                 store.toggleAnimation()
@@ -182,6 +182,12 @@ struct ContentView: View {
                     .frame(width: 1, height: 1)
                     .opacity(0.01)
                     .accessibilityIdentifier("uiTest.pickerFixtureReady")
+            }
+            if store.uiTestMangaSpreadReady {
+                Text("spread-ready")
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+                    .accessibilityIdentifier("uiTest.mangaSpreadReady")
             }
         }
         #endif
