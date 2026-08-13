@@ -22,6 +22,7 @@
 "Unsupported document" = "対応していない書類です";
 "The document is no longer available" = "書類を利用できなくなりました";
 "Select the containing folder for this listed file" = "この一覧ファイルを含むフォルダを選択してください";
+"The selected folder does not contain the opened file" = "選択したフォルダに開いたファイルがありません";
 "Quick menu" = "クイックメニュー";
 "Cancel" = "キャンセル";
 "Swipe navigation" = "スワイプでページ移動";

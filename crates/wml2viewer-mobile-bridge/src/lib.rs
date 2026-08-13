@@ -16,6 +16,7 @@ pub use session::{
     NativeBytes, NativeBytesHandle, NativeErrorCode, NativeImage, NativeImageHandle,
     NativeRequestError, NativeSessionHandle, RgbaEncodeRequest, bridge,
 };
+pub use wml2viewer_core::internal_decoder_extensions;
 
 #[cfg(test)]
 mod tests;

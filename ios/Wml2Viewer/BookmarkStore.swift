@@ -35,6 +35,10 @@ actor BookmarkStore {
         next.insert(record, at: 0)
         try replace(next)
     }
+
+    func remove(sourceID: UUID) throws {
+        try replace(records.filter { $0.sourceID != sourceID })
+    }
 }
 
 actor ConfigStore {

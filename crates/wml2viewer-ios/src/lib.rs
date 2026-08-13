@@ -6,10 +6,11 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::ptr;
+use std::sync::OnceLock;
 use wml2viewer_mobile_bridge::{
     MAX_READING_PAGES, NativeArchiveHandle, NativeBytesHandle, NativeImageHandle,
     NativeSessionHandle, ReadingPlanRequest, RgbaEncodeRequest, bridge, encode_reading_wire,
-    plan_reading,
+    internal_decoder_extensions, plan_reading,
 };
 
 const FALSE: u8 = 0;
@@ -73,6 +74,35 @@ unsafe fn write_utf8(
 
 fn request_id(raw: u64) -> Option<u64> {
     (raw != 0).then_some(raw)
+}
+
+fn internal_decoder_extensions_wire() -> &'static str {
+    static WIRE: OnceLock<String> = OnceLock::new();
+    WIRE.get_or_init(|| internal_decoder_extensions().join("\n"))
+}
+
+/// Copies the normalized UTF-8 filename extensions supported by the compiled-in decoders.
+/// Extensions are sorted and separated by a single newline, without a trailing newline or NUL.
+/// Passing `output == NULL` and `capacity == 0` performs a required-size query.
+///
+/// # Safety
+/// A non-null output pointer must cover `capacity` bytes and remain valid for the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wml2viewer_ios_internal_decoder_extensions(
+    output: *mut u8,
+    capacity: usize,
+    output_length: *mut usize,
+) -> u8 {
+    ffi(FALSE, || {
+        boolean(unsafe {
+            write_utf8(
+                internal_decoder_extensions_wire(),
+                output,
+                capacity,
+                output_length,
+            )
+        })
+    })
 }
 
 #[unsafe(no_mangle)]

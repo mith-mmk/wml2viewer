@@ -76,6 +76,45 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertFalse(PickerRequest.file.selectionIsFolder(resourceIsDirectory: false))
     }
 
+    func testContainingFolderAuthorizationOnlyFollowsOrdinaryImageSelection() {
+        XCTAssertTrue(ContainingFolderAuthorizationPolicy.shouldRequest(
+            isFolder: false, isSupported: true, isArchive: false
+        ))
+        XCTAssertFalse(ContainingFolderAuthorizationPolicy.shouldRequest(
+            isFolder: true, isSupported: true, isArchive: false
+        ))
+        XCTAssertFalse(ContainingFolderAuthorizationPolicy.shouldRequest(
+            isFolder: false, isSupported: true, isArchive: true
+        ))
+        XCTAssertFalse(ContainingFolderAuthorizationPolicy.shouldRequest(
+            isFolder: false, isSupported: false, isArchive: false
+        ))
+    }
+
+    func testFolderEntryMatcherPrefersOpaqueProviderIdentityThenFileName() {
+        let pages = [
+            PageItem(id: "opaque-a", url: URL(fileURLWithPath: "/ignored/001.png"), displayName: "001.png", isArchive: false),
+            PageItem(id: "opaque-b", url: URL(fileURLWithPath: "/ignored/002.png"), displayName: "002.png", isArchive: false)
+        ]
+        XCTAssertEqual(DocumentEntryMatcher.index(
+            selectedOpaqueEntryID: "opaque-b", selectedFileName: "001.png", in: pages
+        ), 1)
+        XCTAssertEqual(DocumentEntryMatcher.index(
+            selectedOpaqueEntryID: "provider-changed", selectedFileName: "002.PNG", in: pages
+        ), 1)
+        XCTAssertNil(DocumentEntryMatcher.index(
+            selectedOpaqueEntryID: nil, selectedFileName: "missing.png", in: pages
+        ))
+    }
+
+    func testOpaqueEntryIdentityIsStableAndDoesNotExposeFilesystemPath() {
+        let url = URL(fileURLWithPath: "/private/provider/secret/example.png")
+        let first = DocumentEntryIdentity.opaqueIdentifier(for: url)
+        XCTAssertEqual(first, DocumentEntryIdentity.opaqueIdentifier(for: url))
+        XCTAssertFalse(first.contains("private"))
+        XCTAssertFalse(first.contains("example.png"))
+    }
+
     func testWideIPadPinsConfiguredFilmstripButPhoneAndNarrowPadUseSheet() {
         XCTAssertTrue(ViewerResponsiveLayout.pinsFilmstrip(isPad: true, width: 1_024, enabled: true))
         XCTAssertFalse(ViewerResponsiveLayout.pinsFilmstrip(isPad: true, width: 899, enabled: true))
@@ -92,6 +131,49 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertEqual(ImageIOCodecRouter.decodeOrder(routing: "UNKNOWN"), [.internalCodec, .imageIO])
     }
 
+    func testNativeDecoderCapabilitiesIncludeRetroFormats() throws {
+        let extensions = try NativeBridge.internalDecoderExtensions()
+        for expected in ["dib", "mag", "mki", "pcd", "pi", "pic", "vsp"] {
+            XCTAssertTrue(extensions.contains(expected), "missing native decoder: \(expected)")
+        }
+    }
+
+    func testMobileFileTypePolicyMatchesAndroidSupportedSet() throws {
+        let osExtensions: Set<String> = ["avif", "dng", "heic", "heif"]
+        let policy = MobileFileTypePolicy(
+            internalImageExtensions: try NativeBridge.internalDecoderExtensions(),
+            imageIOImageExtensions: osExtensions
+        )
+        let androidExtensions: Set<String> = [
+            "avif", "bmp", "dib", "dng", "gif", "heic", "heif", "ico", "jpe", "jpeg",
+            "jpg", "mag", "mki", "pcd", "pi", "pic", "png", "tif", "tiff", "vsp", "webp",
+        ]
+        XCTAssertEqual(policy.imageExtensions, androidExtensions)
+        for ext in androidExtensions {
+            XCTAssertTrue(policy.isImage("PAGE.\(ext.uppercased())"))
+        }
+        for ext in ["jxl", "pnm", "ppm", "qoi", "svg", "tga"] {
+            XCTAssertFalse(policy.isImage("unsupported.\(ext)"))
+        }
+        XCTAssertEqual(policy.archiveFormat(for: "book.cbz"), "zip")
+        XCTAssertEqual(policy.archiveFormat(for: "book.LZH"), "lzh")
+        XCTAssertEqual(policy.mimeType(for: "page.jpe"), "image/jpeg")
+        XCTAssertNil(policy.mimeType(for: "page.mag"))
+    }
+
+    func testLegacyCodecRoutingKeepsInternalFallbackContract() {
+        let policy = MobileFileTypePolicy(
+            internalImageExtensions: ["mag"], imageIOImageExtensions: []
+        )
+        XCTAssertTrue(policy.isImage("page.mag"))
+        XCTAssertNil(policy.mimeType(for: "page.mag"))
+        XCTAssertEqual(ImageIOCodecRouter.decodeOrder(routing: "DEFAULT"), [.internalCodec, .imageIO])
+        XCTAssertEqual(ImageIOCodecRouter.decodeOrder(routing: "INTERNAL_FIRST"), [.internalCodec, .imageIO])
+        XCTAssertEqual(ImageIOCodecRouter.decodeOrder(routing: "OS_FIRST"), [.imageIO, .internalCodec])
+        XCTAssertEqual(ImageIOCodecRouter.decodeOrder(routing: "INTERNAL_ONLY"), [.internalCodec])
+        XCTAssertEqual(ImageIOCodecRouter.decodeOrder(routing: "OS_ONLY"), [.imageIO])
+    }
+
     func testCoordinatedFolderSourceListsOnlySupportedDirectChildrenAndReadsSelection() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("wml2viewer-source-\(UUID().uuidString)", isDirectory: true)
@@ -100,6 +182,7 @@ final class ViewerModelTests: XCTestCase {
         let selected = root.appendingPathComponent("002.png")
         try Data([1, 2, 3]).write(to: selected)
         try Data([4]).write(to: root.appendingPathComponent("001.jpg"))
+        try Data([6]).write(to: root.appendingPathComponent("003.mag"))
         try Data([5]).write(to: root.appendingPathComponent("notes.txt"))
         try FileManager.default.createDirectory(
             at: root.appendingPathComponent("subfolder", isDirectory: true),
@@ -110,7 +193,12 @@ final class ViewerModelTests: XCTestCase {
             sourceID: UUID(), displayName: "fixture", rootURL: root, isFolder: true
         )
         let items = try await source.list()
-        XCTAssertEqual(items.map(\.displayName), ["001.jpg", "002.png"])
+        XCTAssertEqual(items.map(\.displayName), ["001.jpg", "002.png", "003.mag"])
+        XCTAssertEqual(DocumentEntryMatcher.index(
+            selectedOpaqueEntryID: DocumentEntryIdentity.opaqueIdentifier(for: selected),
+            selectedFileName: selected.lastPathComponent,
+            in: items
+        ), 1)
         let selectedData = try await source.read(items[1])
         XCTAssertEqual(selectedData, Data([1, 2, 3]))
     }
@@ -166,5 +254,36 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertEqual(store.currentIndex, 2)
         store.previous()
         XCTAssertEqual(store.currentIndex, 1)
+    }
+
+    @MainActor
+    func testFolderPickerIsQueuedUntilDocumentBrowserDismisses() async {
+        let store = ViewerStore()
+        let selected = URL(fileURLWithPath: "/provider/folder/002.png")
+        store.installQueuedFolderPickerForTest(selectedURL: selected)
+
+        XCTAssertNil(store.pendingPicker)
+        XCTAssertTrue(store.isPickerPresented)
+        XCTAssertEqual(store.folderPickerInitialDirectoryURL, selected.deletingLastPathComponent())
+
+        store.pickerDidDismiss()
+        await Task.yield()
+        XCTAssertEqual(store.pendingPicker, .folder)
+        XCTAssertTrue(store.isPickerPresented)
+    }
+
+    @MainActor
+    func testFolderPickerCancellationKeepsSingleSourceInteractive() {
+        let store = ViewerStore()
+        let selected = URL(fileURLWithPath: "/provider/folder/002.png")
+        store.installPendingFolderCancellationForTest(selectedURL: selected)
+        let originalPages = store.pages
+
+        store.finishPicker(nil)
+
+        XCTAssertEqual(store.pages, originalPages)
+        XCTAssertTrue(store.touchReady)
+        XCTAssertEqual(store.errorMessage, DocumentSourceError.folderRequired.localizedDescription)
+        XCTAssertNil(store.folderPickerInitialDirectoryURL)
     }
 }

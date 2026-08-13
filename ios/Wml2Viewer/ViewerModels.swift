@@ -22,6 +22,16 @@ enum PickerRequest: Identifiable, Hashable {
     }
 }
 
+enum ContainingFolderAuthorizationPolicy {
+    static func shouldRequest(
+        isFolder: Bool,
+        isSupported: Bool,
+        isArchive: Bool
+    ) -> Bool {
+        !isFolder && isSupported && !isArchive
+    }
+}
+
 enum DisplayFit: String, Codable, CaseIterable {
     case contain, width, height, original
 }
@@ -214,7 +224,6 @@ struct PageItem: Identifiable, Hashable, Sendable {
     let isArchive: Bool
 
     var isSupported: Bool {
-        let ext = url.pathExtension.lowercased()
-        return ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "avif", "heif", "heic", "zip", "lha", "lzh", "wmltxt"].contains(ext)
+        MobileFileTypePolicy.shared.isSupported(displayName)
     }
 }

@@ -16,6 +16,11 @@ uint8_t wml2viewer_ios_request_begin(uint64_t session, uint64_t request);
 uint8_t wml2viewer_ios_request_cancel(uint64_t session, uint64_t request);
 uint8_t wml2viewer_ios_request_is_current(uint64_t session, uint64_t request);
 
+/* Sorted newline-separated UTF-8 extensions; no trailing newline or NUL. */
+uint8_t wml2viewer_ios_internal_decoder_extensions(uint8_t *output,
+                                                   size_t capacity,
+                                                   size_t *output_length);
+
 uint64_t wml2viewer_ios_decode_local(uint64_t session, uint64_t request,
                                      const uint8_t *path, size_t path_length,
                                      const uint8_t *mime, size_t mime_length);

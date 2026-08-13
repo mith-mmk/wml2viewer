@@ -105,11 +105,17 @@ EntryRef(sourceId, opaqueEntryId)
 
 単一ファイルを選択した場合:
 
-- 通常画像は1項目だけをsourceとする
+- 通常画像はまず1項目だけをsourceとして表示する
+- Document Browserを閉じた後、`.folder`のDocument Pickerで包含フォルダの明示的な許可を求める
+- 包含フォルダの許可後だけ直下の対応項目を列挙し、元の選択画像の位置から前後移動できるようにする
+- 包含フォルダの選択をキャンセルした場合は、単一画像sourceとして表示を維持する
+- folder pickerはDocument Browserのdismiss完了後に直列提示し、選択ファイルの親を初期位置として提案する
+- 許可後はFile Providerのresource identifierを優先し、同一ファイル名をfallbackとして元画像のindexを維持する
+- folder bookmarkには選択項目のopaque entry IDとlogical indexを保存し、前後移動や外部変更後に更新する
 - ZIP / LHA / LZHは書庫内entryをページとして扱う
 - `.wmltxt`はlisted-fileとして開く
-- 選択ファイルの親フォルダを暗黙に列挙しない
-- 前後移動先がない場合はそのページで停止する
+- 単一ファイルに与えられたsecurity scopeから親フォルダの権限を推測したり、兄弟項目を暗黙に列挙したりしない
+- フォルダ許可が得られない間は前後移動先を持たず、そのページで停止する
 
 フォルダを選択した場合:
 
@@ -648,7 +654,8 @@ iPhoneとiPadで次を確認する。
 - file / folder open
 - Document Browserのcopy / move / rename / delete / share
 - providerが操作を禁止する場合にOS UIへ従うこと
-- folder内の画像順、ZIP / LHA / `.wmltxt`
+- folder内の画像順、ZIP / LHA / LZH / `.wmltxt`
+- Level 1 / LH5のLZHに含まれるMAG画像の表示と前後移動
 - offline、認証切れ、download中断、再接続
 - bookmarkによる再起動後復元
 - Files側でcurrent itemをrename / move / deleteした後の再同期
@@ -726,4 +733,3 @@ iOS版の実装完了は次をすべて満たした時点とする。
 - C ABIのownership、cancel、stale、limit、error contractがtestで保証される
 - Android JNI ABIと既存Android / desktop機能に回帰がない
 - local、iCloud、第三者cloud、実SMBを使った実機acceptanceを記録する
-

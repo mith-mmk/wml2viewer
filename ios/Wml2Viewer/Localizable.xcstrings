@@ -25,6 +25,7 @@
     "Unsupported document" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "対応していない書類です" } } } },
     "The document is no longer available" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "書類を利用できなくなりました" } } } },
     "Select the containing folder for this listed file" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "この一覧ファイルを含むフォルダを選択してください" } } } },
+    "The selected folder does not contain the opened file" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択したフォルダに開いたファイルがありません" } } } },
     "Quick menu" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "クイックメニュー" } } } },
     "Cancel" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "キャンセル" } } } },
     "Swipe navigation" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "スワイプでページ移動" } } } },

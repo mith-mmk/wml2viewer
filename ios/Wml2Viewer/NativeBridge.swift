@@ -246,6 +246,30 @@ enum NativeReadingPlanner {
 }
 
 enum NativeBridge {
+    static func internalDecoderExtensions() throws -> Set<String> {
+        var required = 0
+        guard wml2viewer_ios_internal_decoder_extensions(nil, 0, &required) != 0,
+              required > 0, required <= 4 * 1_024 else {
+            throw NativeBridgeError.invalidBuffer
+        }
+        var bytes = [UInt8](repeating: 0, count: required)
+        let copied = bytes.withUnsafeMutableBufferPointer { buffer in
+            wml2viewer_ios_internal_decoder_extensions(
+                buffer.baseAddress, buffer.count, &required
+            )
+        }
+        guard copied != 0, required == bytes.count,
+              let value = String(bytes: bytes, encoding: .utf8) else {
+            throw NativeBridgeError.invalidBuffer
+        }
+        let extensions = Set(value.split(separator: "\n").map(String.init))
+        guard !extensions.isEmpty,
+              extensions.allSatisfy({ !$0.isEmpty && $0 == $0.lowercased() }) else {
+            throw NativeBridgeError.invalidBuffer
+        }
+        return extensions
+    }
+
     static func decode(path: URL, mime: String? = nil, session: NativeSession, request: UInt64) throws -> NativeImage {
         let pathBytes = Array(path.path.utf8)
         let imageHandle: UInt64 = pathBytes.withUnsafeBufferPointer { pathBuffer in

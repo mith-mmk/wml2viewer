@@ -59,6 +59,55 @@ fn invalid_pointer_length_pairs_fail_without_unwinding() {
 }
 
 #[test]
+fn decoder_extensions_use_checked_two_pass_utf8_copy() {
+    let mut required = 0;
+    assert_eq!(
+        unsafe { wml2viewer_ios_internal_decoder_extensions(ptr::null_mut(), 0, &mut required) },
+        TRUE
+    );
+    assert!(required > 0);
+
+    let mut too_small = vec![0; required - 1];
+    assert_eq!(
+        unsafe {
+            wml2viewer_ios_internal_decoder_extensions(
+                too_small.as_mut_ptr(),
+                too_small.len(),
+                &mut required,
+            )
+        },
+        FALSE
+    );
+    assert_eq!(
+        unsafe { wml2viewer_ios_internal_decoder_extensions(ptr::null_mut(), 1, &mut required) },
+        FALSE
+    );
+    assert_eq!(
+        unsafe { wml2viewer_ios_internal_decoder_extensions(ptr::null_mut(), 0, ptr::null_mut()) },
+        FALSE
+    );
+
+    let mut bytes = vec![0; required];
+    assert_eq!(
+        unsafe {
+            wml2viewer_ios_internal_decoder_extensions(
+                bytes.as_mut_ptr(),
+                bytes.len(),
+                &mut required,
+            )
+        },
+        TRUE
+    );
+    let text = std::str::from_utf8(&bytes).unwrap();
+    assert!(!text.ends_with('\n'));
+    let extensions = text.split('\n').collect::<Vec<_>>();
+    for expected in ["mag", "mki", "pcd", "pi", "pic", "vsp"] {
+        assert!(extensions.contains(&expected), "missing {expected}: {text}");
+    }
+    assert!(extensions.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
 fn encode_returns_owned_bytes_with_borrowed_view() {
     let session = wml2viewer_ios_session_create();
     let request = begin(session);
@@ -224,6 +273,7 @@ fn public_header_declares_every_c_export() {
         "wml2viewer_ios_request_begin",
         "wml2viewer_ios_request_cancel",
         "wml2viewer_ios_request_is_current",
+        "wml2viewer_ios_internal_decoder_extensions",
         "wml2viewer_ios_decode_local",
         "wml2viewer_ios_image_release",
         "wml2viewer_ios_image_width",

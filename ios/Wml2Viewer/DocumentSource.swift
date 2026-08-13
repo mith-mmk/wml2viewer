@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import UniformTypeIdentifiers
 
@@ -33,7 +34,12 @@ struct SecurityScopedDocumentSource: DocumentSource, @unchecked Sendable {
                 }
             }
             return try coordinatedRead(at: rootURL) { coordinatedURL in
-                [PageItem(id: coordinatedURL.path, url: coordinatedURL, displayName: displayName, isArchive: Self.isArchive(coordinatedURL))]
+                [PageItem(
+                    id: DocumentEntryIdentity.opaqueIdentifier(for: coordinatedURL),
+                    url: coordinatedURL,
+                    displayName: displayName,
+                    isArchive: Self.isArchive(coordinatedURL)
+                )]
             }
         }
     }
@@ -71,24 +77,64 @@ struct SecurityScopedDocumentSource: DocumentSource, @unchecked Sendable {
     private static func pageItem(for url: URL) -> PageItem? {
         guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey]),
               values.isRegularFile == true else { return nil }
-        let item = PageItem(id: url.path, url: url, displayName: url.lastPathComponent, isArchive: isArchive(url))
+        let item = PageItem(
+            id: DocumentEntryIdentity.opaqueIdentifier(for: url),
+            url: url,
+            displayName: url.lastPathComponent,
+            isArchive: isArchive(url)
+        )
         return item.isSupported ? item : nil
     }
 
     private static func isArchive(_ url: URL) -> Bool {
-        ["zip", "lha", "lzh", "wmltxt"].contains(url.pathExtension.lowercased())
+        MobileFileTypePolicy.shared.archiveFormat(for: url.lastPathComponent) != nil
+    }
+}
+
+enum DocumentEntryIdentity {
+    /// Produces a UI-safe stable identifier without exposing a provider URL or
+    /// filesystem path. Providers that do not vend an identifier fall back to a
+    /// digest of the direct child's name, which is unique within one directory.
+    static func opaqueIdentifier(for url: URL) -> String {
+        let identity: String
+        if let resourceIdentifier = try? url.resourceValues(
+            forKeys: [.fileResourceIdentifierKey]
+        ).fileResourceIdentifier {
+            identity = "provider:\(String(reflecting: resourceIdentifier))"
+        } else {
+            identity = "name:\(url.lastPathComponent)"
+        }
+        return SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+enum DocumentEntryMatcher {
+    static func index(
+        selectedOpaqueEntryID: String?,
+        selectedFileName: String,
+        in items: [PageItem]
+    ) -> Int? {
+        if let selectedOpaqueEntryID,
+           let exact = items.firstIndex(where: { $0.id == selectedOpaqueEntryID }) {
+            return exact
+        }
+        return items.firstIndex {
+            $0.displayName.compare(selectedFileName, options: [.caseInsensitive, .widthInsensitive]) == .orderedSame
+        }
     }
 }
 
 enum DocumentSourceError: LocalizedError {
     case unsupportedItem
     case folderRequired
+    case selectedFileNotFound
     case permissionDenied
 
     var errorDescription: String? {
         switch self {
         case .unsupportedItem: String(localized: "Unsupported document")
         case .folderRequired: String(localized: "Select the containing folder for this listed file")
+        case .selectedFileNotFound: String(localized: "The selected folder does not contain the opened file")
         case .permissionDenied: String(localized: "The document is no longer available")
         }
     }

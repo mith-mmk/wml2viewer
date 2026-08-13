@@ -105,6 +105,10 @@ pub fn get_decoder_extentions() -> Vec<String> {
     exts.push("pi".to_string());
     #[cfg(all(feature = "pic", not(feature = "noretoro")))]
     exts.push("pic".to_string());
+    #[cfg(all(feature = "pcd", not(feature = "noretoro")))]
+    exts.push("pcd".to_string());
+    #[cfg(all(feature = "vsp", not(feature = "noretoro")))]
+    exts.push("vsp".to_string());
     exts
 }
 

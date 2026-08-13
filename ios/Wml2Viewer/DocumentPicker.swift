@@ -4,6 +4,7 @@ import UIKit
 
 struct SystemDocumentPicker: UIViewControllerRepresentable {
     let request: PickerRequest
+    let initialDirectoryURL: URL?
     let completion: (Result<URL, Error>?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
@@ -13,6 +14,9 @@ struct SystemDocumentPicker: UIViewControllerRepresentable {
         let controller = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
         controller.delegate = context.coordinator
         controller.allowsMultipleSelection = false
+        if request == .folder {
+            controller.directoryURL = initialDirectoryURL
+        }
         return controller
     }
 

@@ -122,12 +122,17 @@ struct ContentView: View {
         .sheet(item: $store.exportItem, onDismiss: { store.finishExport() }) { item in
             SystemShareSheet(activityItems: [item.url])
         }
-        .fullScreenCover(item: $store.pendingPicker) { request in
+        .fullScreenCover(item: $store.pendingPicker, onDismiss: {
+            store.pickerDidDismiss()
+        }) { request in
             Group {
                 if request == .file {
                     DocumentBrowserView { result in store.finishPicker(result) }
                 } else {
-                    SystemDocumentPicker(request: request) { result in
+                    SystemDocumentPicker(
+                        request: request,
+                        initialDirectoryURL: store.folderPickerInitialDirectoryURL
+                    ) { result in
                         store.finishPicker(result)
                     }
                 }

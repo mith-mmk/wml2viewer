@@ -32,6 +32,7 @@ final class ViewerStore: ObservableObject {
     @Published var grayscaleEnabled = false
     @Published var pendingPicker: PickerRequest?
     @Published private(set) var isPickerPresented = false
+    @Published private(set) var folderPickerInitialDirectoryURL: URL?
     @Published var zoom: CGFloat = 1
     @Published var pan: CGSize = .zero
     @Published private(set) var config = MobileConfigV1()
@@ -51,6 +52,21 @@ final class ViewerStore: ObservableObject {
     private var viewportSize: CGSize = .zero
     private var readingPlan: NativeReadingPlan?
     private var portraitByPageID: [String: Bool] = [:]
+    private var queuedPicker: PickerRequest?
+    private var folderAuthorizationContext: FolderAuthorizationContext?
+    private var activeBookmark: ActiveBookmark?
+
+    private struct FolderAuthorizationContext {
+        let selectedOpaqueEntryID: String
+        let selectedFileName: String
+    }
+
+    private struct ActiveBookmark {
+        let sourceID: UUID
+        let data: Data
+        let displayName: String
+        let isFolder: Bool
+    }
 
     func restoreLastSource() async {
         config = await configStore.load()
@@ -65,11 +81,21 @@ final class ViewerStore: ObservableObject {
         do {
             let resolved = try URL(resolvingBookmarkData: record.bookmark, options: [.withoutUI, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &stale)
             let newSource = SecurityScopedDocumentSource(sourceID: record.sourceID, displayName: record.displayName, rootURL: resolved, isFolder: record.isFolder)
-            source = newSource
+            var activeBookmarkData = record.bookmark
             if stale, let renewed = try? resolved.bookmarkData(options: [.suitableForBookmarkFile], includingResourceValuesForKeys: nil, relativeTo: nil) {
+                activeBookmarkData = renewed
                 try? await bookmarks.upsert(BookmarkRecord(sourceID: record.sourceID, bookmark: renewed, displayName: record.displayName, isFolder: record.isFolder, opaqueEntryID: record.opaqueEntryID, logicalPageIndex: record.logicalPageIndex))
             }
-            try await open(source: newSource, preferredIndex: record.logicalPageIndex)
+            activeBookmark = ActiveBookmark(
+                sourceID: record.sourceID, data: activeBookmarkData,
+                displayName: record.displayName, isFolder: record.isFolder
+            )
+            try await open(
+                source: newSource,
+                preferredOpaqueEntryID: record.opaqueEntryID,
+                preferredFileName: nil,
+                preferredIndex: record.logicalPageIndex
+            )
         } catch { return }
     }
 
@@ -108,7 +134,11 @@ final class ViewerStore: ObservableObject {
                 case "zip":
                     encoded = "UEsDBBQAAAAIAAAAIQAvZp0vSwAAAEYAAAALAAAAcGFnZS0wMS5wbmcBRgC5/4lQTkcNChoKAAAADUlIRFIAAAABAAAAAQgGAAAAHxXEiQAAAA1JREFUCNdj+M/A8B8ABQAB/4mZPR0AAAAASUVORK5CYIJQSwECFAMUAAAACAAAACEAL2adL0sAAABGAAAACwAAAAAAAAAAAAAApIEAAAAAcGFnZS0wMS5wbmdQSwUGAAAAAAEAAQA5AAAAdAAAAAAA"
                 case "lzh", "lha":
-                    encoded = "H1otbGgwLUYAAABGAAAAbhl9aiABC3BhZ2UtMDEucG5n+ulVAACJUE5HDQoaCgAAAA1JSERSAAAAAQAAAAEIBgAAAB8VxIkAAAANSURBVAjXY/jPwPAfAAUAAf+JmT0dAAAAAElFTkSuQmCCAA=="
+                    // Hermetic Level 1 / LH5 archive containing two generated
+                    // 640x400 MAG images. This intentionally exercises a real
+                    // legacy-LHA wire stream instead of the former private LH0
+                    // fixture that standard LHA tools rejected.
+                    encoded = "JPgtbGg1LQMBAAAPBAIAZnZ9aiABC3BhZ2UtMDEubWFnz9tVAAACJ0tUoAh/3FJMi6zsrQIGZs2d4LLHiYgUMZG2eSjww+4BaDyuxwlbGM79JwhD0s8hrTtRnzveru/W+KIRrl96gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD8AJJItbGg1LQMBAAAPBAIAZnZ9aiABC3BhZ2UtMDIubWFngMNVAAACJ0tQoAp/3ylOiWMqIEDM2/s/Q4FLHExAoYyNs5KOGHnALQeV2OFdlVUr85QhD0p8hrPtNHne9Hd+t8TQjbp96gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD8AA=="
                 default:
                     throw DocumentSourceError.unsupportedItem
                 }
@@ -152,13 +182,18 @@ final class ViewerStore: ObservableObject {
     #endif
 
     func requestFilePicker() {
+        guard !isPickerPresented else { return }
         errorMessage = nil
+        folderPickerInitialDirectoryURL = nil
         pendingPicker = .file
         isPickerPresented = true
     }
 
     func requestFolderPicker() {
+        guard !isPickerPresented else { return }
         errorMessage = nil
+        folderAuthorizationContext = nil
+        folderPickerInitialDirectoryURL = nil
         pendingPicker = .folder
         isPickerPresented = true
     }
@@ -166,9 +201,14 @@ final class ViewerStore: ObservableObject {
     func finishPicker(_ result: Result<URL, Error>?) {
         let completedRequest = pendingPicker
         pendingPicker = nil
-        isPickerPresented = false
         guard let result else {
-            Task { await reconcileExternalChanges() }
+            if completedRequest == .folder, folderAuthorizationContext != nil {
+                folderAuthorizationContext = nil
+                folderPickerInitialDirectoryURL = nil
+                errorMessage = DocumentSourceError.folderRequired.localizedDescription
+            } else {
+                Task { await reconcileExternalChanges() }
+            }
             return
         }
         Task { @MainActor in
@@ -180,9 +220,49 @@ final class ViewerStore: ObservableObject {
                 let isFolder = completedRequest?.selectionIsFolder(
                     resourceIsDirectory: resourceIsDirectory
                 ) ?? resourceIsDirectory
-                try await accept(url: url, isFolder: isFolder)
+                let authorization = completedRequest == .folder ? folderAuthorizationContext : nil
+                if completedRequest == .folder {
+                    folderAuthorizationContext = nil
+                    folderPickerInitialDirectoryURL = nil
+                }
+                try await accept(
+                    url: url,
+                    isFolder: isFolder,
+                    preferredOpaqueEntryID: authorization?.selectedOpaqueEntryID,
+                    preferredFileName: authorization?.selectedFileName,
+                    requiresPreferredItem: authorization != nil
+                )
+                if completedRequest == .file,
+                   ContainingFolderAuthorizationPolicy.shouldRequest(
+                       isFolder: isFolder,
+                       isSupported: MobileFileTypePolicy.shared.isSupported(url.lastPathComponent),
+                       isArchive: MobileFileTypePolicy.shared.isArchive(url.lastPathComponent)
+                   ) {
+                    queueContainingFolderAuthorization(for: url)
+                }
             }
-            catch { errorMessage = error.localizedDescription }
+            catch {
+                if completedRequest == .folder {
+                    folderAuthorizationContext = nil
+                    folderPickerInitialDirectoryURL = nil
+                }
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func pickerDidDismiss() {
+        guard pendingPicker == nil else {
+            isPickerPresented = true
+            return
+        }
+        isPickerPresented = false
+        guard let queuedPicker else { return }
+        self.queuedPicker = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.isPickerPresented else { return }
+            self.pendingPicker = queuedPicker
+            self.isPickerPresented = true
         }
     }
 
@@ -190,7 +270,15 @@ final class ViewerStore: ObservableObject {
         Task { @MainActor in
             do {
                 let values = try url.resourceValues(forKeys: [.isDirectoryKey])
-                try await accept(url: url, isFolder: values.isDirectory == true)
+                let isFolder = values.isDirectory == true
+                try await accept(url: url, isFolder: isFolder)
+                if ContainingFolderAuthorizationPolicy.shouldRequest(
+                    isFolder: isFolder,
+                    isSupported: MobileFileTypePolicy.shared.isSupported(url.lastPathComponent),
+                    isArchive: MobileFileTypePolicy.shared.isArchive(url.lastPathComponent)
+                ) {
+                    queueContainingFolderAuthorization(for: url)
+                }
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -201,6 +289,7 @@ final class ViewerStore: ObservableObject {
         guard !pages.isEmpty else { return }
         currentIndex = readingPlan?.nextAnchorIndex ?? min(currentIndex + 1, pages.count - 1)
         loadCurrent()
+        persistCurrentLocation()
     }
 
     func toggleAnimation() {
@@ -265,6 +354,7 @@ final class ViewerStore: ObservableObject {
         guard !pages.isEmpty else { return }
         currentIndex = readingPlan?.previousAnchorIndex ?? max(currentIndex - 1, 0)
         loadCurrent()
+        persistCurrentLocation()
     }
 
     var pagePositionAccessibilityValue: String {
@@ -277,6 +367,7 @@ final class ViewerStore: ObservableObject {
         currentIndex = index
         showFilmstrip = false
         loadCurrent()
+        persistCurrentLocation()
     }
 
     func update(_ config: MobileConfigV1) {
@@ -316,19 +407,87 @@ final class ViewerStore: ObservableObject {
             ) ?? 0
             sourceGeneration &+= 1
             loadCurrent()
+            persistCurrentLocation()
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    private func accept(url: URL, isFolder: Bool) async throws {
+    private func accept(
+        url: URL,
+        isFolder: Bool,
+        preferredOpaqueEntryID: String? = nil,
+        preferredFileName: String? = nil,
+        requiresPreferredItem: Bool = false
+    ) async throws {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let bookmark = try url.bookmarkData(options: [.suitableForBookmarkFile], includingResourceValuesForKeys: nil, relativeTo: nil)
         let newSource = SecurityScopedDocumentSource(sourceID: UUID(), displayName: url.lastPathComponent, rootURL: url, isFolder: isFolder)
-        source = newSource
-        try await bookmarks.upsert(BookmarkRecord(sourceID: newSource.sourceID, bookmark: bookmark, displayName: newSource.displayName, isFolder: isFolder, opaqueEntryID: nil, logicalPageIndex: 0))
-        try await open(source: newSource, preferredIndex: 0)
+        let listedPages = try await newSource.list()
+        guard !listedPages.isEmpty else { throw DocumentSourceError.unsupportedItem }
+        let preferredIndex: Int
+        if let preferredFileName {
+            if let matched = DocumentEntryMatcher.index(
+                selectedOpaqueEntryID: preferredOpaqueEntryID,
+                selectedFileName: preferredFileName,
+                in: listedPages
+            ) {
+                preferredIndex = matched
+            } else {
+                guard !requiresPreferredItem else { throw DocumentSourceError.selectedFileNotFound }
+                preferredIndex = 0
+            }
+        } else {
+            preferredIndex = 0
+        }
+        try commitOpen(source: newSource, listedPages: listedPages, preferredIndex: preferredIndex)
+        if let previous = activeBookmark, previous.sourceID != newSource.sourceID {
+            try? await bookmarks.remove(sourceID: previous.sourceID)
+        }
+        activeBookmark = ActiveBookmark(
+            sourceID: newSource.sourceID, data: bookmark,
+            displayName: newSource.displayName, isFolder: isFolder
+        )
+        try await bookmarks.upsert(BookmarkRecord(
+            sourceID: newSource.sourceID,
+            bookmark: bookmark,
+            displayName: newSource.displayName,
+            isFolder: isFolder,
+            opaqueEntryID: pages[currentIndex].id,
+            logicalPageIndex: currentIndex
+        ))
+    }
+
+    private func queueContainingFolderAuthorization(for selectedURL: URL) {
+        let scoped = selectedURL.startAccessingSecurityScopedResource()
+        defer { if scoped { selectedURL.stopAccessingSecurityScopedResource() } }
+        folderAuthorizationContext = FolderAuthorizationContext(
+            selectedOpaqueEntryID: DocumentEntryIdentity.opaqueIdentifier(for: selectedURL),
+            selectedFileName: selectedURL.lastPathComponent
+        )
+        folderPickerInitialDirectoryURL = selectedURL.deletingLastPathComponent()
+        if isPickerPresented {
+            queuedPicker = .folder
+        } else {
+            pendingPicker = .folder
+            isPickerPresented = true
+        }
+    }
+
+    private func persistCurrentLocation() {
+        guard nativeArchive == nil,
+              let activeBookmark,
+              pages.indices.contains(currentIndex) else { return }
+        let record = BookmarkRecord(
+            sourceID: activeBookmark.sourceID,
+            bookmark: activeBookmark.data,
+            displayName: activeBookmark.displayName,
+            isFolder: activeBookmark.isFolder,
+            opaqueEntryID: pages[currentIndex].id,
+            logicalPageIndex: currentIndex
+        )
+        Task { try? await bookmarks.upsert(record) }
     }
 
     private static func isDirectoryURL(_ url: URL) -> Bool {
@@ -341,7 +500,29 @@ final class ViewerStore: ObservableObject {
         return (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true || url.hasDirectoryPath
     }
 
-    private func open(source: SecurityScopedDocumentSource, preferredIndex: Int) async throws {
+    private func open(
+        source: SecurityScopedDocumentSource,
+        preferredOpaqueEntryID: String? = nil,
+        preferredFileName: String? = nil,
+        preferredIndex: Int
+    ) async throws {
+        let listedPages = try await source.list()
+        guard !listedPages.isEmpty else { throw DocumentSourceError.unsupportedItem }
+        let restoredIndex = preferredOpaqueEntryID.flatMap { opaqueID in
+            DocumentEntryMatcher.index(
+                selectedOpaqueEntryID: opaqueID,
+                selectedFileName: preferredFileName ?? "",
+                in: listedPages
+            )
+        } ?? preferredIndex
+        try commitOpen(source: source, listedPages: listedPages, preferredIndex: restoredIndex)
+    }
+
+    private func commitOpen(
+        source: SecurityScopedDocumentSource,
+        listedPages: [PageItem],
+        preferredIndex: Int
+    ) throws {
         nativeArchive?.close()
         nativeSession?.close()
         nativeArchive = nil
@@ -351,8 +532,8 @@ final class ViewerStore: ObservableObject {
         sourceGeneration += 1
         portraitByPageID.removeAll()
         let generation = sourceGeneration
-        pages = try await source.list()
-        guard !pages.isEmpty else { throw DocumentSourceError.unsupportedItem }
+        self.source = source
+        pages = listedPages
         currentIndex = min(max(preferredIndex, 0), pages.count - 1)
         guard generation == sourceGeneration else { return }
         loadCurrent()
@@ -521,21 +702,6 @@ final class ViewerStore: ObservableObject {
         return frames
     }
 
-    private static func mimeType(for name: String) -> String? {
-        switch URL(fileURLWithPath: name).pathExtension.lowercased() {
-        case "jpg", "jpeg": "image/jpeg"
-        case "png": "image/png"
-        case "gif": "image/gif"
-        case "webp": "image/webp"
-        case "bmp": "image/bmp"
-        case "tif", "tiff": "image/tiff"
-        case "avif": "image/avif"
-        case "heic": "image/heic"
-        case "heif": "image/heif"
-        default: nil
-        }
-    }
-
     private func decodeArchiveFrames(
         archive: NativeArchive, session: NativeSession, index: Int, entryName: String
     ) throws -> [AnimationFrame] {
@@ -547,7 +713,7 @@ final class ViewerStore: ObservableObject {
                 case .internalCodec:
                     let nativeImage = try archive.decode(
                         session: session, request: request, index: index,
-                        mime: Self.mimeType(for: entryName)
+                        mime: MobileFileTypePolicy.shared.mimeType(for: entryName)
                     )
                     defer { nativeImage.close() }
                     return try Self.decodeNativeFrames(nativeImage)
@@ -628,13 +794,17 @@ final class ViewerStore: ObservableObject {
         )
         let session = try NativeSession()
         let request = try session.nextRequest()
-        let archive = try NativeBridge.openArchive(path: cache, format: item.url.pathExtension.lowercased(), session: session, request: request)
+        guard let format = MobileFileTypePolicy.shared.archiveFormat(for: item.displayName) else {
+            throw DocumentSourceError.unsupportedItem
+        }
+        let archive = try NativeBridge.openArchive(
+            path: cache, format: format, session: session, request: request
+        )
         var entries: [PageItem] = []
         var entryIndices: [Int] = []
         for index in 0..<archive.entryCount {
             let name = try archive.entryName(at: index)
-            let ext = URL(fileURLWithPath: name).pathExtension.lowercased()
-            guard ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "avif", "heif", "heic", "wmltxt"].contains(ext) else { continue }
+            guard MobileFileTypePolicy.shared.isImage(name) else { continue }
             entries.append(PageItem(id: "\(cache.path)#\(index)", url: URL(fileURLWithPath: name), displayName: name, isArchive: false))
             entryIndices.append(index)
         }
@@ -670,6 +840,24 @@ final class ViewerStore: ObservableObject {
     var testReadingPlan: NativeReadingPlan? {
         _ = plannedIndices()
         return readingPlan
+    }
+
+    func installQueuedFolderPickerForTest(selectedURL: URL) {
+        pendingPicker = nil
+        isPickerPresented = true
+        queueContainingFolderAuthorization(for: selectedURL)
+    }
+
+    func installPendingFolderCancellationForTest(selectedURL: URL) {
+        installTestPages(count: 2)
+        touchReady = true
+        folderAuthorizationContext = FolderAuthorizationContext(
+            selectedOpaqueEntryID: DocumentEntryIdentity.opaqueIdentifier(for: selectedURL),
+            selectedFileName: selectedURL.lastPathComponent
+        )
+        folderPickerInitialDirectoryURL = selectedURL.deletingLastPathComponent()
+        pendingPicker = .folder
+        isPickerPresented = true
     }
 
     private static func decodeNativeRGBA(_ data: Data, width: Int, height: Int, stride: Int) throws -> CGImage {

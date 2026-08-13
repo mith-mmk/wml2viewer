@@ -170,14 +170,26 @@ final class Wml2ViewerUITests: XCTestCase {
     }
 
     func testZipArchiveDisplaysItsImageEntry() throws {
-        try assertArchiveDisplaysEntry(format: "zip", routing: "OS_ONLY")
+        try assertArchiveDisplaysEntry(format: "zip", entryName: "page-01.png", routing: "OS_ONLY")
     }
 
     func testLzhArchiveDisplaysItsImageEntry() throws {
-        try assertArchiveDisplaysEntry(format: "lzh")
+        let app = try assertArchiveDisplaysEntry(format: "lzh", entryName: "page-01.mag")
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let second = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier == 'viewer.currentImage' AND label == 'page-02.mag'")
+        ).firstMatch
+        XCTAssertTrue(second.waitForExistence(timeout: 15), "second MAG entry was not displayed")
     }
 
-    private func assertArchiveDisplaysEntry(format: String, routing: String? = nil) throws {
+    @discardableResult
+    private func assertArchiveDisplaysEntry(
+        format: String,
+        entryName: String,
+        routing: String? = nil
+    ) throws -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
         app.launchEnvironment["WML2VIEWER_UI_TEST_FIXTURE_ARCHIVE"] = format
@@ -187,9 +199,10 @@ final class Wml2ViewerUITests: XCTestCase {
         app.launch()
 
         let image = app.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier == 'viewer.currentImage' AND label == 'page-01.png'")
+            NSPredicate(format: "identifier == 'viewer.currentImage' AND label == %@", entryName)
         ).firstMatch
         XCTAssertTrue(image.waitForExistence(timeout: 15), "\(format) entry was not displayed")
         XCTAssertFalse(app.descendants(matching: .any)["viewer.error"].exists)
+        return app
     }
 }

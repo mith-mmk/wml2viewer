@@ -2549,9 +2549,9 @@ dependencies = [
 
 [[package]]
 name = "oxiarc-archive"
-version = "0.2.8"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3aa6fe8f8e27f88882b0855df16bc7d667d8b8e8dadf32b303e5f2d068725c1"
+checksum = "65da3dfeeab515a81be137c49d467142535771bd8d0161b31d64fbd0d7437757"
 dependencies = [
  "encoding_rs",
  "oxiarc-brotli",
@@ -2567,81 +2567,83 @@ dependencies = [
 
 [[package]]
 name = "oxiarc-brotli"
-version = "0.2.8"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7e0cbcb45dcac7b0e51c330b7821148e10aa08e3dc74951d24c69de240f1e10"
+checksum = "67112ee7230e7850bf1ff9aacd470928740ba11740a43512430ded0ec3fed414"
 dependencies = [
  "oxiarc-core",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "oxiarc-bzip2"
-version = "0.2.8"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "254cbb99acb61795c1a222b58e6d8ba19879455a8461ba07d69066f047b13972"
+checksum = "ddf640afbe039752f75aa005c9a83412b9113b9e4440812d929d6ad0ec0d56db"
 dependencies = [
  "oxiarc-core",
 ]
 
 [[package]]
 name = "oxiarc-core"
-version = "0.2.8"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c3a93341d720329f503b2743970f11695ac25dc0661ccc94cb43e077545e23a"
+checksum = "119a925483e4917b645fd77acef86859164e166faa4cce3353c1d7cecfd3665a"
 dependencies = [
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "oxiarc-deflate"
-version = "0.2.8"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8dc36d4d90ad609a86771a386611d0468ba823b6886364aace554b7c01c481d8"
+checksum = "2c3bbbc19af6cc7dd40fccafdb87772cc634d594fc1c588007125280d240d41a"
 dependencies = [
  "oxiarc-core",
 ]
 
 [[package]]
 name = "oxiarc-lz4"
-version = "0.2.8"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5445f78ef4955e6027558b45c6c6dd4085d0e8c2c955aa2266e3f91f4b6da8b5"
+checksum = "c5cccbb2bc13e1654444de7eca50e492f5613629b98a77354936e49f7cc71a32"
 dependencies = [
  "oxiarc-core",
 ]
 
 [[package]]
 name = "oxiarc-lzhuf"
-version = "0.2.8"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf32cdba9d055ad6d0497b502760b9591e370a646758ce5874fc97c4b5738838"
+checksum = "98491c75b3ad6a6b8d4c63db62f7c4703c48659b3f7692857da9f176a85a5764"
 dependencies = [
  "oxiarc-core",
 ]
 
 [[package]]
 name = "oxiarc-lzma"
-version = "0.2.8"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60a2f8e3478440da4d48af154d1b0ace59d3975f294299d2d4a1c32f844198cb"
+checksum = "41b62ce7b597baf44b03171ce0f229656513e965b3abbaa9a7ebaac8b2188299"
 dependencies = [
  "oxiarc-core",
 ]
 
 [[package]]
 name = "oxiarc-snappy"
-version = "0.2.8"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea8417267d4714662055168f32862c65ca935c78d81bfa5d86c4d7037fcf38d6"
+checksum = "817dda4c061a39c70d028dabf52b70e15b660513a61d6e8cedae7192f9fec111"
 dependencies = [
  "oxiarc-core",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "oxiarc-zstd"
-version = "0.2.8"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "843bcf00f00acaa23607a0feba6713951889c9d52233971c59f77cab5ccc9a9e"
+checksum = "5dfe82b51b13660b3c44c80706eecf7e477bbce3a2b1509a83631a2ca6b955ce"
 dependencies = [
  "oxiarc-core",
 ]
@@ -5091,6 +5093,7 @@ name = "wml2viewer-core"
 version = "0.0.19"
 dependencies = [
  "oxiarc-archive",
+ "oxiarc-lzhuf",
  "wml2",
  "zip",
 ]
