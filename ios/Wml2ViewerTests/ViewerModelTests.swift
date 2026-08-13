@@ -400,6 +400,28 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertNil(thumbnail)
     }
 
+    func testMaterializeCacheEvictsLeastRecentlyUsedEntry() async throws {
+        let cache = MaterializeCache(limitBytes: 8)
+        let first = try await cache.materialize(Data([1, 2, 3, 4]), suggestedExtension: "bin")
+        let second = try await cache.materialize(Data([5, 6, 7, 8]), suggestedExtension: "bin")
+        await cache.touch(first)
+        let third = try await cache.materialize(Data([9, 10, 11, 12]), suggestedExtension: "bin")
+        defer {
+            try? FileManager.default.removeItem(at: first)
+            try? FileManager.default.removeItem(at: second)
+            try? FileManager.default.removeItem(at: third)
+        }
+        #if DEBUG
+        let cachedBytes = await cache.cachedByteCount
+        let cachedFiles = await cache.cachedFileCount
+        XCTAssertEqual(cachedBytes, 8)
+        XCTAssertEqual(cachedFiles, 2)
+        #endif
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: second.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: third.path))
+    }
+
     func testDoubleTapFitOverrideAlternatesWithoutChangingConfiguredFit() {
         let configured = DisplayFit.width
         let first = FitOverridePolicy.next(current: configured)
