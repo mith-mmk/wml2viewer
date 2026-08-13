@@ -25,14 +25,16 @@
 
 今回のSimulator結果:
 
-- iPhone 17 Pro: Swift unit 56 passed、UI 21 passed、iPad専用1 skipped、0 failures
-- iPad Pro 13-inch: Swift unit 56 passed、focused UI 4 passed、0 failures
+- iPhone 17 Pro: Swift unit 59 passed、UI 21 passed、iPad専用1 skipped、0 failures
+- iPad Pro 13-inch: Swift unit 59 passed、focused UI 4 passed、0 failures
 - 見開き中央pixel、0pt/設定値のlayout算術、日本語「見開き間隔」、Files picker、ZIP/LZH/MAGを同じsuiteで回帰
 
 最新のiPhone Simulator focused UIでは、folderの左右移動・filmstrip、空ZIP後の復帰、設定画面の3件を連続実行し、3/3 passed。英日String Catalogと`.strings`のkey集合は77件で一致する。
 
 設定カテゴリ統合後のiPhone Japanese UI test（設定表示・見開き間隔）は1/1 passed。
 ジェスチャー仲裁の依存関係（pinch > pan > swipe > long press > double tap > single zone tap）を明示した後、同じiPhone focused UI 3件とDocument Browser管理導線1件がそれぞれ成功した。device向けarm64 Debug buildも成功した。
+
+3x3の既定割当を`TouchMapConfig`として`MobileConfigV1`へ追加し、Androidと同じ安全な`ViewerAction`集合（前後、先頭/末尾、zoom、fit、animation、grayscale、manga、Files、設定、filmstrip、quick menu、export、reload、disabled）を設定画面から変更できるようにした。double tap / long pressも同じdispatcherへ接続し、旧設定JSONは既定値へ移行する。追加Swift unit 3件を含むViewerModelTests 59件、iPhoneの3x3前後/filmstrip・エラー復帰・日本語UI 4件が0 failuresで通過した。
 
 ## 2026-08-14 実機Provider受入追記
 
@@ -66,7 +68,7 @@ local/iCloud/third-partyでは復帰可能エラー後の再表示も確認し�
 | TAP-01 | 3×3上中央 | fixtureを開きsurface上端中央をタップ | `OPEN_FILER` | chrome表示時はgesture overlayの外。OS pickerが開くかを専用fixtureで確認する必要がある |
 | TAP-02 | 3×3中央中央 | surface中央をタップ | `OPEN_SETTINGS` | resolverとUIテストを追加済み。chromeボタンを経由しない座標tapで確認する |
 | TAP-03 | 3×3下中央 | surface下端中央をタップ | `OPEN_SUBFILER` | 現テストはbottom chromeのfilmstripボタンを拾う可能性があるため、chrome非表示fixtureが必要 |
-| TAP-04 | 全9セル | 9セルを順番にタップ | Androidの`TouchMapConfig`割当 | `TouchZoneResolver`の9セルunit testを追加済み。surface座標からのdispatchは未完了 |
+| TAP-04 | 全9セル | 9セルを順番にタップ | Androidの`TouchMapConfig`割当 | `TouchMapConfig`の9セル設定とsurface座標dispatch、unit/UI回帰を実装済み |
 | GEST-01 | swipe既定値 | 1本指の左右スワイプ | 既定OFF、zoom中は無効 | `ViewerSurface`は常時ページ送り |
 | GEST-02 | double tap | 同じ場所を2回タップ | fit modeの一時切替 | iOSはzoomを1↔2へ変更 |
 | GEST-03 | long press | surfaceを0.45秒長押し | quick menu | iOSはfilmstripを開く |

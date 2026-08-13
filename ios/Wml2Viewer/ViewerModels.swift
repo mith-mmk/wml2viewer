@@ -339,6 +339,9 @@ struct MobileConfigV1: Codable, Equatable {
     var pinchZoomEnabled = true
     var panEnabled = true
     var longPressQuickMenuEnabled = true
+    var touchMap = TouchMapConfig()
+    var doubleTapAction: ViewerAction = .toggleFitMode
+    var longPressAction: ViewerAction = .openContextMenu
 
     var locale: Locale {
         language == "system" ? .autoupdatingCurrent : Locale(identifier: language)
@@ -348,7 +351,7 @@ struct MobileConfigV1: Codable, Equatable {
         case schemaVersion, fit, showTopChrome, showFilmstrip, keepScreenOn, mangaEnabled, mangaRTL,
              coverAlone, prefetchSpreads, mangaPageSpacing, theme, language, rememberLastLocation, cacheLimitBytes,
              codecRouting, touchZonesEnabled, swipeEnabled, pinchZoomEnabled, panEnabled,
-             longPressQuickMenuEnabled
+             longPressQuickMenuEnabled, touchMap, doubleTapAction, longPressAction
     }
 
     init() {}
@@ -378,20 +381,114 @@ struct MobileConfigV1: Codable, Equatable {
         pinchZoomEnabled = try c.decodeIfPresent(Bool.self, forKey: .pinchZoomEnabled) ?? true
         panEnabled = try c.decodeIfPresent(Bool.self, forKey: .panEnabled) ?? true
         longPressQuickMenuEnabled = try c.decodeIfPresent(Bool.self, forKey: .longPressQuickMenuEnabled) ?? true
+        touchMap = try c.decodeIfPresent(TouchMapConfig.self, forKey: .touchMap) ?? TouchMapConfig()
+        doubleTapAction = try c.decodeIfPresent(ViewerAction.self, forKey: .doubleTapAction) ?? .toggleFitMode
+        longPressAction = try c.decodeIfPresent(ViewerAction.self, forKey: .longPressAction) ?? .openContextMenu
     }
 }
 
-enum ViewerAction: Equatable {
+enum ViewerAction: String, Codable, CaseIterable, Equatable {
+    case none
     case previous
     case next
+    case first
+    case last
+    case zoomIn
+    case zoomOut
+    case zoomReset
+    case toggleFitMode
+    case toggleAnimation
+    case toggleGrayscale
+    case toggleMangaMode
     case openFiler
     case settings
     case filmstrip
+    case openContextMenu
+    case export
+    case reload
+
+    func localizedLabel(locale: Locale = .autoupdatingCurrent) -> String {
+        switch self {
+        case .none: String(localized: "None", locale: locale)
+        case .previous: String(localized: "Previous page", locale: locale)
+        case .next: String(localized: "Next page", locale: locale)
+        case .first: String(localized: "First page", locale: locale)
+        case .last: String(localized: "Last page", locale: locale)
+        case .zoomIn: String(localized: "Zoom in", locale: locale)
+        case .zoomOut: String(localized: "Zoom out", locale: locale)
+        case .zoomReset: String(localized: "Reset zoom", locale: locale)
+        case .toggleFitMode: String(localized: "Toggle fit mode", locale: locale)
+        case .toggleAnimation: String(localized: "Toggle animation", locale: locale)
+        case .toggleGrayscale: String(localized: "Toggle grayscale", locale: locale)
+        case .toggleMangaMode: String(localized: "Toggle manga mode", locale: locale)
+        case .openFiler: String(localized: "Open Files", locale: locale)
+        case .settings: String(localized: "Settings", locale: locale)
+        case .filmstrip: String(localized: "Pages", locale: locale)
+        case .openContextMenu: String(localized: "Quick menu", locale: locale)
+        case .export: String(localized: "Export", locale: locale)
+        case .reload: String(localized: "Reload", locale: locale)
+        }
+    }
 }
 
-struct TouchZone: Equatable {
+struct TouchZone: Equatable, Hashable, Codable {
     let row: Int
     let column: Int
+
+    static var all: [TouchZone] {
+        (0..<3).flatMap { row in (0..<3).map { TouchZone(row: row, column: $0) } }
+    }
+
+    var storageKey: String { "\(row),\(column)" }
+
+    func localizedLabel(locale: Locale = .autoupdatingCurrent) -> String {
+        switch storageKey {
+        case "0,0": String(localized: "Touch zone 1,1", locale: locale)
+        case "0,1": String(localized: "Touch zone 1,2", locale: locale)
+        case "0,2": String(localized: "Touch zone 1,3", locale: locale)
+        case "1,0": String(localized: "Touch zone 2,1", locale: locale)
+        case "1,1": String(localized: "Touch zone 2,2", locale: locale)
+        case "1,2": String(localized: "Touch zone 2,3", locale: locale)
+        case "2,0": String(localized: "Touch zone 3,1", locale: locale)
+        case "2,1": String(localized: "Touch zone 3,2", locale: locale)
+        case "2,2": String(localized: "Touch zone 3,3", locale: locale)
+        default: String(localized: "Touch", locale: locale)
+        }
+    }
+}
+
+struct TouchMapConfig: Codable, Equatable {
+    private(set) var bindings: [String: ViewerAction]
+
+    init(bindings: [String: ViewerAction] = Self.defaultBindings) {
+        self.bindings = bindings
+    }
+
+    func action(for zone: TouchZone) -> ViewerAction {
+        bindings[zone.storageKey] ?? .none
+    }
+
+    func setting(zone: TouchZone, action: ViewerAction) -> TouchMapConfig {
+        var copy = self
+        copy.bindings[zone.storageKey] = action
+        return copy
+    }
+
+    static var defaultBindings: [String: ViewerAction] {
+        [
+            TouchZone(row: 0, column: 0): .previous,
+            TouchZone(row: 0, column: 1): .openFiler,
+            TouchZone(row: 0, column: 2): .next,
+            TouchZone(row: 1, column: 0): .previous,
+            TouchZone(row: 1, column: 1): .settings,
+            TouchZone(row: 1, column: 2): .next,
+            TouchZone(row: 2, column: 0): .previous,
+            TouchZone(row: 2, column: 1): .filmstrip,
+            TouchZone(row: 2, column: 2): .next,
+        ].reduce(into: [String: ViewerAction]()) { result, item in
+            result[item.key.storageKey] = item.value
+        }
+    }
 }
 
 enum TouchZoneResolver {
@@ -408,14 +505,7 @@ enum TouchZoneResolver {
     /// Physical left/right placement deliberately does not mirror in RTL locales.
     static func defaultAction(row: Int, column: Int) -> ViewerAction? {
         guard (0..<3).contains(row), (0..<3).contains(column) else { return nil }
-        if column == 0 { return .previous }
-        if column == 2 { return .next }
-        switch row {
-        case 0: return .openFiler
-        case 1: return .settings
-        case 2: return .filmstrip
-        default: return nil
-        }
+        return TouchMapConfig().action(for: TouchZone(row: row, column: column))
     }
 }
 

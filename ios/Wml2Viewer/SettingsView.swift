@@ -41,6 +41,27 @@ struct SettingsView: View {
                     Toggle(String(localized: "Pinch zoom", locale: store.config.locale), isOn: Binding(get: { store.config.pinchZoomEnabled }, set: { var c = store.config; c.pinchZoomEnabled = $0; store.update(c) }))
                     Toggle(String(localized: "Pan while zoomed", locale: store.config.locale), isOn: Binding(get: { store.config.panEnabled }, set: { var c = store.config; c.panEnabled = $0; store.update(c) }))
                     Toggle(String(localized: "Long press quick menu", locale: store.config.locale), isOn: Binding(get: { store.config.longPressQuickMenuEnabled }, set: { var c = store.config; c.longPressQuickMenuEnabled = $0; store.update(c) }))
+                    Picker(String(localized: "Double tap action", locale: store.config.locale), selection: Binding(get: { store.config.doubleTapAction }, set: { var c = store.config; c.doubleTapAction = $0; store.update(c) })) {
+                        ForEach(ViewerAction.allCases, id: \.self) { action in
+                            Text(action.localizedLabel(locale: store.config.locale)).tag(action)
+                        }
+                    }
+                    Picker(String(localized: "Long press action", locale: store.config.locale), selection: Binding(get: { store.config.longPressAction }, set: { var c = store.config; c.longPressAction = $0; store.update(c) })) {
+                        ForEach(ViewerAction.allCases, id: \.self) { action in
+                            Text(action.localizedLabel(locale: store.config.locale)).tag(action)
+                        }
+                    }
+                    ForEach(TouchZone.all, id: \.self) { zone in
+                        Picker(zone.localizedLabel(locale: store.config.locale), selection: Binding(get: { store.config.touchMap.action(for: zone) }, set: { action in
+                            var c = store.config
+                            c.touchMap = c.touchMap.setting(zone: zone, action: action)
+                            store.update(c)
+                        })) {
+                            ForEach(ViewerAction.allCases, id: \.self) { action in
+                                Text(action.localizedLabel(locale: store.config.locale)).tag(action)
+                            }
+                        }
+                    }
                     Stepper("\(String(localized: "Prefetch spreads", locale: store.config.locale)): \(store.config.prefetchSpreads)", value: Binding(get: { store.config.prefetchSpreads }, set: { var c = store.config; c.prefetchSpreads = $0; store.update(c) }), in: 0...8)
                 }
                 Section(String(localized: "Files and restoration", locale: store.config.locale)) {

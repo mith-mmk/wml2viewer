@@ -5,7 +5,6 @@ struct ViewerSurface: View {
     var filmstripIsPinned = false
     @State private var dragStart: CGSize = .zero
     @State private var gestureScale: CGFloat = 1
-    @State private var runtimeFit: DisplayFit?
 
     var body: some View {
         GeometryReader { geometry in
@@ -19,7 +18,7 @@ struct ViewerSurface: View {
                                 CGSize(width: $0.width, height: $0.height)
                             },
                             surfaceSize: size,
-                            fit: runtimeFit ?? store.config.fit,
+                            fit: store.runtimeFit ?? store.config.fit,
                             spacing: images.count > 1
                                 ? CGFloat(store.config.mangaPageSpacing) : 0
                         )
@@ -56,22 +55,16 @@ struct ViewerSurface: View {
                         if ended { dragStart = store.pan }
                     },
                     onSwipe: { direction in direction == .left ? store.next() : store.previous() },
-                    onLongPress: { if store.config.longPressQuickMenuEnabled { store.showQuickMenu = true } },
-                    onDoubleTap: {
-                        runtimeFit = (runtimeFit ?? store.config.fit) == .original ? .contain : .original
-                        store.zoom = 1
-                        store.pan = .zero
+                    onLongPress: {
+                        if store.config.longPressQuickMenuEnabled {
+                            store.perform(store.config.longPressAction)
+                        }
                     },
+                    onDoubleTap: { store.perform(store.config.doubleTapAction) },
                     onZoneTap: { row, col in
                         guard store.config.touchZonesEnabled, store.interactionReady else { return }
-                        switch TouchZoneResolver.defaultAction(row: row, column: col) {
-                        case .previous: store.previous()
-                        case .next: store.next()
-                        case .openFiler: store.requestFilePicker()
-                        case .settings: store.showSettings = true
-                        case .filmstrip: store.openFilmstrip()
-                        case nil: break
-                        }
+                        let zone = TouchZone(row: row, column: col)
+                        store.perform(store.config.touchMap.action(for: zone))
                     },
                     onGenerationChanged: { dragStart = .zero }
                 )
@@ -83,7 +76,6 @@ struct ViewerSurface: View {
             .onAppear { store.updateViewport(geometry.size) }
             .onChange(of: geometry.size) { _, size in store.updateViewport(size) }
         }
-        .onChange(of: store.currentIndex) { _, _ in runtimeFit = nil }
         .toolbar(.hidden, for: .navigationBar)
     }
 

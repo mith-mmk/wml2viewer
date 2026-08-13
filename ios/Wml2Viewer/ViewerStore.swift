@@ -41,6 +41,7 @@ final class ViewerStore: ObservableObject {
     @Published private(set) var thumbnails: [String: CGImage] = [:]
     @Published var zoom: CGFloat = 1
     @Published var pan: CGSize = .zero
+    @Published private(set) var runtimeFit: DisplayFit?
     @Published private(set) var config = MobileConfigV1()
 
     #if DEBUG
@@ -831,6 +832,7 @@ final class ViewerStore: ObservableObject {
     func next() {
         guard !pages.isEmpty else { return }
         clearTransientSourceMessagesForNavigation()
+        runtimeFit = nil
         let previousIndex = currentIndex
         folderTraversalDirection = .forward
         let proposedIndex = readingPlan?.nextAnchorIndex ?? min(currentIndex + 1, pages.count - 1)
@@ -843,6 +845,57 @@ final class ViewerStore: ObservableObject {
         #endif
         loadCurrent()
         persistCurrentLocation()
+    }
+
+    /// Executes an Android-compatible safe viewer action. File management
+    /// remains OS-owned: the only file action exposed here is opening the
+    /// mixed Files picker, while destructive operations stay in Document
+    /// Browser's quick-menu entry.
+    func perform(_ action: ViewerAction) {
+        switch action {
+        case .none:
+            return
+        case .previous:
+            previous()
+        case .next:
+            next()
+        case .first:
+            select(index: 0)
+        case .last:
+            select(index: max(0, pages.count - 1))
+        case .zoomIn:
+            zoom = min(8, max(1, zoom * 1.25))
+        case .zoomOut:
+            zoom = max(1, zoom / 1.25)
+            if zoom == 1 { pan = .zero }
+        case .zoomReset:
+            zoom = 1
+            pan = .zero
+        case .toggleFitMode:
+            runtimeFit = (runtimeFit ?? config.fit) == .original ? .contain : .original
+            zoom = 1
+            pan = .zero
+        case .toggleAnimation:
+            toggleAnimation()
+        case .toggleGrayscale:
+            toggleGrayscale()
+        case .toggleMangaMode:
+            var updated = config
+            updated.mangaEnabled.toggle()
+            update(updated)
+        case .openFiler:
+            requestFilePicker()
+        case .settings:
+            showSettings = true
+        case .filmstrip:
+            openFilmstrip()
+        case .openContextMenu:
+            showQuickMenu = true
+        case .export:
+            prepareExport()
+        case .reload:
+            retryCurrentSource()
+        }
     }
 
     func toggleAnimation() {
@@ -926,6 +979,7 @@ final class ViewerStore: ObservableObject {
     func previous() {
         guard !pages.isEmpty else { return }
         clearTransientSourceMessagesForNavigation()
+        runtimeFit = nil
         let previousIndex = currentIndex
         folderTraversalDirection = .backward
         let proposedIndex = readingPlan?.previousAnchorIndex ?? max(currentIndex - 1, 0)
@@ -955,6 +1009,7 @@ final class ViewerStore: ObservableObject {
     func select(index: Int) {
         guard pages.indices.contains(index) else { return }
         clearTransientSourceMessagesForNavigation()
+        runtimeFit = nil
         folderTraversalDirection = index < currentIndex ? .backward : .forward
         currentIndex = index
         showFilmstrip = false

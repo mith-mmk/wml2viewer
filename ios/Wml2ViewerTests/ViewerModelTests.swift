@@ -226,6 +226,50 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertNil(TouchZoneResolver.zone(at: CGPoint(x: 195, y: 780), in: size))
     }
 
+    func testTouchMapDefaultsAreConfigurableAndPersisted() throws {
+        let center = TouchZone(row: 1, column: 1)
+        var config = MobileConfigV1()
+        XCTAssertEqual(config.touchMap.action(for: center), .settings)
+        config.touchMap = config.touchMap.setting(zone: center, action: .openContextMenu)
+        XCTAssertEqual(config.touchMap.action(for: center), .openContextMenu)
+
+        let restored = try JSONDecoder().decode(
+            MobileConfigV1.self,
+            from: JSONEncoder().encode(config)
+        )
+        XCTAssertEqual(restored.touchMap.action(for: center), .openContextMenu)
+        XCTAssertEqual(restored.doubleTapAction, .toggleFitMode)
+        XCTAssertEqual(restored.longPressAction, .openContextMenu)
+    }
+
+    func testLegacyConfigGetsSafeGestureActionDefaults() throws {
+        let legacy = try JSONDecoder().decode(
+            MobileConfigV1.self,
+            from: Data(#"{"schemaVersion":1,"touchZonesEnabled":true}"#.utf8)
+        )
+        XCTAssertEqual(legacy.touchMap.action(for: TouchZone(row: 0, column: 1)), .openFiler)
+        XCTAssertEqual(legacy.doubleTapAction, .toggleFitMode)
+        XCTAssertEqual(legacy.longPressAction, .openContextMenu)
+    }
+
+    @MainActor
+    func testViewerActionDispatcherSupportsSafeNavigationAndRuntimeControls() {
+        let store = ViewerStore()
+        store.installTestPages(count: 3)
+        store.perform(.last)
+        XCTAssertEqual(store.currentIndex, 2)
+        store.perform(.first)
+        XCTAssertEqual(store.currentIndex, 0)
+        store.perform(.zoomIn)
+        XCTAssertEqual(store.zoom, 1.25, accuracy: 0.001)
+        store.perform(.zoomReset)
+        XCTAssertEqual(store.zoom, 1, accuracy: 0.001)
+        store.perform(.toggleFitMode)
+        XCTAssertEqual(store.runtimeFit, .original)
+        store.perform(.toggleFitMode)
+        XCTAssertEqual(store.runtimeFit, .contain)
+    }
+
     func testConfiguredLanguageProducesExplicitLocale() {
         var config = MobileConfigV1()
         config.language = "ja"
