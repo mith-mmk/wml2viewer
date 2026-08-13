@@ -6,6 +6,8 @@
 
 初回監査で判明した日本語、3×3、gesture、animation、見開き、grayscale、基本export、foreground再列挙は実装済みである。今回さらに、picker完了のexactly-once化、Document Browserの全画面表示、security scope内の`NSFileCoordinator`読取、picker取消後の再列挙、広いiPadの固定filmstrip、codec routingの実decode順への接続を行った。描画はSwiftUI `Canvas`へ移行し、見開きは共通倍率で隣接描画する。既定0ptの綴じ目はiPhone/iPadのpixel回帰、0～64ptの設定値はlayout算術と設定移行testで検証する。
 
+設定カテゴリは`ios.md`の8カテゴリ（Display、Manga、Touch、Files and restoration、Codec、Language and appearance、Cache、About）へ統合し、ThemeはLanguage and appearance内で設定する。独立したAppearanceカテゴリは持たない。
+
 | ID | 残る差分 | `ios.md`要件 | 現状 / 必要な検証 |
 | --- | --- | --- | --- |
 | FILE-01 | Browser lifecycle | 閉じた時にsource再列挙 | 選択・folder picker取消は接続済み。Document Browser自体のprovider固有dismissは実機検証が必要 |
@@ -28,6 +30,8 @@
 - 見開き中央pixel、0pt/設定値のlayout算術、日本語「見開き間隔」、Files picker、ZIP/LZH/MAGを同じsuiteで回帰
 
 最新のiPhone Simulator focused UIでは、folderの左右移動・filmstrip、空ZIP後の復帰、設定画面の3件を連続実行し、3/3 passed。英日String Catalogと`.strings`のkey集合は77件で一致する。
+
+設定カテゴリ統合後のiPhone Japanese UI test（設定表示・見開き間隔）は1/1 passed。
 
 ## 2026-08-14 実機Provider受入追記
 

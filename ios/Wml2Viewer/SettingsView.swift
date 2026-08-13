@@ -50,22 +50,24 @@ struct SettingsView: View {
                         store.requestFolderPicker()
                     }
                 }
-                Section(String(localized: "Appearance", locale: store.config.locale)) {
-                    Picker(String(localized: "Theme", locale: store.config.locale), selection: Binding(get: { store.config.theme }, set: { var c = store.config; c.theme = $0; store.update(c) })) {
-                        ForEach(ThemeMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                    }
-                }
                 Section(String(localized: "Codec", locale: store.config.locale)) {
                     Picker(String(localized: "Routing", locale: store.config.locale), selection: Binding(get: { store.config.codecRouting }, set: { var c = store.config; c.codecRouting = $0; store.update(c) })) {
                         ForEach(["DEFAULT", "INTERNAL_FIRST", "OS_FIRST", "INTERNAL_ONLY", "OS_ONLY"], id: \.self) { Text($0).tag($0) }
                     }
                 }
-                Section(String(localized: "Language and appearance", locale: store.config.locale)) {
+                Section {
+                    Picker(String(localized: "Theme", locale: store.config.locale), selection: Binding(get: { store.config.theme }, set: { var c = store.config; c.theme = $0; store.update(c) })) {
+                        ForEach(ThemeMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    .accessibilityIdentifier("settings.theme")
                     Picker(String(localized: "Language", locale: store.config.locale), selection: Binding(get: { store.config.language }, set: { var c = store.config; c.language = $0; store.update(c) })) {
                         Text(String(localized: "System", locale: store.config.locale)).tag("system")
                         Text("English").tag("en")
                         Text("日本語").tag("ja")
                     }
+                } header: {
+                    Text(String(localized: "Language and appearance", locale: store.config.locale))
+                        .accessibilityIdentifier("settings.languageAppearance")
                 }
                 Section(String(localized: "Cache", locale: store.config.locale)) {
                     Stepper("\(String(localized: "Cache limit", locale: store.config.locale)): \(Int((store.config.cacheLimitBytes ?? 134_217_728) / 1_048_576)) MiB", value: Binding(get: { Int((store.config.cacheLimitBytes ?? 134_217_728) / 1_048_576) }, set: { var c = store.config; c.cacheLimitBytes = UInt64(max(64, min($0, 2048))) * 1_048_576; store.update(c) }), in: 64...2048, step: 64)
