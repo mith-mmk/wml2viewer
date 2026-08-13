@@ -6,6 +6,7 @@ actor MaterializeCache {
     private struct Entry {
         let size: Int
         var lastAccess: UInt64
+        var pinCount: Int
     }
 
     private var limit: Int
@@ -29,7 +30,7 @@ actor MaterializeCache {
         let url = root.appendingPathComponent("materialized-\(UUID().uuidString).\(suggestedExtension)")
         try data.write(to: url, options: .atomic)
         clock &+= 1
-        files[url] = Entry(size: data.count, lastAccess: clock)
+        files[url] = Entry(size: data.count, lastAccess: clock, pinCount: 0)
         bytes += data.count
         evictIfNeeded()
         return url
@@ -40,6 +41,19 @@ actor MaterializeCache {
         clock &+= 1
         entry.lastAccess = clock
         files[url] = entry
+    }
+
+    func pin(_ url: URL) {
+        guard var entry = files[url] else { return }
+        entry.pinCount += 1
+        files[url] = entry
+    }
+
+    func unpin(_ url: URL) {
+        guard var entry = files[url] else { return }
+        entry.pinCount = max(0, entry.pinCount - 1)
+        files[url] = entry
+        evictIfNeeded()
     }
 
     func remove(_ url: URL) {
@@ -60,7 +74,9 @@ actor MaterializeCache {
 
     private func evictIfNeeded() {
         while bytes > limit,
-              let victim = files.min(by: { $0.value.lastAccess < $1.value.lastAccess })?.key {
+              let victim = files
+                  .filter({ $0.value.pinCount == 0 })
+                  .min(by: { $0.value.lastAccess < $1.value.lastAccess })?.key {
             remove(victim)
         }
     }

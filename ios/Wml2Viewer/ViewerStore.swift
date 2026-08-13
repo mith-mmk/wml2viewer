@@ -1360,11 +1360,15 @@ final class ViewerStore: ObservableObject {
         listedPages: [PageItem],
         preferredIndex: Int
     ) throws {
+        let previousArchiveURL = archiveURL
         nativeArchive?.close()
         nativeSession?.close()
         nativeArchive = nil
         nativeSession = nil
         archiveURL = nil
+        if let previousArchiveURL {
+            Task { await MaterializeCache.shared.unpin(previousArchiveURL) }
+        }
         archiveParentPages = nil
         listedManifestItem = nil
         sourceGeneration += 1
@@ -1775,6 +1779,8 @@ final class ViewerStore: ObservableObject {
                         data,
                         suggestedExtension: item.url.pathExtension
                     )
+                    await MaterializeCache.shared.pin(localURL)
+                    defer { Task { await MaterializeCache.shared.unpin(localURL) } }
                     let session = try NativeSession()
                     defer { session.close() }
                     let request = try session.nextRequest()
@@ -1841,8 +1847,12 @@ final class ViewerStore: ObservableObject {
             entryIndices.append(index)
         }
         guard !entries.isEmpty else { throw DocumentSourceError.unsupportedItem }
+        await MaterializeCache.shared.pin(cache)
         await MainActor.run {
-            guard self.sourceGeneration == generation else { return }
+            guard self.sourceGeneration == generation else {
+                Task { await MaterializeCache.shared.unpin(cache) }
+                return
+            }
             self.archiveParentPages = self.pages
             self.pages = entries
             self.currentIndex = 0
