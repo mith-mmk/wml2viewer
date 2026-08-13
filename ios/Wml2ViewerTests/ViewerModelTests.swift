@@ -302,7 +302,7 @@ final class ViewerModelTests: XCTestCase {
     }
 
     @MainActor
-    func testFolderPickerIsQueuedUntilDocumentBrowserDismisses() async {
+    func testFolderPickerIsQueuedUntilPrimaryPickerDismisses() async {
         let store = ViewerStore()
         let selected = URL(fileURLWithPath: "/provider/folder/002.png")
         let primaryID = try! XCTUnwrap(store.installQueuedFolderPickerForTest(selectedURL: selected))

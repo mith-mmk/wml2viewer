@@ -57,6 +57,8 @@ disk、network、File Provider download、native decode、全画面pixel変換�
 
 3×3上中央の標準open actionには、ファイルとフォルダの両方を選択できる`UIDocumentPickerViewController`を使用する。フォルダをsourceとして選択できることを通常導線とし、画像1ファイルのsecurity scopeから親フォルダや兄弟項目を推測しない。
 
+`UIFileSharingEnabled`を有効にし、アプリのDocumentsを「このiPhone/iPad内」とFinderのファイル共有へ公開する。ユーザーがFiles経由でWML2ViewerのDocumentsへ配置したフォルダも、他のFile Providerと同じDocument Picker入口から選択できるようにする。設定、bookmark、cache、一時materializeはDocumentsへ保存せず、Application SupportまたはCachesへ分離する。
+
 copy、move、rename、delete、shareを行う管理画面には`UIDocumentBrowserViewController`を使用し、long press quick menuの「ファイル管理」から全画面で提示する。同等のファイル操作UIはアプリ内に実装しない。
 
 - 公式仕様: [UIDocumentBrowserAction](https://developer.apple.com/documentation/uikit/uidocumentbrowseraction)

@@ -40,6 +40,10 @@ final class ViewerStore: ObservableObject {
     @Published var pan: CGSize = .zero
     @Published private(set) var config = MobileConfigV1()
 
+    #if DEBUG
+    @Published private(set) var uiTestPickerFixtureReady = false
+    #endif
+
     private let bookmarks = BookmarkStore()
     private let configStore = ConfigStore()
     private var source: SecurityScopedDocumentSource?
@@ -65,6 +69,10 @@ final class ViewerStore: ObservableObject {
         subsystem: "io.github.mith-mmk.wml2viewer",
         category: "FilesOpenFlow"
     )
+
+    #if DEBUG
+    private var uiTestPickerInitialDirectoryURL: URL?
+    #endif
 
     var isPickerPresented: Bool { filesOpenPhase.blocksViewerInput }
 
@@ -129,8 +137,15 @@ final class ViewerStore: ObservableObject {
         let folderFixture = environment["WML2VIEWER_UI_TEST_FIXTURE_FOLDER"] == "1"
         let errorFixture = environment["WML2VIEWER_UI_TEST_FIXTURE_UNSUPPORTED"] == "1"
         let archiveFormat = environment["WML2VIEWER_UI_TEST_FIXTURE_ARCHIVE"]
-        guard folderFixture || errorFixture || archiveFormat != nil else { return }
+        let pickerFolderName = environment["WML2VIEWER_UI_TEST_PICKER_FOLDER_NAME"]
+        guard folderFixture || errorFixture || archiveFormat != nil || pickerFolderName != nil else {
+            return
+        }
         do {
+            if let pickerFolderName {
+                try installUITestPickerFixture(named: pickerFolderName)
+                return
+            }
             let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("ui-folder-fixture", isDirectory: true)
             try? FileManager.default.removeItem(at: directory)
@@ -167,20 +182,10 @@ final class ViewerStore: ObservableObject {
                 try await open(source: fixture, preferredIndex: 0)
                 return
             }
-            let colors: [[UInt8]] = [[0xE8, 0x4A, 0x5F, 0xFF], [0x4A, 0x90, 0xE2, 0xFF], [0x50, 0xC8, 0x78, 0xFF]]
+            let colors = Self.uiTestFixtureColors
             for (index, color) in (folderFixture ? colors : []).enumerated() {
-                let data = Data(color)
-                guard let provider = CGDataProvider(data: data as CFData),
-                      let image = CGImage(
-                          width: 1, height: 1, bitsPerComponent: 8, bitsPerPixel: 32,
-                          bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
-                          bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                          provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
-                      ) else { continue }
                 let url = directory.appendingPathComponent(String(format: "page-%02d.png", index + 1))
-                guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else { continue }
-                CGImageDestinationAddImage(destination, image, nil)
-                _ = CGImageDestinationFinalize(destination)
+                try Self.writeUITestPNG(color: color, to: url)
             }
             let fixture = SecurityScopedDocumentSource(
                 sourceID: UUID(), displayName: "UI fixture", rootURL: directory, isFolder: true
@@ -191,10 +196,66 @@ final class ViewerStore: ObservableObject {
             errorMessage = error.localizedDescription
         }
     }
+
+    private static let uiTestFixtureColors: [[UInt8]] = [
+        [0xE8, 0x4A, 0x5F, 0xFF],
+        [0x4A, 0x90, 0xE2, 0xFF],
+        [0x50, 0xC8, 0x78, 0xFF],
+    ]
+
+    private func installUITestPickerFixture(named folderName: String) throws {
+        guard !folderName.isEmpty,
+              folderName != ".",
+              folderName != "..",
+              !folderName.contains("/") else {
+            throw CocoaError(.fileWriteInvalidFileName)
+        }
+        let documents = try FileManager.default.url(
+            for: .documentDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = documents.appendingPathComponent(folderName, isDirectory: true)
+        if FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.removeItem(at: directory)
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        for (index, color) in Self.uiTestFixtureColors.enumerated() {
+            let url = directory.appendingPathComponent(String(format: "page-%02d.png", index + 1))
+            try Self.writeUITestPNG(color: color, to: url)
+        }
+        uiTestPickerInitialDirectoryURL = documents
+        uiTestPickerFixtureReady = true
+    }
+
+    private static func writeUITestPNG(color: [UInt8], to url: URL) throws {
+        let data = Data(color)
+        guard let provider = CGDataProvider(data: data as CFData),
+              let image = CGImage(
+                  width: 1, height: 1, bitsPerComponent: 8, bitsPerPixel: 32,
+                  bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                  provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
+              ),
+              let destination = CGImageDestinationCreateWithURL(
+                  url as CFURL, UTType.png.identifier as CFString, 1, nil
+              ) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+    }
     #endif
 
     func requestFilePicker() {
+        #if DEBUG
+        beginPicker(.openTarget, initialDirectoryURL: uiTestPickerInitialDirectoryURL)
+        #else
         beginPicker(.openTarget)
+        #endif
     }
 
     func requestFolderPicker() {
@@ -548,9 +609,24 @@ final class ViewerStore: ObservableObject {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let bookmark = try url.bookmarkData(options: [.suitableForBookmarkFile], includingResourceValuesForKeys: nil, relativeTo: nil)
         let newSource = SecurityScopedDocumentSource(sourceID: UUID(), displayName: url.lastPathComponent, rootURL: url, isFolder: isFolder)
-        let snapshot = try await newSource.snapshot()
+        let snapshot: SourceSnapshot
+        do {
+            snapshot = try await newSource.snapshot()
+        } catch {
+            let cocoaError = error as NSError
+            filesLog.error(
+                "source snapshot failed: folder=\(isFolder, privacy: .public) domain=\(cocoaError.domain, privacy: .public) code=\(cocoaError.code, privacy: .public)"
+            )
+            throw error
+        }
+        filesLog.info(
+            "source snapshot: folder=\(isFolder, privacy: .public) enumerated=\(snapshot.enumeratedItemCount, privacy: .public) supported=\(snapshot.supportedItemCount, privacy: .public)"
+        )
         let listedPages = snapshot.entries
         guard !listedPages.isEmpty else {
+            filesLog.error(
+                "source snapshot empty: folder=\(isFolder, privacy: .public) enumerated=\(snapshot.enumeratedItemCount, privacy: .public)"
+            )
             throw isFolder ? DocumentSourceError.noSupportedItems : DocumentSourceError.unsupportedItem
         }
         let preferredIndex: Int

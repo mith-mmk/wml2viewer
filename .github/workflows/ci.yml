@@ -197,8 +197,14 @@ jobs:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
       - name: test Rust workspace
         run: cargo test --workspace --locked
-      - name: build iOS app (unsigned device)
-        run: xcodebuild -project ios/Wml2Viewer.xcodeproj -scheme Wml2Viewer -sdk iphoneos -configuration Debug -derivedDataPath "$RUNNER_TEMP/.test-xcode" CODE_SIGNING_ALLOWED=NO build
+      - name: build iOS app (unsigned Release device)
+        run: xcodebuild -project ios/Wml2Viewer.xcodeproj -scheme Wml2Viewer -sdk iphoneos -configuration Release -derivedDataPath "$RUNNER_TEMP/.test-xcode-release" CODE_SIGNING_ALLOWED=NO build
+      - name: verify Release excludes UI test fixtures
+        run: |
+          app="$RUNNER_TEMP/.test-xcode-release/Build/Products/Release-iphoneos/Wml2Viewer.app"
+          test -d "$app"
+          test "$(plutil -extract UIFileSharingEnabled raw -o - "$app/Info.plist")" = true
+          ! strings "$app/Wml2Viewer" | grep -E 'WML2VIEWER_UI_TEST_PICKER_FOLDER_NAME|uiTest\.pickerFixtureReady|Picker Continuous Pages'
       - name: build iOS Simulator tests
         run: xcodebuild -project ios/Wml2Viewer.xcodeproj -scheme Wml2Viewer -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -configuration Debug -derivedDataPath "$RUNNER_TEMP/.test-xcode-simulator" CODE_SIGNING_ALLOWED=NO build-for-testing
       - name: verify iOS C ABI header

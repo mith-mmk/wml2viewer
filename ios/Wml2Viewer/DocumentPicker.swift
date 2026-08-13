@@ -17,8 +17,8 @@ struct SystemDocumentPicker: UIViewControllerRepresentable {
         let controller = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
         controller.delegate = context.coordinator
         controller.allowsMultipleSelection = false
-        if presentation.request == .containingFolder {
-            controller.directoryURL = presentation.initialDirectoryURL
+        if let initialDirectoryURL = presentation.initialDirectoryURL {
+            controller.directoryURL = initialDirectoryURL
         }
         return controller
     }

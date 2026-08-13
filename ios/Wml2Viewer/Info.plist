@@ -14,6 +14,7 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key><true/>
 	<key>UILaunchScreen</key><dict/>
 	<key>LSSupportsOpeningDocumentsInPlace</key><true/>
+	<key>UIFileSharingEnabled</key><true/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

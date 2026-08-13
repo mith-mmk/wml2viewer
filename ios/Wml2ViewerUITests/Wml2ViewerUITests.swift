@@ -2,6 +2,11 @@ import XCTest
 import UIKit
 
 final class Wml2ViewerUITests: XCTestCase {
+    private enum PickerFixture {
+        static let folderName = "Picker Continuous Pages"
+        static let pageNames = ["page-01.png", "page-02.png", "page-03.png"]
+    }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -44,6 +49,145 @@ final class Wml2ViewerUITests: XCTestCase {
             object: surface
         )
         XCTAssertEqual(XCTWaiter.wait(for: [browserPresented], timeout: 10), .completed)
+    }
+
+    func testOSPickerFolderSelectionConnectsThreePageSource() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_LANGUAGE"] = "en"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_PICKER_FOLDER_NAME"] = PickerFixture.folderName
+        app.launch()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["uiTest.pickerFixtureReady"]
+                .waitForExistence(timeout: 10),
+            "The picker fixture was not seeded"
+        )
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+
+        let folder = app.cells.matching(
+            NSPredicate(format: "identifier == %@", "\(PickerFixture.folderName), Folder")
+        ).firstMatch
+        XCTAssertTrue(folder.waitForExistence(timeout: 15), pickerFailureDescription(app))
+        folder.tap()
+
+        let firstPage = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier == 'viewer.currentImage' AND label == %@",
+                PickerFixture.pageNames[0]
+            )
+        ).firstMatch
+        if !firstPage.waitForExistence(timeout: 2) {
+            let openButton = app.buttons.matching(
+                NSPredicate(format: "label == 'Open' OR label == '開く'")
+            ).firstMatch
+            XCTAssertTrue(openButton.waitForExistence(timeout: 10), pickerFailureDescription(app))
+            openButton.tap()
+        }
+
+        XCTAssertTrue(firstPage.waitForExistence(timeout: 15), pickerFailureDescription(app))
+        XCTAssertEqual(surface.value as? String, "1 / 3")
+
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let secondPage = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier == 'viewer.currentImage' AND label == %@",
+                PickerFixture.pageNames[1]
+            )
+        ).firstMatch
+        XCTAssertTrue(secondPage.waitForExistence(timeout: 10))
+
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82)).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["filmstrip.panel"].waitForExistence(timeout: 5))
+        for (index, pageName) in PickerFixture.pageNames.enumerated() {
+            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", pageName)).firstMatch.exists)
+            XCTAssertTrue(
+                app.descendants(matching: .any)["filmstrip.thumbnail.\(index)"]
+                    .waitForExistence(timeout: 10)
+            )
+        }
+    }
+
+    func testOSPickerImageThenContainingFolderPreservesMiddlePage() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_LANGUAGE"] = "en"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_PICKER_FOLDER_NAME"] = PickerFixture.folderName
+        app.launch()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["uiTest.pickerFixtureReady"]
+                .waitForExistence(timeout: 10)
+        )
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+
+        let folder = app.cells.matching(
+            NSPredicate(format: "identifier == %@", "\(PickerFixture.folderName), Folder")
+        ).firstMatch
+        XCTAssertTrue(folder.waitForExistence(timeout: 15), pickerFailureDescription(app))
+        folder.tap()
+
+        let selectedName = PickerFixture.pageNames[1]
+        let selectedURL = URL(fileURLWithPath: selectedName)
+        let pickerIdentifier = "\(selectedURL.deletingPathExtension().lastPathComponent), \(selectedURL.pathExtension)"
+        let selectedFile = app.cells.matching(
+            NSPredicate(format: "identifier == %@", pickerIdentifier)
+        ).firstMatch
+        XCTAssertTrue(selectedFile.waitForExistence(timeout: 10), pickerFailureDescription(app))
+        selectedFile.tap()
+
+        let selectedImage = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier == 'viewer.currentImage' AND label == %@",
+                selectedName
+            )
+        ).firstMatch
+        if !selectedImage.waitForExistence(timeout: 2) {
+            let openSelectedFile = app.buttons.matching(
+                NSPredicate(format: "label == 'Open' OR label == '開く'")
+            ).firstMatch
+            XCTAssertTrue(openSelectedFile.waitForExistence(timeout: 10), pickerFailureDescription(app))
+            openSelectedFile.tap()
+        }
+
+        XCTAssertTrue(selectedImage.waitForExistence(timeout: 15), pickerFailureDescription(app))
+        let singleSource = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '1 / 1' AND isHittable == false"),
+            object: surface
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [singleSource], timeout: 15), .completed,
+            pickerFailureDescription(app)
+        )
+
+        let authorizeFolder = app.buttons.matching(
+            NSPredicate(format: "label == 'Open' OR label == '開く'")
+        ).firstMatch
+        XCTAssertTrue(authorizeFolder.waitForExistence(timeout: 10), pickerFailureDescription(app))
+        authorizeFolder.tap()
+
+        let promotedSource = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '2 / 3' AND isHittable == true"),
+            object: surface
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [promotedSource], timeout: 15), .completed,
+            pickerFailureDescription(app)
+        )
+        XCTAssertEqual(selectedImage.label, selectedName)
+
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let lastPage = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier == 'viewer.currentImage' AND label == %@",
+                PickerFixture.pageNames[2]
+            )
+        ).firstMatch
+        XCTAssertTrue(lastPage.waitForExistence(timeout: 10))
     }
 
     func testQuickMenuKeepsDocumentBrowserAsFileManagementAction() throws {
@@ -228,5 +372,13 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(image.waitForExistence(timeout: 15), "\(format) entry was not displayed")
         XCTAssertFalse(app.descendants(matching: .any)["viewer.error"].exists)
         return app
+    }
+
+    private func pickerFailureDescription(_ app: XCUIApplication) -> String {
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "UIDocumentPicker failure"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        return "UIDocumentPicker hierarchy:\n\(app.debugDescription)"
     }
 }

@@ -175,6 +175,16 @@ struct ContentView: View {
                     .accessibilityIdentifier("viewer.sourceNotice")
             }
         }
+        #if DEBUG
+        .overlay(alignment: .topLeading) {
+            if store.uiTestPickerFixtureReady {
+                Text("ready")
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+                    .accessibilityIdentifier("uiTest.pickerFixtureReady")
+            }
+        }
+        #endif
         .environment(\.locale, store.config.locale)
         .preferredColorScheme(store.config.theme.colorScheme)
         .onChange(of: scenePhase) { _, phase in
