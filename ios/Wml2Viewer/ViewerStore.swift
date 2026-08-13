@@ -575,6 +575,12 @@ final class ViewerStore: ObservableObject {
                 }
                 sourceConnectionState = .retryableError
                 errorMessage = error.localizedDescription
+                // A failed folder snapshot or an unsupported picker result
+                // must never leave the gesture surface in its pre-open
+                // loading state. Keep the previous source (if any) and make
+                // Files/Settings available for retry.
+                isLoading = false
+                touchReady = true
                 #if DEBUG
                 providerAcceptance?.recoverableError(inputReady: interactionReady)
                 #endif
@@ -791,6 +797,8 @@ final class ViewerStore: ObservableObject {
                 guard self.sourceOpenOperationID == operationID else { return }
                 self.sourceConnectionState = .retryableError
                 self.errorMessage = error.localizedDescription
+                self.isLoading = false
+                self.touchReady = true
                 #if DEBUG
                 self.providerAcceptance?.recoverableError(inputReady: self.interactionReady)
                 #endif
