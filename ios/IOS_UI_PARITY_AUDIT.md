@@ -23,9 +23,11 @@
 
 今回のSimulator結果:
 
-- iPhone 17 Pro: Swift unit 55 passed、UI 21 passed、iPad専用1 skipped、0 failures
-- iPad Pro 13-inch: Swift unit 55 passed、focused UI 4 passed、0 failures
+- iPhone 17 Pro: Swift unit 56 passed、UI 21 passed、iPad専用1 skipped、0 failures
+- iPad Pro 13-inch: Swift unit 56 passed、focused UI 4 passed、0 failures
 - 見開き中央pixel、0pt/設定値のlayout算術、日本語「見開き間隔」、Files picker、ZIP/LZH/MAGを同じsuiteで回帰
+
+最新のiPhone Simulator focused UIでは、folderの左右移動・filmstrip、空ZIP後の復帰、設定画面の3件を連続実行し、3/3 passed。英日String Catalogと`.strings`のkey集合は77件で一致する。
 
 ## 2026-08-14 実機Provider受入追記
 
