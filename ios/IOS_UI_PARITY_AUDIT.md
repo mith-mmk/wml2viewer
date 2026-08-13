@@ -14,10 +14,10 @@
 | FILE-04 | listed file | `.wmltxt`の包含folder要求とrelative containment | `.wmltxt`をself-contained archiveから分離し、包含folder許可後に相対entryを正規化・symlink containment検証してsourceへ接続。manifestの外部変更・復元も対応 |
 | CODEC-01 | capability | 実fixtureによる起動時ImageIO probe | `supports`が固定UTI表のまま |
 | CODEC-02 | animation fallback | OSがposter化した時の内部fallback、`OS_ONLY`明示error | frame列挙はあるが、poster化検出と専用errorが未実装 |
-| EXPORT-01 | export形式 | 利用可能なPNG/JPEG/WebP lossy/losslessだけ提示 | PNG + share sheetのみ。形式選択、encoder probe、期限付きtemp cleanupが未実装 |
+| EXPORT-01 | export形式 | 利用可能なPNG/JPEG/WebP lossy/losslessだけ提示 | PNG + share sheetを実装。形式選択・encoder probeは残差分だが、Exportsの24時間超一時ファイルは生成前にcleanupする |
 | CACHE-01 | materialize policy | auto容量、LRU、lease、最低空き1GiB、backup除外 | 選択項目のみ64MiB上限とLRU eviction、起動時の孤児materialized file掃除を実装。動的空き容量・lease・最低空き1GiBは実機容量依存の残差分 |
 | UI-03 | iPhone landscape | 上部chromeを隠す | 設定値だけで制御し、orientation連動は未実装 |
-| LIFE-01 | memory warning | current spread以外を解放 | observer / purge処理が未実装 |
+| LIFE-01 | memory warning | current spread以外を解放 | UIApplication memory warning observerでthumbnail・in-flight decodeをpurgeし、表示中spreadと入力を維持 |
 | LIFE-02 | 外部rename | opaque IDで現在項目を維持 | pathをIDにしているためrenameは消失扱いとなり、sort上の最寄りへ移動する |
 
 今回のSimulator結果:
