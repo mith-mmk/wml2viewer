@@ -139,14 +139,18 @@ struct SecurityScopedDocumentSource: DocumentSource, @unchecked Sendable {
             return try await coordinatedRead(
                 at: rootURL,
                 cancellation: cancellation
-            ) { coordinatedURL in
+            ) { _ in
                 try cancellation?.checkCancellation()
+                // `NSFileAccessIntent.url` may be a provider-owned temporary
+                // materialization. It is valid only for this coordination
+                // block, so retain the original security-scoped root URL for
+                // all later reads and bookmark restoration.
                 return SourceSnapshot(
                     entries: [PageItem(
-                        id: DocumentEntryIdentity.opaqueIdentifier(for: coordinatedURL),
-                        url: coordinatedURL,
+                        id: DocumentEntryIdentity.opaqueIdentifier(for: rootURL),
+                        url: rootURL,
                         displayName: displayName,
-                        isArchive: Self.isArchive(coordinatedURL)
+                        isArchive: Self.isArchive(rootURL)
                     )],
                     enumeratedItemCount: 1
                 )

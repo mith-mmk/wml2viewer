@@ -61,7 +61,6 @@ final class ViewerStore: ObservableObject {
     private var sourceOpenCancellation: DocumentSourceCancellation?
     private var sourceOpenOperationID: UUID?
     private var sourceOpenPickerContext: (flowID: UUID, presentationID: UUID)?
-    private var pickerDismissalWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var sourceGeneration = 0
     private var viewportGeneration = 0
     private var viewportSize: CGSize = .zero
@@ -72,7 +71,6 @@ final class ViewerStore: ObservableObject {
     private var activeBookmark: ActiveBookmark?
     private var thumbnailRequests: Set<String> = []
     private var flowToFinishAfterDismissal: UUID?
-    private var lastPresentedPickerID: UUID?
     private var configSaveSequence: UInt64 = 0
     private var memoryWarningObserver: NSObjectProtocol?
     private let filesLog = Logger(
@@ -356,7 +354,6 @@ final class ViewerStore: ObservableObject {
             initialDirectoryURL: initialDirectoryURL
         ) else { return }
         pendingPicker = presentation
-        lastPresentedPickerID = presentation.id
         syncPickerPhase()
         #if DEBUG
         if request != .manageFiles { providerAcceptance?.pickerRequested() }
@@ -393,7 +390,18 @@ final class ViewerStore: ObservableObject {
         sourceOpenOperationID = operationID
         sourceOpenCancellation = cancellation
         sourceOpenPickerContext = (presentation.flowID, presentation.id)
+        // Start the scope while the picker-delivered URL is still in the
+        // delegate hand-off. Some third-party providers vend a transient URL;
+        // retaining the scope across dismissal keeps that grant alive until a
+        // bookmark and the first coordinated snapshot have both completed.
+        let selectedURL = try? result.get()
+        let retainedSelectionScope = selectedURL?.startAccessingSecurityScopedResource() == true
         sourceOpenTask = Task { @MainActor [weak self] in
+            defer {
+                if retainedSelectionScope, let selectedURL {
+                    selectedURL.stopAccessingSecurityScopedResource()
+                }
+            }
             guard let self else { return }
             do {
                 let url = try result.get()
@@ -408,7 +416,7 @@ final class ViewerStore: ObservableObject {
                 // Wait for UIKit/SwiftUI dismissal before touching a provider;
                 // otherwise a slow File Provider looks frozen and Cancel is
                 // unreachable behind the picker scene.
-                await self.waitForPickerDismissal(presentation.id)
+                try await self.waitForPickerDismissal(presentation.id)
                 try Task.checkCancellation()
                 try cancellation.checkCancellation()
                 guard self.sourceOpenOperationID == operationID else { return }
@@ -484,12 +492,35 @@ final class ViewerStore: ObservableObject {
                 if isFolder, snapshot.supportedItemCount == 1 {
                     sourceNoticeMessage = DocumentSourceError.noOtherSupportedItems.localizedDescription
                 }
-                if presentation.request != .containingFolder,
-                   ContainingFolderAuthorizationPolicy.shouldRequest(
+                let shouldRequestContainingFolder = presentation.request != .containingFolder &&
+                    ContainingFolderAuthorizationPolicy.shouldRequest(
                        isFolder: isFolder,
                        isSupported: MobileFileTypePolicy.shared.isSupported(url.lastPathComponent),
                        isSelfContainedArchive: MobileFileTypePolicy.shared.isSelfContainedArchive(url.lastPathComponent)
-                   ) {
+                    )
+                // A normal image must genuinely be visible before asking for
+                // broader folder access. This also keeps corrupt images from
+                // opening a second picker and then replacing their decode
+                // error with a misleading folder-cancel notice. WMLTXT is the
+                // exception: it cannot resolve any page until its containing
+                // folder has been authorized.
+                if !isFolder,
+                   !MobileFileTypePolicy.shared.isListedFile(url.lastPathComponent) {
+                    let displayed = try await waitForInitialDisplay(
+                        operationID: operationID,
+                        cancellation: cancellation
+                    )
+                    guard self.sourceOpenOperationID == operationID else { return }
+                    if !displayed {
+                        finishFlowWhenDismissed(
+                            flowID: presentation.flowID,
+                            presentationID: presentation.id
+                        )
+                        finishSourceOpening(operationID: operationID)
+                        return
+                    }
+                }
+                if shouldRequestContainingFolder {
                     queueContainingFolderAuthorization(
                         for: url,
                         flowID: presentation.flowID
@@ -575,12 +606,28 @@ final class ViewerStore: ObservableObject {
         sourceOpeningProgress = nil
     }
 
+    private func waitForInitialDisplay(
+        operationID: UUID,
+        cancellation: DocumentSourceCancellation
+    ) async throws -> Bool {
+        while sourceOpenOperationID == operationID {
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
+            if !isLoading {
+                // `loadCurrent` makes decode failures interactive and writes a
+                // precise, filename-bearing error. Preserve it rather than
+                // converting the failure into a folder authorization prompt.
+                return touchReady && image != nil && errorMessage == nil
+            }
+            try await ContinuousClock().sleep(for: .milliseconds(25))
+        }
+        throw CancellationError()
+    }
+
     func pickerDidDismiss(_ presentationID: UUID) {
         let next = pickerFlow.didDismiss(presentationID)
-        pickerDismissalWaiters.removeValue(forKey: presentationID)?.resume()
         if let next {
             pendingPicker = next
-            lastPresentedPickerID = next.id
         } else if let flowID = flowToFinishAfterDismissal,
                   pickerFlow.flowID == flowID {
             flowToFinishAfterDismissal = nil
@@ -589,20 +636,26 @@ final class ViewerStore: ObservableObject {
         syncPickerPhase()
     }
 
-    private func waitForPickerDismissal(_ presentationID: UUID) async {
-        if pickerFlow.activePresentationID == presentationID,
-           pickerFlow.activePresentationWasDismissed {
-            return
+    private func waitForPickerDismissal(_ presentationID: UUID) async throws {
+        let clock = ContinuousClock()
+        let fallbackDeadline = clock.now.advanced(by: .seconds(1))
+        while pickerFlow.activePresentationID == presentationID,
+              !pickerFlow.activePresentationWasDismissed {
+            try Task.checkCancellation()
+            // SwiftUI normally reports the per-presentation `onDisappear`.
+            // Real File Providers have been observed to finish their UIKit
+            // dismissal without delivering the outer cover callback. Once the
+            // binding is already nil and the animation had ample time to end,
+            // infer dismissal so this task and the entire Files flow cannot
+            // remain suspended forever.
+            if pendingPicker == nil, clock.now >= fallbackDeadline {
+                filesLog.warning("picker dismissal callback timed out; completing selected presentation")
+                pickerDidDismiss(presentationID)
+                break
+            }
+            try await clock.sleep(for: .milliseconds(25))
         }
-        await withCheckedContinuation { continuation in
-            pickerDismissalWaiters[presentationID]?.resume()
-            pickerDismissalWaiters[presentationID] = continuation
-        }
-    }
-
-    func pickerCoverDidDismiss() {
-        guard let lastPresentedPickerID else { return }
-        pickerDidDismiss(lastPresentedPickerID)
+        try Task.checkCancellation()
     }
 
     private func finishFlowWhenDismissed(flowID: UUID, presentationID: UUID) {
@@ -622,30 +675,116 @@ final class ViewerStore: ObservableObject {
     }
 
     func openExternalURL(_ url: URL) {
-        Task { @MainActor in
+        // External-open URLs have the same File Provider lifetime rules as
+        // picker results. Retain their scope for classification, bookmark
+        // creation and the initial coordinated snapshot.
+        cancelSourceOpeningForReplacement()
+        let operationID = UUID()
+        let cancellation = DocumentSourceCancellation()
+        sourceOpenOperationID = operationID
+        sourceOpenCancellation = cancellation
+        sourceOpenPickerContext = nil
+        let retainedSelectionScope = url.startAccessingSecurityScopedResource()
+        sourceOpenTask = Task { @MainActor [weak self] in
+            defer {
+                if retainedSelectionScope {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+            guard let self else { return }
             do {
-                let values = try url.resourceValues(forKeys: [.isDirectoryKey])
-                let isFolder = values.isDirectory == true
-                let snapshot = try await accept(url: url, isFolder: isFolder)
+                let isFolder = await Task.detached(priority: .userInitiated) {
+                    Self.isDirectoryURL(url)
+                }.value
+                try Task.checkCancellation()
+                try cancellation.checkCancellation()
+                guard self.sourceOpenOperationID == operationID else { return }
+                try SelectedDocumentPolicy.validate(name: url.lastPathComponent, isFolder: isFolder)
+                self.errorMessage = nil
+                self.sourceNoticeMessage = nil
+                self.sourceOpeningProgress = SourceOpeningProgress(
+                    isFolder: isFolder,
+                    processedItemCount: 0,
+                    totalItemCount: nil
+                )
+                let snapshot = try await self.accept(
+                    url: url,
+                    isFolder: isFolder,
+                    cancellation: cancellation,
+                    progress: { [weak self] processed, total in
+                        Task { @MainActor in
+                            guard let self,
+                                  self.sourceOpenOperationID == operationID,
+                                  var progress = self.sourceOpeningProgress else { return }
+                            progress.processedItemCount = processed
+                            progress.totalItemCount = total
+                            self.sourceOpeningProgress = progress
+                        }
+                    }
+                )
+                try Task.checkCancellation()
+                try cancellation.checkCancellation()
+                guard self.sourceOpenOperationID == operationID else { return }
                 #if DEBUG
-                if isFolder { providerAcceptance?.folderCommitted(snapshot) }
+                if isFolder { self.providerAcceptance?.folderCommitted(snapshot) }
                 #endif
-                if ContainingFolderAuthorizationPolicy.shouldRequest(
+                let shouldRequestContainingFolder = ContainingFolderAuthorizationPolicy.shouldRequest(
                     isFolder: isFolder,
                     isSupported: MobileFileTypePolicy.shared.isSupported(url.lastPathComponent),
                     isSelfContainedArchive: MobileFileTypePolicy.shared.isSelfContainedArchive(url.lastPathComponent)
-                ) {
-                    queueContainingFolderAuthorization(for: url, flowID: nil)
-                } else if isFolder, snapshot.supportedItemCount == 1 {
-                    sourceNoticeMessage = DocumentSourceError.noOtherSupportedItems.localizedDescription
+                )
+                if !isFolder,
+                   !MobileFileTypePolicy.shared.isListedFile(url.lastPathComponent) {
+                    let displayed = try await self.waitForInitialDisplay(
+                        operationID: operationID,
+                        cancellation: cancellation
+                    )
+                    guard self.sourceOpenOperationID == operationID else { return }
+                    if !displayed {
+                        self.finishSourceOpening(operationID: operationID)
+                        return
+                    }
                 }
+                if shouldRequestContainingFolder {
+                    self.queueContainingFolderAuthorization(for: url, flowID: nil)
+                } else if isFolder, snapshot.supportedItemCount == 1 {
+                    self.sourceNoticeMessage = DocumentSourceError.noOtherSupportedItems.localizedDescription
+                }
+                self.finishSourceOpening(operationID: operationID)
+            } catch is CancellationError {
+                guard self.sourceOpenOperationID == operationID else { return }
+                self.sourceNoticeMessage = self.pages.isEmpty
+                    ? String(localized: "Opening was cancelled.")
+                    : String(localized: "Opening was cancelled. The current document remains open.")
+                self.touchReady = true
+                self.finishSourceOpening(operationID: operationID)
             } catch {
-                sourceConnectionState = .retryableError
-                errorMessage = error.localizedDescription
+                guard self.sourceOpenOperationID == operationID else { return }
+                self.sourceConnectionState = .retryableError
+                self.errorMessage = error.localizedDescription
                 #if DEBUG
-                providerAcceptance?.recoverableError(inputReady: interactionReady)
+                self.providerAcceptance?.recoverableError(inputReady: self.interactionReady)
                 #endif
+                self.finishSourceOpening(operationID: operationID)
             }
+        }
+    }
+
+    private func cancelSourceOpeningForReplacement() {
+        guard sourceOpenOperationID != nil else { return }
+        let pickerContext = sourceOpenPickerContext
+        sourceOpenOperationID = nil
+        sourceOpenCancellation?.cancel()
+        sourceOpenTask?.cancel()
+        sourceOpenTask = nil
+        sourceOpenCancellation = nil
+        sourceOpenPickerContext = nil
+        sourceOpeningProgress = nil
+        if let pickerContext {
+            finishFlowWhenDismissed(
+                flowID: pickerContext.flowID,
+                presentationID: pickerContext.presentationID
+            )
         }
     }
 
@@ -1007,7 +1146,6 @@ final class ViewerStore: ObservableObject {
                 initialDirectoryURL: initialDirectoryURL
             ) {
                 pendingPicker = presentation
-                lastPresentedPickerID = presentation.id
             }
             syncPickerPhase()
         } else {
@@ -1587,7 +1725,6 @@ final class ViewerStore: ObservableObject {
     func installQueuedFolderPickerForTest(selectedURL: URL) -> UUID? {
         guard let primary = pickerFlow.begin(.openTarget) else { return nil }
         pendingPicker = primary
-        lastPresentedPickerID = primary.id
         _ = pickerFlow.beginResultProcessing(primary)
         pendingPicker = nil
         queueContainingFolderAuthorization(for: selectedURL, flowID: primary.flowID)
@@ -1608,7 +1745,6 @@ final class ViewerStore: ObservableObject {
             initialDirectoryURL: selectedURL.deletingLastPathComponent()
         ) else { return nil }
         pendingPicker = presentation
-        lastPresentedPickerID = presentation.id
         syncPickerPhase()
         return presentation
     }

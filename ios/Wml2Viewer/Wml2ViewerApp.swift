@@ -124,9 +124,7 @@ struct ContentView: View {
         .sheet(item: $store.exportItem, onDismiss: { store.finishExport() }) { item in
             SystemShareSheet(activityItems: [item.url])
         }
-        .fullScreenCover(item: $store.pendingPicker, onDismiss: {
-            store.pickerCoverDidDismiss()
-        }) { presentation in
+        .fullScreenCover(item: $store.pendingPicker) { presentation in
             Group {
                 if presentation.request == .manageFiles {
                     ZStack(alignment: .topTrailing) {
@@ -152,6 +150,13 @@ struct ContentView: View {
                         store.finishPicker(presentation, result)
                     }
                 }
+            }
+            // Capture the presentation token in the content itself. A global
+            // `onDismiss` can otherwise mistake a delayed callback from the
+            // first picker for the automatically queued containing-folder
+            // picker and close the new presentation.
+            .onDisappear {
+                store.pickerDidDismiss(presentation.id)
             }
         }
         .overlay(alignment: .bottom) {

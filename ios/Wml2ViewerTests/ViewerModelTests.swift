@@ -233,6 +233,38 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertEqual(flow.phase, .idle)
     }
 
+    func testFilesOpenFlowQueuesFollowUpAfterDismissalWithoutAcceptingStaleDisappear() {
+        var flow = FilesOpenFlowMachine()
+        let primary = try! XCTUnwrap(flow.begin(.openTarget))
+        XCTAssertTrue(flow.beginResultProcessing(primary))
+        XCTAssertNil(flow.didDismiss(primary.id))
+
+        let folder = try! XCTUnwrap(flow.queueFollowUp(
+            .containingFolder,
+            initialDirectoryURL: URL(fileURLWithPath: "/provider/folder")
+        ))
+        XCTAssertEqual(flow.phase, .presenting(.containingFolder))
+        XCTAssertFalse(flow.activePresentationWasDismissed)
+
+        // A delayed disappearance callback from the primary picker must not
+        // dismiss the newly presented folder picker.
+        XCTAssertNil(flow.didDismiss(primary.id))
+        XCTAssertEqual(flow.activePresentationID, folder.id)
+        XCTAssertFalse(flow.activePresentationWasDismissed)
+        XCTAssertTrue(flow.beginResultProcessing(folder))
+    }
+
+    func testFilesOpenFlowPresentsArchiveWithoutContainingFolderFollowUp() {
+        for name in ["book.zip", "book.lha", "book.lzh"] {
+            XCTAssertTrue(MobileFileTypePolicy.shared.isSelfContainedArchive(name))
+            XCTAssertFalse(ContainingFolderAuthorizationPolicy.shouldRequest(
+                isFolder: false,
+                isSupported: MobileFileTypePolicy.shared.isSupported(name),
+                isSelfContainedArchive: MobileFileTypePolicy.shared.isSelfContainedArchive(name)
+            ))
+        }
+    }
+
     func testProviderPlaceholderDoesNotRequireRegularFileMetadata() {
         XCTAssertTrue(DirectoryEntryPolicy.includes(
             name: "cloud-page.png", isDirectory: false,
@@ -311,6 +343,23 @@ final class ViewerModelTests: XCTestCase {
         } catch is CancellationError {
             XCTAssertTrue(cancellation.isCancelled)
         }
+    }
+
+    func testSingleFileSnapshotRetainsTheSecurityScopedRootURL() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".test-wml2viewer-single-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data([0]).write(to: root)
+        let source = SecurityScopedDocumentSource(
+            sourceID: UUID(), displayName: root.lastPathComponent,
+            rootURL: root, isFolder: false
+        )
+
+        let snapshot = try await source.snapshot()
+
+        XCTAssertEqual(snapshot.entries.count, 1)
+        XCTAssertEqual(snapshot.entries[0].url, root)
+        XCTAssertEqual(snapshot.entries[0].displayName, root.lastPathComponent)
     }
 
     func testWmltxtResolverNormalizesEntriesAndRejectsEscape() throws {
