@@ -525,7 +525,7 @@ final class ViewerStore: ObservableObject {
                 let shouldRequestContainingFolder = presentation.request != .containingFolder &&
                     ContainingFolderAuthorizationPolicy.shouldRequest(
                        isFolder: isFolder,
-                       isSupported: MobileFileTypePolicy.shared.isSupported(url.lastPathComponent),
+                       isSupported: SelectedDocumentPolicy.isSupported(url: url),
                        isSelfContainedArchive: MobileFileTypePolicy.shared.isSelfContainedArchive(url.lastPathComponent)
                     )
                 // A normal image must genuinely be visible before asking for
@@ -766,7 +766,7 @@ final class ViewerStore: ObservableObject {
                 #endif
                 let shouldRequestContainingFolder = ContainingFolderAuthorizationPolicy.shouldRequest(
                     isFolder: isFolder,
-                    isSupported: MobileFileTypePolicy.shared.isSupported(url.lastPathComponent),
+                    isSupported: SelectedDocumentPolicy.isSupported(url: url),
                     isSelfContainedArchive: MobileFileTypePolicy.shared.isSelfContainedArchive(url.lastPathComponent)
                 )
                 if !isFolder,

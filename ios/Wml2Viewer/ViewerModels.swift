@@ -69,6 +69,18 @@ struct SourceOpeningProgress: Equatable {
 }
 
 enum SelectedDocumentPolicy {
+    static func declaredMime(for url: URL) -> String? {
+        try? url.resourceValues(forKeys: [.contentTypeKey])
+            .contentType?.preferredMIMEType
+    }
+
+    static func isSupported(url: URL) -> Bool {
+        MobileFileTypePolicy.shared.isSupported(
+            url.lastPathComponent,
+            declaredMime: declaredMime(for: url)
+        )
+    }
+
     static func validate(
         name: String,
         isFolder: Bool,
@@ -87,12 +99,10 @@ enum SelectedDocumentPolicy {
     /// security scope is still alive instead of rejecting a valid image by
     /// filename alone.
     static func validate(url: URL, isFolder: Bool) throws {
-        let declaredMime = try? url.resourceValues(forKeys: [.contentTypeKey])
-            .contentType?.preferredMIMEType
         try validate(
             name: url.lastPathComponent,
             isFolder: isFolder,
-            declaredMime: declaredMime
+            declaredMime: declaredMime(for: url)
         )
     }
 }
