@@ -235,17 +235,46 @@ final class ViewerModelTests: XCTestCase {
 
     func testContainingFolderAuthorizationOnlyFollowsOrdinaryImageSelection() {
         XCTAssertTrue(ContainingFolderAuthorizationPolicy.shouldRequest(
-            isFolder: false, isSupported: true, isArchive: false
+            isFolder: false, isSupported: true, isSelfContainedArchive: false
         ))
         XCTAssertFalse(ContainingFolderAuthorizationPolicy.shouldRequest(
-            isFolder: true, isSupported: true, isArchive: false
+            isFolder: true, isSupported: true, isSelfContainedArchive: false
         ))
         XCTAssertFalse(ContainingFolderAuthorizationPolicy.shouldRequest(
-            isFolder: false, isSupported: true, isArchive: true
+            isFolder: false, isSupported: true, isSelfContainedArchive: true
         ))
         XCTAssertFalse(ContainingFolderAuthorizationPolicy.shouldRequest(
-            isFolder: false, isSupported: false, isArchive: false
+            isFolder: false, isSupported: false, isSelfContainedArchive: false
         ))
+        XCTAssertTrue(MobileFileTypePolicy.shared.isListedFile("book.wmltxt"))
+        XCTAssertFalse(MobileFileTypePolicy.shared.isSelfContainedArchive("book.wmltxt"))
+    }
+
+    func testWmltxtResolverNormalizesEntriesAndRejectsEscape() throws {
+        let manifest = Data("#!WMLViewer2 ListedFile\n# comment\nchapter\\001.png\n./chapter/002.png\n".utf8)
+        XCTAssertEqual(
+            try WmltxtEntryResolver.paths(from: manifest),
+            ["chapter/001.png", "chapter/002.png"]
+        )
+        let root = URL(fileURLWithPath: "/provider/book", isDirectory: true)
+        XCTAssertEqual(
+            try WmltxtEntryResolver.resolve("chapter/001.png", under: root).path,
+            "/provider/book/chapter/001.png"
+        )
+        XCTAssertThrowsError(try WmltxtEntryResolver.paths(
+            from: Data("#!WMLViewer2 ListedFile\n../outside.png\n".utf8)
+        ))
+        XCTAssertThrowsError(try WmltxtEntryResolver.resolve("../outside.png", under: root))
+        XCTAssertThrowsError(try WmltxtEntryResolver.resolve("/absolute.png", under: root))
+    }
+
+    func testBookmarkRecordManifestFieldsRemainBackwardCompatible() throws {
+        let sourceID = UUID()
+        let legacy = Data("{\"sourceID\":\"\(sourceID.uuidString)\",\"bookmark\":\"AQID\",\"displayName\":\"Book\",\"isFolder\":true,\"opaqueEntryID\":\"entry\",\"logicalPageIndex\":2}".utf8)
+        let restored = try JSONDecoder().decode(BookmarkRecord.self, from: legacy)
+        XCTAssertNil(restored.listedManifestOpaqueEntryID)
+        XCTAssertNil(restored.listedManifestFileName)
+        XCTAssertEqual(restored.logicalPageIndex, 2)
     }
 
     func testFolderEntryMatcherPrefersOpaqueProviderIdentityThenFileName() {

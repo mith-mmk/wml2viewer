@@ -125,9 +125,9 @@ enum ContainingFolderAuthorizationPolicy {
     static func shouldRequest(
         isFolder: Bool,
         isSupported: Bool,
-        isArchive: Bool
+        isSelfContainedArchive: Bool
     ) -> Bool {
-        !isFolder && isSupported && !isArchive
+        !isFolder && isSupported && !isSelfContainedArchive
     }
 }
 
@@ -319,6 +319,10 @@ struct BookmarkRecord: Codable, Equatable, Sendable {
     let isFolder: Bool
     var opaqueEntryID: String?
     var logicalPageIndex: Int
+    /// Optional manifest identity for provider-backed `.wmltxt` sources.
+    /// Missing fields decode as nil for pre-manifest bookmarks.
+    var listedManifestOpaqueEntryID: String? = nil
+    var listedManifestFileName: String? = nil
 }
 
 struct PageItem: Identifiable, Hashable, Sendable {

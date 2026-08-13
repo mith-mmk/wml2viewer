@@ -52,6 +52,7 @@ final class ViewerStore: ObservableObject {
     private var archiveURL: URL?
     private var archiveParentPages: [PageItem]?
     private var archiveEntryIndices: [Int] = []
+    private var listedManifestItem: PageItem?
     private var loadTask: Task<Void, Never>?
     private var animationTask: Task<Void, Never>?
     private var sourceGeneration = 0
@@ -114,7 +115,7 @@ final class ViewerStore: ObservableObject {
             var activeBookmarkData = record.bookmark
             if stale, let renewed = try? resolved.bookmarkData(options: [.suitableForBookmarkFile], includingResourceValuesForKeys: nil, relativeTo: nil) {
                 activeBookmarkData = renewed
-                try? await bookmarks.upsert(BookmarkRecord(sourceID: record.sourceID, bookmark: renewed, displayName: record.displayName, isFolder: record.isFolder, opaqueEntryID: record.opaqueEntryID, logicalPageIndex: record.logicalPageIndex))
+                try? await bookmarks.upsert(BookmarkRecord(sourceID: record.sourceID, bookmark: renewed, displayName: record.displayName, isFolder: record.isFolder, opaqueEntryID: record.opaqueEntryID, logicalPageIndex: record.logicalPageIndex, listedManifestOpaqueEntryID: record.listedManifestOpaqueEntryID, listedManifestFileName: record.listedManifestFileName))
             }
             activeBookmark = ActiveBookmark(
                 sourceID: record.sourceID, data: activeBookmarkData,
@@ -124,7 +125,9 @@ final class ViewerStore: ObservableObject {
                 source: newSource,
                 preferredOpaqueEntryID: record.opaqueEntryID,
                 preferredFileName: nil,
-                preferredIndex: record.logicalPageIndex
+                preferredIndex: record.logicalPageIndex,
+                listedManifestOpaqueEntryID: record.listedManifestOpaqueEntryID,
+                listedManifestFileName: record.listedManifestFileName
             )
         } catch {
             markRestoreFailure()
@@ -354,13 +357,28 @@ final class ViewerStore: ObservableObject {
                 if presentation.request == .containingFolder {
                     folderAuthorizationContext = nil
                 }
-                let snapshot = try await accept(
+                var snapshot = try await accept(
                     url: url,
                     isFolder: isFolder,
                     preferredOpaqueEntryID: authorization?.selectedOpaqueEntryID,
                     preferredFileName: authorization?.selectedFileName,
                     requiresPreferredItem: authorization != nil
                 )
+                if let authorization,
+                   presentation.request == .containingFolder,
+                   MobileFileTypePolicy.shared.isListedFile(authorization.selectedFileName),
+                   let folderSource = source,
+                   let listedIndex = DocumentEntryMatcher.index(
+                       selectedOpaqueEntryID: authorization.selectedOpaqueEntryID,
+                       selectedFileName: authorization.selectedFileName,
+                       in: pages
+                   ),
+                   pages.indices.contains(listedIndex) {
+                    snapshot = try await openListedFile(
+                        source: folderSource,
+                        listedItem: pages[listedIndex]
+                    )
+                }
                 filesLog.info(
                     "source committed: folder=\(isFolder, privacy: .public) enumerated=\(snapshot.enumeratedItemCount, privacy: .public) supported=\(snapshot.supportedItemCount, privacy: .public)"
                 )
@@ -374,7 +392,7 @@ final class ViewerStore: ObservableObject {
                    ContainingFolderAuthorizationPolicy.shouldRequest(
                        isFolder: isFolder,
                        isSupported: MobileFileTypePolicy.shared.isSupported(url.lastPathComponent),
-                       isArchive: MobileFileTypePolicy.shared.isArchive(url.lastPathComponent)
+                       isSelfContainedArchive: MobileFileTypePolicy.shared.isSelfContainedArchive(url.lastPathComponent)
                    ) {
                     queueContainingFolderAuthorization(
                         for: url,
@@ -450,7 +468,7 @@ final class ViewerStore: ObservableObject {
                 if ContainingFolderAuthorizationPolicy.shouldRequest(
                     isFolder: isFolder,
                     isSupported: MobileFileTypePolicy.shared.isSupported(url.lastPathComponent),
-                    isArchive: MobileFileTypePolicy.shared.isArchive(url.lastPathComponent)
+                    isSelfContainedArchive: MobileFileTypePolicy.shared.isSelfContainedArchive(url.lastPathComponent)
                 ) {
                     queueContainingFolderAuthorization(for: url, flowID: nil)
                 } else if isFolder, snapshot.supportedItemCount == 1 {
@@ -654,6 +672,29 @@ final class ViewerStore: ObservableObject {
                     : DocumentSourceError.unsupportedItem.localizedDescription
                 return
             }
+            if source.isFolder,
+               let previousManifest = listedManifestItem,
+               let manifestIndex = DocumentEntryMatcher.index(
+                   selectedOpaqueEntryID: DocumentEntryIdentity.opaqueIdentifier(for: previousManifest.url),
+                   selectedFileName: previousManifest.displayName,
+                   in: refreshed
+               ),
+               MobileFileTypePolicy.shared.isListedFile(refreshed[manifestIndex].displayName) {
+                let manifestItem = refreshed[manifestIndex]
+                let (_, entries) = try await listedEntries(source: source, listedItem: manifestItem)
+                let refreshedCurrentID = pages.indices.contains(oldIndex) ? pages[oldIndex].id : nil
+                let nextIndex = ExternalPageReconciler.index(
+                    oldIndex: oldIndex,
+                    oldID: refreshedCurrentID,
+                    refreshedIDs: entries.map(\.id)
+                ) ?? 0
+                try commitOpen(source: source, listedPages: entries, preferredIndex: nextIndex)
+                listedManifestItem = manifestItem
+                sourceConnectionState = .archive(entries: entries.count)
+                persistCurrentLocation()
+                return
+            }
+            listedManifestItem = nil
             pages = refreshed
             sourceConnectionState = source.isFolder
                 ? .folder(
@@ -668,6 +709,8 @@ final class ViewerStore: ObservableObject {
             loadCurrent()
             persistCurrentLocation()
         } catch {
+            sourceConnectionState = .retryableError
+            touchReady = true
             errorMessage = error.localizedDescription
         }
     }
@@ -732,7 +775,9 @@ final class ViewerStore: ObservableObject {
             displayName: newSource.displayName,
             isFolder: isFolder,
             opaqueEntryID: pages[currentIndex].id,
-            logicalPageIndex: currentIndex
+            logicalPageIndex: currentIndex,
+            listedManifestOpaqueEntryID: listedManifestItem.map { DocumentEntryIdentity.opaqueIdentifier(for: $0.url) },
+            listedManifestFileName: listedManifestItem?.displayName
         ))
         sourceConnectionState = isFolder
             ? .folder(
@@ -779,7 +824,9 @@ final class ViewerStore: ObservableObject {
             displayName: activeBookmark.displayName,
             isFolder: activeBookmark.isFolder,
             opaqueEntryID: pages[currentIndex].id,
-            logicalPageIndex: currentIndex
+            logicalPageIndex: currentIndex,
+            listedManifestOpaqueEntryID: listedManifestItem.map { DocumentEntryIdentity.opaqueIdentifier(for: $0.url) },
+            listedManifestFileName: listedManifestItem?.displayName
         )
         Task { try? await bookmarks.upsert(record) }
     }
@@ -798,7 +845,9 @@ final class ViewerStore: ObservableObject {
         source: SecurityScopedDocumentSource,
         preferredOpaqueEntryID: String? = nil,
         preferredFileName: String? = nil,
-        preferredIndex: Int
+        preferredIndex: Int,
+        listedManifestOpaqueEntryID: String? = nil,
+        listedManifestFileName: String? = nil
     ) async throws {
         let snapshot = try await source.snapshot()
         let listedPages = snapshot.entries
@@ -815,12 +864,81 @@ final class ViewerStore: ObservableObject {
             )
         } ?? preferredIndex
         try commitOpen(source: source, listedPages: listedPages, preferredIndex: restoredIndex)
+        if source.isFolder,
+           let manifestIndex = DocumentEntryMatcher.index(
+               selectedOpaqueEntryID: listedManifestOpaqueEntryID,
+               selectedFileName: listedManifestFileName ?? "",
+               in: listedPages
+           ),
+           listedPages.indices.contains(manifestIndex),
+           MobileFileTypePolicy.shared.isListedFile(listedPages[manifestIndex].displayName) {
+            let manifestItem = listedPages[manifestIndex]
+            let (_, entries) = try await listedEntries(source: source, listedItem: manifestItem)
+            try commitOpen(
+                source: source,
+                listedPages: entries,
+                preferredIndex: min(max(preferredIndex, 0), entries.count - 1)
+            )
+            listedManifestItem = manifestItem
+            sourceConnectionState = .archive(entries: entries.count)
+            persistCurrentLocation()
+            return
+        }
         sourceConnectionState = source.isFolder
             ? .folder(
                 enumerated: snapshot.enumeratedItemCount,
                 supported: snapshot.supportedItemCount
             )
             : .singleFile
+    }
+
+    /// Opens a `.wmltxt` manifest after the containing folder has been
+    /// explicitly granted. Listed entries are resolved one-by-one under that
+    /// folder and remain ordinary source pages, so each read still goes
+    /// through the provider-aware `DocumentSource` contract.
+    private func openListedFile(
+        source: SecurityScopedDocumentSource,
+        listedItem: PageItem
+    ) async throws -> SourceSnapshot {
+        let (paths, entries) = try await listedEntries(source: source, listedItem: listedItem)
+        try commitOpen(source: source, listedPages: entries, preferredIndex: 0)
+        listedManifestItem = listedItem
+        sourceConnectionState = .archive(entries: entries.count)
+        persistCurrentLocation()
+        return SourceSnapshot(entries: entries, enumeratedItemCount: paths.count)
+    }
+
+    private func listedEntries(
+        source: SecurityScopedDocumentSource,
+        listedItem: PageItem
+    ) async throws -> (paths: [String], entries: [PageItem]) {
+        guard source.isFolder, MobileFileTypePolicy.shared.isListedFile(listedItem.displayName) else {
+            throw DocumentSourceError.invalidListedFile
+        }
+        let manifest = try await source.read(listedItem)
+        let paths = try WmltxtEntryResolver.paths(from: manifest)
+        var entries: [PageItem] = []
+        for path in paths {
+            let url = try WmltxtEntryResolver.resolve(path, under: source.rootURL)
+            let values = try? url.resourceValues(forKeys: [
+                .isDirectoryKey, .isRegularFileKey, .nameKey, .contentTypeKey,
+            ])
+            let name = values?.name ?? path
+            guard DirectoryEntryPolicy.includes(
+                name: name,
+                isDirectory: values?.isDirectory,
+                isRegularFile: values?.isRegularFile,
+                declaredMime: values?.contentType?.preferredMIMEType
+            ) else { continue }
+            entries.append(PageItem(
+                id: DocumentEntryIdentity.opaqueIdentifier(for: url),
+                url: url,
+                displayName: path,
+                isArchive: MobileFileTypePolicy.shared.isArchive(path)
+            ))
+        }
+        guard !entries.isEmpty else { throw DocumentSourceError.noSupportedItems }
+        return (paths, entries)
     }
 
     private func commitOpen(
@@ -834,6 +952,7 @@ final class ViewerStore: ObservableObject {
         nativeSession = nil
         archiveURL = nil
         archiveParentPages = nil
+        listedManifestItem = nil
         sourceGeneration += 1
         portraitByPageID.removeAll()
         thumbnails.removeAll()
@@ -902,6 +1021,34 @@ final class ViewerStore: ObservableObject {
                         #endif
                         let position = visual.firstIndex(of: index) ?? 0
                         self.startAnimation(currentFrames, generation: generation, viewport: viewport, spreadPosition: position)
+                    }
+                    return
+                }
+                if item.isArchive,
+                   MobileFileTypePolicy.shared.isListedFile(item.displayName),
+                   source.isFolder {
+                    guard let self else { return }
+                    let listedEntries = try await self.listedEntries(
+                        source: source,
+                        listedItem: item
+                    )
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        guard self.sourceGeneration == generation,
+                              self.currentIndex == index else { return }
+                        do {
+                            try self.commitOpen(
+                                source: source,
+                                listedPages: listedEntries.entries,
+                                preferredIndex: 0
+                            )
+                            self.listedManifestItem = item
+                            self.sourceConnectionState = .archive(entries: listedEntries.entries.count)
+                            self.persistCurrentLocation()
+                        } catch {
+                            self.errorMessage = error.localizedDescription
+                            self.touchReady = true
+                        }
                     }
                     return
                 }

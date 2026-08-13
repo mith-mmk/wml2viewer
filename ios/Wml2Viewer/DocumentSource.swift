@@ -181,6 +181,8 @@ enum DocumentSourceError: LocalizedError {
     case permissionDenied
     case noSupportedItems
     case noOtherSupportedItems
+    case invalidListedFile
+    case listedEntryOutsideFolder
 
     var errorDescription: String? {
         switch self {
@@ -190,6 +192,62 @@ enum DocumentSourceError: LocalizedError {
         case .permissionDenied: String(localized: "The document is no longer available")
         case .noSupportedItems: String(localized: "No supported files were found in the selected folder")
         case .noOtherSupportedItems: String(localized: "No other supported files were found in the selected folder")
+        case .invalidListedFile: String(localized: "The listed file is invalid")
+        case .listedEntryOutsideFolder: String(localized: "A listed file entry is outside the selected folder")
         }
+    }
+}
+
+/// Parses the platform-neutral WML listed-file manifest while keeping every
+/// resolved entry inside the user-approved folder. The same normalization
+/// rules as the Rust core are applied before any provider URL is read.
+enum WmltxtEntryResolver {
+    private static let header = "#!WMLViewer2 ListedFile"
+
+    static func paths(from data: Data) throws -> [String] {
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw DocumentSourceError.invalidListedFile
+        }
+        var lines = text.drop { $0 == "\u{feff}" }.split(whereSeparator: \.isNewline)
+        guard let first = lines.first?.trimmingCharacters(in: .whitespaces),
+              first.hasPrefix(header) else {
+            throw DocumentSourceError.invalidListedFile
+        }
+        lines.removeFirst()
+        return try lines.compactMap { rawLine in
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty, !line.hasPrefix("#"), !line.hasPrefix("@") else { return nil }
+            return try normalize(line)
+        }
+    }
+
+    static func resolve(_ rawPath: String, under root: URL) throws -> URL {
+        let relative = try normalize(rawPath)
+        let canonicalRoot = root.standardizedFileURL.resolvingSymlinksInPath()
+        let candidate = canonicalRoot
+            .appendingPathComponent(relative, isDirectory: false)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let rootPath = canonicalRoot.path.hasSuffix("/") ? canonicalRoot.path : canonicalRoot.path + "/"
+        guard candidate.path != canonicalRoot.path, candidate.path.hasPrefix(rootPath) else {
+            throw DocumentSourceError.listedEntryOutsideFolder
+        }
+        return candidate
+    }
+
+    private static func normalize(_ rawPath: String) throws -> String {
+        let replaced = rawPath.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\\", with: "/")
+        guard !replaced.isEmpty, !replaced.contains("\0"),
+              !replaced.hasPrefix("/"), !replaced.hasPrefix("//") else {
+            throw DocumentSourceError.listedEntryOutsideFolder
+        }
+        let components = replaced.split(separator: "/", omittingEmptySubsequences: true)
+        guard !components.isEmpty,
+              !components.contains(where: { $0 == ".." || $0.contains(":") }) else {
+            throw DocumentSourceError.listedEntryOutsideFolder
+        }
+        let normalized = components.filter { $0 != "." }.joined(separator: "/")
+        guard !normalized.isEmpty else { throw DocumentSourceError.invalidListedFile }
+        return normalized
     }
 }

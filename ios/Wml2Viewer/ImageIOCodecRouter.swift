@@ -60,6 +60,16 @@ struct MobileFileTypePolicy: Sendable {
         Self.archiveFormats[Self.fileExtension(name)]
     }
 
+    /// A listed file is a manifest whose entries live beside it. It is not a
+    /// self-contained archive and therefore needs an explicit folder grant.
+    func isListedFile(_ name: String) -> Bool {
+        Self.fileExtension(name) == "wmltxt"
+    }
+
+    func isSelfContainedArchive(_ name: String) -> Bool {
+        archiveFormat(for: name) != nil && !isListedFile(name)
+    }
+
     func isArchive(_ name: String) -> Bool {
         archiveFormat(for: name) != nil
     }
