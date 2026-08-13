@@ -32,6 +32,7 @@
 最新のiPhone Simulator focused UIでは、folderの左右移動・filmstrip、空ZIP後の復帰、設定画面の3件を連続実行し、3/3 passed。英日String Catalogと`.strings`のkey集合は77件で一致する。
 
 設定カテゴリ統合後のiPhone Japanese UI test（設定表示・見開き間隔）は1/1 passed。
+ジェスチャー仲裁の依存関係（pinch > pan > swipe > long press > double tap > single zone tap）を明示した後、同じiPhone focused UI 3件とDocument Browser管理導線1件がそれぞれ成功した。device向けarm64 Debug buildも成功した。
 
 ## 2026-08-14 実機Provider受入追記
 
@@ -47,6 +48,8 @@ local/iCloud/third-partyでは復帰可能エラー後の再表示も確認し�
 | iCloud | 49 | 6 | 成功 | 成功 | 成功 | passed |
 | third-party | 49 | 6 | 成功 | 成功 | 成功 | passed |
 | SMB | 25 | 8 | 成功 | 成功 | 成功 | passed |
+
+同じ実機（iPad A16、iOS 26.6、unlocked）で`ios/device-smoke.sh`を再実行し、XCTest、署名build、install、launch、native session/request/cancel/releaseの自己診断が成功した。
 
 空ZIPを含むfolderで、失敗項目を方向に応じてスキップし、前後移動後に
 エラー表示と入力ロックが解除される回帰UI testも通過した。現在の作業ツリーは

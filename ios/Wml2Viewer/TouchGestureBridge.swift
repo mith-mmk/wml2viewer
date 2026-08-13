@@ -30,6 +30,14 @@ struct TouchGestureBridge: UIViewRepresentable {
         let double = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.doubleTap(_:)))
         double.numberOfTapsRequired = 2
         let single = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.singleTap(_:)))
+        // Keep the arbitration order explicit: pinch > pan > swipe > long
+        // press > double tap > single zone tap. A lower-priority recognizer
+        // must wait for the higher-priority one to fail, otherwise a page
+        // swipe or a long press can also dispatch a zone tap.
+        pan.require(toFail: pinch)
+        swipe.require(toFail: pan)
+        long.require(toFail: swipe)
+        double.require(toFail: long)
         single.require(toFail: double)
         single.require(toFail: long)
         long.minimumPressDuration = 0.45
@@ -81,9 +89,7 @@ struct TouchGestureBridge: UIViewRepresentable {
             parent.onZoneTap(zone.row, zone.column)
         }
 
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            gestureRecognizer is UIPinchGestureRecognizer && otherGestureRecognizer is UIPanGestureRecognizer
-        }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { false }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             switch gestureRecognizer {
