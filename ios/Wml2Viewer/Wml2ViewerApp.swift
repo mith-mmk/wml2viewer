@@ -156,14 +156,22 @@ struct ContentView: View {
         }
         .overlay(alignment: .bottom) {
             if let error = store.errorMessage {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.callout)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .padding(.bottom, 24)
-                    .accessibilityAddTraits(.isStaticText)
-                    .accessibilityIdentifier("viewer.error")
+                HStack(spacing: 12) {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .accessibilityAddTraits(.isStaticText)
+                        .accessibilityIdentifier("viewer.error")
+                    Button(String(localized: "Open Files")) { store.requestFilePicker() }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("viewer.error.openFiles")
+                    Button(String(localized: "Choose folder")) { store.requestFolderPicker() }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("viewer.error.chooseFolder")
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.bottom, 24)
             } else if let notice = store.sourceNoticeMessage {
                 Label(notice, systemImage: "folder.badge.questionmark")
                     .font(.callout)

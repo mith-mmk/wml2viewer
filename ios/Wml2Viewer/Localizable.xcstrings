@@ -15,6 +15,7 @@
     "Manga" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "マンガ" } } } },
     "Manga mode" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "マンガモード" } } } },
     "Page spacing" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "見開き間隔" } } } },
+    "Open Files" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "ファイルを開く" } } } },
     "No document" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "書類がありません" } } } },
     "No other supported files were found in the selected folder" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択したフォルダに他の対応ファイルがありません" } } } },
     "No supported files were found in the selected folder" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択したフォルダに対応ファイルがありません" } } } },

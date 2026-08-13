@@ -99,7 +99,14 @@ final class ViewerStore: ObservableObject {
         }
         #endif
         guard config.rememberLastLocation else { return }
-        guard let records = try? await bookmarks.load(), let record = records.first else { return }
+        let records: [BookmarkRecord]
+        do {
+            records = try await bookmarks.load()
+        } catch {
+            markRestoreFailure()
+            return
+        }
+        guard let record = records.first else { return }
         var stale = false
         do {
             let resolved = try URL(resolvingBookmarkData: record.bookmark, options: [.withoutUI, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &stale)
@@ -119,7 +126,18 @@ final class ViewerStore: ObservableObject {
                 preferredFileName: nil,
                 preferredIndex: record.logicalPageIndex
             )
-        } catch { return }
+        } catch {
+            markRestoreFailure()
+        }
+    }
+
+    /// A stale bookmark, revoked provider authorization, or an offline File
+    /// Provider must not leave the viewer in a non-interactive loading state.
+    /// Keep the current source (if any) and expose an OS-picker retry path.
+    private func markRestoreFailure() {
+        sourceConnectionState = .retryableError
+        touchReady = true
+        errorMessage = DocumentSourceError.permissionDenied.localizedDescription
     }
 
     #if DEBUG
