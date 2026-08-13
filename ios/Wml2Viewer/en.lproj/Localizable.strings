@@ -27,6 +27,7 @@
 "Theme" = "Theme";
 "Thumbnail" = "Thumbnail";
 "Unsupported document" = "Unsupported document";
+"This animated image is not supported by the selected OS codec" = "This animated image is not supported by the selected OS codec";
 "Unsupported file type. Choose an image, ZIP/LHA/LZH archive, or WMLTXT file." = "Unsupported file type. Choose an image, ZIP/LHA/LZH archive, or WMLTXT file.";
 "Unsupported file type “.%@”. Choose an image, ZIP/LHA/LZH archive, or WMLTXT file." = "Unsupported file type “.%@”. Choose an image, ZIP/LHA/LZH archive, or WMLTXT file.";
 "Could not display “%@”. The file may be damaged or use an unsupported variant." = "Could not display “%@”. The file may be damaged or use an unsupported variant.";

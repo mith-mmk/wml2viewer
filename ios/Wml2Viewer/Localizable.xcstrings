@@ -34,6 +34,7 @@
     "Theme" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "テーマ" } } } },
     "Thumbnail" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "サムネイル" } } } },
     "Unsupported document" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "対応していない書類です" } } } },
+    "This animated image is not supported by the selected OS codec" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択したOSコーデックではこのアニメーション画像に対応していません" } } } },
     "Unsupported file type. Choose an image, ZIP/LHA/LZH archive, or WMLTXT file." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "このファイル形式には対応していません。画像、ZIP/LHA/LZH書庫、またはWMLTXTファイルを選択してください。" } } } },
     "Unsupported file type “.%@”. Choose an image, ZIP/LHA/LZH archive, or WMLTXT file." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "ファイル形式「.%@」には対応していません。画像、ZIP/LHA/LZH書庫、またはWMLTXTファイルを選択してください。" } } } },
     "Could not display “%@”. The file may be damaged or use an unsupported variant." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "「%@」を表示できませんでした。ファイルが破損しているか、未対応の形式である可能性があります。" } } } },

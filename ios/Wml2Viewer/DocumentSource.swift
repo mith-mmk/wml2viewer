@@ -319,6 +319,7 @@ enum DocumentEntryMatcher {
 
 enum DocumentSourceError: LocalizedError {
     case unsupportedItem
+    case osAnimationUnsupported
     case unsupportedFileType(String)
     case unreadableDocument(String)
     case folderRequired
@@ -332,6 +333,7 @@ enum DocumentSourceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupportedItem: String(localized: "Unsupported document")
+        case .osAnimationUnsupported: String(localized: "This animated image is not supported by the selected OS codec")
         case .unsupportedFileType(let fileExtension):
             fileExtension.isEmpty
                 ? String(localized: "Unsupported file type. Choose an image, ZIP/LHA/LZH archive, or WMLTXT file.")

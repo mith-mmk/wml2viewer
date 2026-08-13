@@ -1669,11 +1669,14 @@ final class ViewerStore: ObservableObject {
         return plan?.logicalIndices ?? [currentIndex]
     }
 
-    private static func decodeFrames(data: Data) throws -> [AnimationFrame] {
+    private static func decodeFrames(data: Data, item: PageItem? = nil) throws -> [AnimationFrame] {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             throw DocumentSourceError.unsupportedItem
         }
         let count = min(CGImageSourceGetCount(source), 256)
+        if count <= 1, ImageIOCodecRouter.encodedAnimationHint(data) {
+            throw DocumentSourceError.osAnimationUnsupported
+        }
         var frames: [AnimationFrame] = []
         var retainedBytes: UInt64 = 0
         for index in 0..<count {
@@ -1747,7 +1750,10 @@ final class ViewerStore: ObservableObject {
                         session: session, request: request, index: index
                     )
                     defer { bytes.close() }
-                    return try Self.decodeFrames(data: bytes.copy())
+                    return try Self.decodeFrames(data: bytes.copy(), item: PageItem(
+                        id: entryName, url: URL(fileURLWithPath: entryName),
+                        displayName: entryName, isArchive: false
+                    ))
                 }
             } catch {
                 lastError = error
@@ -1762,7 +1768,7 @@ final class ViewerStore: ObservableObject {
             do {
                 switch backend {
                 case .imageIO:
-                    return try Self.decodeFrames(data: data)
+                    return try Self.decodeFrames(data: data, item: item)
                 case .internalCodec:
                     let localURL = try await MaterializeCache.shared.materialize(
                         data,

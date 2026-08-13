@@ -177,4 +177,23 @@ enum ImageIOCodecRouter {
     static func supports(_ type: String) -> Bool {
         ((CGImageSourceCopyTypeIdentifiers() as? [String]) ?? []).contains(type)
     }
+
+    /// Detect an animated container even when ImageIO exposes only a poster
+    /// frame. This lets OS_FIRST fall back to the internal decoder while
+    /// OS_ONLY reports a clear, actionable error.
+    static func encodedAnimationHint(_ data: Data) -> Bool {
+        let bytes = [UInt8](data)
+        if bytes.starts(with: [0x47, 0x49, 0x46, 0x38]) { // GIF8
+            return bytes.dropFirst().filter { $0 == 0x2c }.count > 1
+        }
+        if bytes.starts(with: [0x89, 0x50, 0x4e, 0x47]) { // PNG
+            return data.range(of: Data("acTL".utf8)) != nil
+        }
+        if bytes.count >= 12,
+           bytes[0..<4].elementsEqual([0x52, 0x49, 0x46, 0x46]),
+           bytes[8..<12].elementsEqual([0x57, 0x45, 0x42, 0x50]) { // RIFF/WEBP
+            return data.range(of: Data("ANMF".utf8)) != nil
+        }
+        return false
+    }
 }

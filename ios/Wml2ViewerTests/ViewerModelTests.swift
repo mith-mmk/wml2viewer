@@ -541,6 +541,19 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertEqual(probed, ImageIOCodecRouter.supportedImageExtensions)
     }
 
+    func testImageIODetectsAnimatedContainerWhenOSReturnsPoster() {
+        XCTAssertTrue(ImageIOCodecRouter.encodedAnimationHint(
+            Data([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x2c, 0x00, 0x2c])
+        ))
+        XCTAssertTrue(ImageIOCodecRouter.encodedAnimationHint(
+            Data([0x89, 0x50, 0x4e, 0x47]) + Data("acTL".utf8)
+        ))
+        XCTAssertTrue(ImageIOCodecRouter.encodedAnimationHint(
+            Data("RIFFxxxxWEBPANMF".utf8)
+        ))
+        XCTAssertFalse(ImageIOCodecRouter.encodedAnimationHint(Data("static".utf8)))
+    }
+
     func testMobileFileTypePolicyMatchesAndroidSupportedSet() throws {
         let osExtensions: Set<String> = ["avif", "dng", "heic", "heif"]
         let policy = MobileFileTypePolicy(

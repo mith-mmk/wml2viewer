@@ -27,6 +27,7 @@
 "Theme" = "テーマ";
 "Thumbnail" = "サムネイル";
 "Unsupported document" = "対応していない書類です";
+"This animated image is not supported by the selected OS codec" = "選択したOSコーデックではこのアニメーション画像に対応していません";
 "Unsupported file type. Choose an image, ZIP/LHA/LZH archive, or WMLTXT file." = "このファイル形式には対応していません。画像、ZIP/LHA/LZH書庫、またはWMLTXTファイルを選択してください。";
 "Unsupported file type “.%@”. Choose an image, ZIP/LHA/LZH archive, or WMLTXT file." = "ファイル形式「.%@」には対応していません。画像、ZIP/LHA/LZH書庫、またはWMLTXTファイルを選択してください。";
 "Could not display “%@”. The file may be damaged or use an unsupported variant." = "「%@」を表示できませんでした。ファイルが破損しているか、未対応の形式である可能性があります。";
