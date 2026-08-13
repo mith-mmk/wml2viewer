@@ -16,7 +16,7 @@
 | CODEC-02 | animation fallback | OSがposter化した時の内部fallback、`OS_ONLY`明示error | GIF/APNG/WebPのcontainer markerとImageIO frame countを照合し、poster化を`osAnimationUnsupported`として内部codecへfallback。OS_ONLYはローカライズ済みエラー。52件の単体テストで検証。 |
 | EXPORT-01 | export形式 | 利用可能なPNG/JPEG/WebP lossy/losslessだけ提示 | `ImageIOCodecRouter.availableExportFormats`で実encoderをprobeし、quick menuから形式を選択。PNG/JPEG/WebPは成功したencoderだけ提示し、24時間超のexport tempを生成前にcleanupする。53件の単体テストで回帰。 |
 | CACHE-01 | materialize policy | auto容量、LRU、lease、最低空き1GiB、backup除外 | 合計上限は空き容量10%を256MiB〜2GiBへclampし、1GiB予約を差し引く。単一materializeは64MiB、LRU eviction、起動時孤児掃除、設定上書きを実装。lease中のpinは今後の拡張。 |
-| UI-03 | iPhone landscape | 上部chromeを隠す | 設定値だけで制御し、orientation連動は未実装 |
+| UI-03 | iPhone landscape | 上部chromeを隠す | viewerは常設top chromeを持たず、portrait/landscapeとも画像面と3x3入力を主領域にする。横向きでアイコンが再出現しないことをiPhone回転UI testで検証。 |
 | LIFE-01 | memory warning | current spread以外を解放 | UIApplication memory warning observerでthumbnail・in-flight decodeをpurgeし、表示中spreadと入力を維持 |
 | LIFE-02 | 外部rename | opaque IDで現在項目を維持 | `fileResourceIdentifier`をopaque IDへハッシュし、resource identifierを返すlocal/providerではrename後も維持する回帰を追加。identifierを返さないProviderは名前fallbackのため実機確認が必要 |
 
