@@ -11,6 +11,8 @@
 "Manga mode" = "マンガモード";
 "No document" = "書類がありません";
 "Open" = "開く";
+"Manage Files" = "ファイル管理";
+"Close" = "閉じる";
 "Open a document from Files" = "Filesから書類を開きます";
 "Open a file or folder from Files" = "Filesからファイルまたはフォルダを開いてください";
 "Pages" = "ページ";
@@ -19,10 +21,13 @@
 "Settings" = "設定";
 "Show top controls" = "上部コントロールを表示";
 "Theme" = "テーマ";
+"Thumbnail" = "サムネイル";
 "Unsupported document" = "対応していない書類です";
 "The document is no longer available" = "書類を利用できなくなりました";
 "Select the containing folder for this listed file" = "この一覧ファイルを含むフォルダを選択してください";
 "The selected folder does not contain the opened file" = "選択したフォルダに開いたファイルがありません";
+"No other supported files were found in the selected folder" = "選択したフォルダに他の対応ファイルがありません";
+"No supported files were found in the selected folder" = "選択したフォルダに対応ファイルがありません";
 "Quick menu" = "クイックメニュー";
 "Cancel" = "キャンセル";
 "Swipe navigation" = "スワイプでページ移動";

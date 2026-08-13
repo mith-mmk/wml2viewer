@@ -11,6 +11,8 @@
 "Manga mode" = "Manga mode";
 "No document" = "No document";
 "Open" = "Open";
+"Manage Files" = "Manage Files";
+"Close" = "Close";
 "Open a document from Files" = "Open a document from Files";
 "Open a file or folder from Files" = "Open a file or folder from Files";
 "Pages" = "Pages";
@@ -19,10 +21,13 @@
 "Settings" = "Settings";
 "Show top controls" = "Show top controls";
 "Theme" = "Theme";
+"Thumbnail" = "Thumbnail";
 "Unsupported document" = "Unsupported document";
 "The document is no longer available" = "The document is no longer available";
 "Select the containing folder for this listed file" = "Select the containing folder for this listed file";
 "The selected folder does not contain the opened file" = "The selected folder does not contain the opened file";
+"No other supported files were found in the selected folder" = "No other supported files were found in the selected folder";
+"No supported files were found in the selected folder" = "No supported files were found in the selected folder";
 "Quick menu" = "Quick menu";
 "Cancel" = "Cancel";
 "Swipe navigation" = "Swipe navigation";

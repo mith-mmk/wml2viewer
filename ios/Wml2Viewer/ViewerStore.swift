@@ -4,6 +4,7 @@ import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 import CoreImage
+import OSLog
 
 @MainActor
 final class ViewerStore: ObservableObject {
@@ -24,15 +25,17 @@ final class ViewerStore: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var touchReady = false
     @Published var errorMessage: String?
+    @Published var sourceNoticeMessage: String?
     @Published var showSettings = false
     @Published var showFilmstrip = false
     @Published var showQuickMenu = false
     @Published var exportItem: ExportItem?
     @Published private(set) var animationEnabled = true
     @Published var grayscaleEnabled = false
-    @Published var pendingPicker: PickerRequest?
-    @Published private(set) var isPickerPresented = false
-    @Published private(set) var folderPickerInitialDirectoryURL: URL?
+    @Published var pendingPicker: PickerPresentation?
+    @Published private(set) var filesOpenPhase: FilesOpenFlowPhase = .idle
+    @Published private(set) var sourceConnectionState: SourceConnectionState = .empty
+    @Published private(set) var thumbnails: [String: CGImage] = [:]
     @Published var zoom: CGFloat = 1
     @Published var pan: CGSize = .zero
     @Published private(set) var config = MobileConfigV1()
@@ -52,9 +55,18 @@ final class ViewerStore: ObservableObject {
     private var viewportSize: CGSize = .zero
     private var readingPlan: NativeReadingPlan?
     private var portraitByPageID: [String: Bool] = [:]
-    private var queuedPicker: PickerRequest?
+    private var pickerFlow = FilesOpenFlowMachine()
     private var folderAuthorizationContext: FolderAuthorizationContext?
     private var activeBookmark: ActiveBookmark?
+    private var thumbnailRequests: Set<String> = []
+    private var flowToFinishAfterDismissal: UUID?
+    private var lastPresentedPickerID: UUID?
+    private let filesLog = Logger(
+        subsystem: "io.github.mith-mmk.wml2viewer",
+        category: "FilesOpenFlow"
+    )
+
+    var isPickerPresented: Bool { filesOpenPhase.blocksViewerInput }
 
     private struct FolderAuthorizationContext {
         let selectedOpaqueEntryID: String
@@ -182,88 +194,141 @@ final class ViewerStore: ObservableObject {
     #endif
 
     func requestFilePicker() {
-        guard !isPickerPresented else { return }
-        errorMessage = nil
-        folderPickerInitialDirectoryURL = nil
-        pendingPicker = .file
-        isPickerPresented = true
+        beginPicker(.openTarget)
     }
 
     func requestFolderPicker() {
-        guard !isPickerPresented else { return }
-        errorMessage = nil
         folderAuthorizationContext = nil
-        folderPickerInitialDirectoryURL = nil
-        pendingPicker = .folder
-        isPickerPresented = true
+        beginPicker(.containingFolder)
     }
 
-    func finishPicker(_ result: Result<URL, Error>?) {
-        let completedRequest = pendingPicker
+    func requestFileManagement() {
+        beginPicker(.manageFiles)
+    }
+
+    private func beginPicker(_ request: PickerRequest, initialDirectoryURL: URL? = nil) {
+        errorMessage = nil
+        sourceNoticeMessage = nil
+        flowToFinishAfterDismissal = nil
+        guard let presentation = pickerFlow.begin(
+            request,
+            initialDirectoryURL: initialDirectoryURL
+        ) else { return }
+        pendingPicker = presentation
+        lastPresentedPickerID = presentation.id
+        syncPickerPhase()
+    }
+
+    func finishPicker(
+        _ presentation: PickerPresentation,
+        _ result: Result<URL, Error>?
+    ) {
+        guard pickerFlow.beginResultProcessing(presentation) else { return }
         pendingPicker = nil
+        syncPickerPhase()
         guard let result else {
-            if completedRequest == .folder, folderAuthorizationContext != nil {
+            if presentation.request == .containingFolder,
+               folderAuthorizationContext != nil {
                 folderAuthorizationContext = nil
-                folderPickerInitialDirectoryURL = nil
                 errorMessage = DocumentSourceError.folderRequired.localizedDescription
+                sourceConnectionState = .retryableError
             } else {
                 Task { await reconcileExternalChanges() }
             }
+            finishFlowWhenDismissed(
+                flowID: presentation.flowID,
+                presentationID: presentation.id
+            )
             return
         }
         Task { @MainActor in
             do {
                 let url = try result.get()
-                // An explicit folder picker is authoritative. File Provider URLs do
-                // not have to encode directory-ness with a trailing slash.
                 let resourceIsDirectory = Self.isDirectoryURL(url)
-                let isFolder = completedRequest?.selectionIsFolder(
+                let isFolder = presentation.request.selectionIsFolder(
                     resourceIsDirectory: resourceIsDirectory
-                ) ?? resourceIsDirectory
-                let authorization = completedRequest == .folder ? folderAuthorizationContext : nil
-                if completedRequest == .folder {
+                )
+                let authorization = presentation.request == .containingFolder
+                    ? folderAuthorizationContext : nil
+                if presentation.request == .containingFolder {
                     folderAuthorizationContext = nil
-                    folderPickerInitialDirectoryURL = nil
                 }
-                try await accept(
+                let snapshot = try await accept(
                     url: url,
                     isFolder: isFolder,
                     preferredOpaqueEntryID: authorization?.selectedOpaqueEntryID,
                     preferredFileName: authorization?.selectedFileName,
                     requiresPreferredItem: authorization != nil
                 )
-                if completedRequest == .file,
+                filesLog.info(
+                    "source committed: folder=\(isFolder, privacy: .public) enumerated=\(snapshot.enumeratedItemCount, privacy: .public) supported=\(snapshot.supportedItemCount, privacy: .public)"
+                )
+                if isFolder, snapshot.supportedItemCount == 1 {
+                    sourceNoticeMessage = DocumentSourceError.noOtherSupportedItems.localizedDescription
+                }
+                if presentation.request != .containingFolder,
                    ContainingFolderAuthorizationPolicy.shouldRequest(
                        isFolder: isFolder,
                        isSupported: MobileFileTypePolicy.shared.isSupported(url.lastPathComponent),
                        isArchive: MobileFileTypePolicy.shared.isArchive(url.lastPathComponent)
                    ) {
-                    queueContainingFolderAuthorization(for: url)
+                    queueContainingFolderAuthorization(
+                        for: url,
+                        flowID: presentation.flowID
+                    )
+                } else {
+                    finishFlowWhenDismissed(
+                        flowID: presentation.flowID,
+                        presentationID: presentation.id
+                    )
                 }
-            }
-            catch {
-                if completedRequest == .folder {
+            } catch {
+                if presentation.request == .containingFolder {
                     folderAuthorizationContext = nil
-                    folderPickerInitialDirectoryURL = nil
                 }
+                sourceConnectionState = .retryableError
                 errorMessage = error.localizedDescription
+                filesLog.error("source open failed in phase \(String(describing: presentation.request), privacy: .public)")
+                finishFlowWhenDismissed(
+                    flowID: presentation.flowID,
+                    presentationID: presentation.id
+                )
             }
         }
     }
 
-    func pickerDidDismiss() {
-        guard pendingPicker == nil else {
-            isPickerPresented = true
-            return
+    func pickerDidDismiss(_ presentationID: UUID) {
+        let next = pickerFlow.didDismiss(presentationID)
+        if let next {
+            pendingPicker = next
+            lastPresentedPickerID = next.id
+        } else if let flowID = flowToFinishAfterDismissal,
+                  pickerFlow.flowID == flowID {
+            flowToFinishAfterDismissal = nil
+            pickerFlow.finish(flowID: flowID)
         }
-        isPickerPresented = false
-        guard let queuedPicker else { return }
-        self.queuedPicker = nil
-        DispatchQueue.main.async { [weak self] in
-            guard let self, !self.isPickerPresented else { return }
-            self.pendingPicker = queuedPicker
-            self.isPickerPresented = true
+        syncPickerPhase()
+    }
+
+    func pickerCoverDidDismiss() {
+        guard let lastPresentedPickerID else { return }
+        pickerDidDismiss(lastPresentedPickerID)
+    }
+
+    private func finishFlowWhenDismissed(flowID: UUID, presentationID: UUID) {
+        guard pickerFlow.flowID == flowID,
+              pickerFlow.activePresentationID == presentationID else { return }
+        if pickerFlow.activePresentationWasDismissed {
+            pickerFlow.finish(flowID: flowID)
+            flowToFinishAfterDismissal = nil
+        } else {
+            flowToFinishAfterDismissal = flowID
         }
+        syncPickerPhase()
+    }
+
+    private func syncPickerPhase() {
+        filesOpenPhase = pickerFlow.phase
     }
 
     func openExternalURL(_ url: URL) {
@@ -271,15 +336,18 @@ final class ViewerStore: ObservableObject {
             do {
                 let values = try url.resourceValues(forKeys: [.isDirectoryKey])
                 let isFolder = values.isDirectory == true
-                try await accept(url: url, isFolder: isFolder)
+                let snapshot = try await accept(url: url, isFolder: isFolder)
                 if ContainingFolderAuthorizationPolicy.shouldRequest(
                     isFolder: isFolder,
                     isSupported: MobileFileTypePolicy.shared.isSupported(url.lastPathComponent),
                     isArchive: MobileFileTypePolicy.shared.isArchive(url.lastPathComponent)
                 ) {
-                    queueContainingFolderAuthorization(for: url)
+                    queueContainingFolderAuthorization(for: url, flowID: nil)
+                } else if isFolder, snapshot.supportedItemCount == 1 {
+                    sourceNoticeMessage = DocumentSourceError.noOtherSupportedItems.localizedDescription
                 }
             } catch {
+                sourceConnectionState = .retryableError
                 errorMessage = error.localizedDescription
             }
         }
@@ -370,6 +438,52 @@ final class ViewerStore: ObservableObject {
         persistCurrentLocation()
     }
 
+    func thumbnail(for item: PageItem) -> CGImage? {
+        thumbnails[item.id]
+    }
+
+    func requestThumbnail(for item: PageItem) {
+        guard thumbnails[item.id] == nil,
+              !thumbnailRequests.contains(item.id),
+              let pageIndex = pages.firstIndex(where: { $0.id == item.id }) else { return }
+        thumbnailRequests.insert(item.id)
+        let generation = sourceGeneration
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.thumbnailRequests.remove(item.id) }
+            do {
+                let decoded: CGImage
+                if let archive = self.nativeArchive,
+                   let session = self.nativeSession,
+                   self.archiveEntryIndices.indices.contains(pageIndex) {
+                    let frames = try self.decodeArchiveFrames(
+                        archive: archive,
+                        session: session,
+                        index: self.archiveEntryIndices[pageIndex],
+                        entryName: item.displayName
+                    )
+                    guard let first = frames.first else { return }
+                    decoded = first.image
+                } else {
+                    guard let source = self.source else { return }
+                    let data = try await source.read(item)
+                    if let image = Self.decodeThumbnail(data: data) {
+                        decoded = image
+                    } else {
+                        let frames = try await self.decodeDocumentFrames(data: data, item: item)
+                        guard let first = frames.first else { return }
+                        decoded = first.image
+                    }
+                }
+                guard !Task.isCancelled,
+                      generation == self.sourceGeneration else { return }
+                self.thumbnails[item.id] = Self.scaleThumbnail(decoded, maximumPixelSize: 160)
+            } catch {
+                // A failed thumbnail must not remove the page or block navigation.
+            }
+        }
+    }
+
     func update(_ config: MobileConfigV1) {
         let readingChanged = config.mangaEnabled != self.config.mangaEnabled ||
             config.mangaRTL != self.config.mangaRTL || config.coverAlone != self.config.coverAlone
@@ -391,17 +505,27 @@ final class ViewerStore: ObservableObject {
         let oldIndex = currentIndex
         let oldID = pages.indices.contains(oldIndex) ? pages[oldIndex].id : nil
         do {
-            let refreshed = try await source.list()
+            let snapshot = try await source.snapshot()
+            let refreshed = snapshot.entries
             guard !refreshed.isEmpty else {
                 pages = []
                 currentIndex = 0
                 image = nil
                 spreadImages = []
                 touchReady = false
-                errorMessage = DocumentSourceError.unsupportedItem.localizedDescription
+                sourceConnectionState = .retryableError
+                errorMessage = source.isFolder
+                    ? DocumentSourceError.noSupportedItems.localizedDescription
+                    : DocumentSourceError.unsupportedItem.localizedDescription
                 return
             }
             pages = refreshed
+            sourceConnectionState = source.isFolder
+                ? .folder(
+                    enumerated: snapshot.enumeratedItemCount,
+                    supported: snapshot.supportedItemCount
+                )
+                : .singleFile
             currentIndex = ExternalPageReconciler.index(
                 oldIndex: oldIndex, oldID: oldID, refreshedIDs: refreshed.map(\.id)
             ) ?? 0
@@ -419,13 +543,16 @@ final class ViewerStore: ObservableObject {
         preferredOpaqueEntryID: String? = nil,
         preferredFileName: String? = nil,
         requiresPreferredItem: Bool = false
-    ) async throws {
+    ) async throws -> SourceSnapshot {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let bookmark = try url.bookmarkData(options: [.suitableForBookmarkFile], includingResourceValuesForKeys: nil, relativeTo: nil)
         let newSource = SecurityScopedDocumentSource(sourceID: UUID(), displayName: url.lastPathComponent, rootURL: url, isFolder: isFolder)
-        let listedPages = try await newSource.list()
-        guard !listedPages.isEmpty else { throw DocumentSourceError.unsupportedItem }
+        let snapshot = try await newSource.snapshot()
+        let listedPages = snapshot.entries
+        guard !listedPages.isEmpty else {
+            throw isFolder ? DocumentSourceError.noSupportedItems : DocumentSourceError.unsupportedItem
+        }
         let preferredIndex: Int
         if let preferredFileName {
             if let matched = DocumentEntryMatcher.index(
@@ -457,21 +584,38 @@ final class ViewerStore: ObservableObject {
             opaqueEntryID: pages[currentIndex].id,
             logicalPageIndex: currentIndex
         ))
+        sourceConnectionState = isFolder
+            ? .folder(
+                enumerated: snapshot.enumeratedItemCount,
+                supported: snapshot.supportedItemCount
+            )
+            : .singleFile
+        return snapshot
     }
 
-    private func queueContainingFolderAuthorization(for selectedURL: URL) {
+    private func queueContainingFolderAuthorization(
+        for selectedURL: URL,
+        flowID: UUID?
+    ) {
         let scoped = selectedURL.startAccessingSecurityScopedResource()
         defer { if scoped { selectedURL.stopAccessingSecurityScopedResource() } }
         folderAuthorizationContext = FolderAuthorizationContext(
             selectedOpaqueEntryID: DocumentEntryIdentity.opaqueIdentifier(for: selectedURL),
             selectedFileName: selectedURL.lastPathComponent
         )
-        folderPickerInitialDirectoryURL = selectedURL.deletingLastPathComponent()
-        if isPickerPresented {
-            queuedPicker = .folder
+        let initialDirectoryURL = selectedURL.deletingLastPathComponent()
+        if let flowID {
+            guard pickerFlow.flowID == flowID else { return }
+            if let presentation = pickerFlow.queueFollowUp(
+                .containingFolder,
+                initialDirectoryURL: initialDirectoryURL
+            ) {
+                pendingPicker = presentation
+                lastPresentedPickerID = presentation.id
+            }
+            syncPickerPhase()
         } else {
-            pendingPicker = .folder
-            isPickerPresented = true
+            beginPicker(.containingFolder, initialDirectoryURL: initialDirectoryURL)
         }
     }
 
@@ -506,8 +650,13 @@ final class ViewerStore: ObservableObject {
         preferredFileName: String? = nil,
         preferredIndex: Int
     ) async throws {
-        let listedPages = try await source.list()
-        guard !listedPages.isEmpty else { throw DocumentSourceError.unsupportedItem }
+        let snapshot = try await source.snapshot()
+        let listedPages = snapshot.entries
+        guard !listedPages.isEmpty else {
+            throw source.isFolder
+                ? DocumentSourceError.noSupportedItems
+                : DocumentSourceError.unsupportedItem
+        }
         let restoredIndex = preferredOpaqueEntryID.flatMap { opaqueID in
             DocumentEntryMatcher.index(
                 selectedOpaqueEntryID: opaqueID,
@@ -516,6 +665,12 @@ final class ViewerStore: ObservableObject {
             )
         } ?? preferredIndex
         try commitOpen(source: source, listedPages: listedPages, preferredIndex: restoredIndex)
+        sourceConnectionState = source.isFolder
+            ? .folder(
+                enumerated: snapshot.enumeratedItemCount,
+                supported: snapshot.supportedItemCount
+            )
+            : .singleFile
     }
 
     private func commitOpen(
@@ -531,6 +686,8 @@ final class ViewerStore: ObservableObject {
         archiveParentPages = nil
         sourceGeneration += 1
         portraitByPageID.removeAll()
+        thumbnails.removeAll()
+        thumbnailRequests.removeAll()
         let generation = sourceGeneration
         self.source = source
         pages = listedPages
@@ -702,6 +859,37 @@ final class ViewerStore: ObservableObject {
         return frames
     }
 
+    private static func decodeThumbnail(data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 160,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: false,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    private static func scaleThumbnail(_ image: CGImage, maximumPixelSize: Int) -> CGImage {
+        let longest = max(image.width, image.height)
+        guard longest > maximumPixelSize else { return image }
+        let scale = CGFloat(maximumPixelSize) / CGFloat(longest)
+        let width = max(1, Int(CGFloat(image.width) * scale))
+        let height = max(1, Int(CGFloat(image.height) * scale))
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        context.interpolationQuality = .medium
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage() ?? image
+    }
+
     private func decodeArchiveFrames(
         archive: NativeArchive, session: NativeSession, index: Int, entryName: String
     ) throws -> [AnimationFrame] {
@@ -818,6 +1006,9 @@ final class ViewerStore: ObservableObject {
             self.nativeSession = session
             self.nativeArchive = archive
             self.archiveEntryIndices = entryIndices
+            self.thumbnails.removeAll()
+            self.thumbnailRequests.removeAll()
+            self.sourceConnectionState = .archive(entries: entries.count)
         }
         loadCurrent()
     }
@@ -842,22 +1033,34 @@ final class ViewerStore: ObservableObject {
         return readingPlan
     }
 
-    func installQueuedFolderPickerForTest(selectedURL: URL) {
+    @discardableResult
+    func installQueuedFolderPickerForTest(selectedURL: URL) -> UUID? {
+        guard let primary = pickerFlow.begin(.openTarget) else { return nil }
+        pendingPicker = primary
+        lastPresentedPickerID = primary.id
+        _ = pickerFlow.beginResultProcessing(primary)
         pendingPicker = nil
-        isPickerPresented = true
-        queueContainingFolderAuthorization(for: selectedURL)
+        queueContainingFolderAuthorization(for: selectedURL, flowID: primary.flowID)
+        syncPickerPhase()
+        return primary.id
     }
 
-    func installPendingFolderCancellationForTest(selectedURL: URL) {
+    @discardableResult
+    func installPendingFolderCancellationForTest(selectedURL: URL) -> PickerPresentation? {
         installTestPages(count: 2)
         touchReady = true
         folderAuthorizationContext = FolderAuthorizationContext(
             selectedOpaqueEntryID: DocumentEntryIdentity.opaqueIdentifier(for: selectedURL),
             selectedFileName: selectedURL.lastPathComponent
         )
-        folderPickerInitialDirectoryURL = selectedURL.deletingLastPathComponent()
-        pendingPicker = .folder
-        isPickerPresented = true
+        guard let presentation = pickerFlow.begin(
+            .containingFolder,
+            initialDirectoryURL: selectedURL.deletingLastPathComponent()
+        ) else { return nil }
+        pendingPicker = presentation
+        lastPresentedPickerID = presentation.id
+        syncPickerPhase()
+        return presentation
     }
 
     private static func decodeNativeRGBA(_ data: Data, width: Int, height: Int, stride: Int) throws -> CGImage {

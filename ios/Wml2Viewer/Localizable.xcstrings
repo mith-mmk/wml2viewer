@@ -1,6 +1,7 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Close" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "閉じる" } } } },
     "About" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "情報" } } } },
     "Appearance" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "外観" } } } },
     "Choose folder" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "フォルダを選択" } } } },
@@ -10,9 +11,12 @@
     "Fit" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "表示方法" } } } },
     "Image" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "画像" } } } },
     "Keep screen awake" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "画面をスリープさせない" } } } },
+    "Manage Files" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "ファイル管理" } } } },
     "Manga" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "マンガ" } } } },
     "Manga mode" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "マンガモード" } } } },
     "No document" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "書類がありません" } } } },
+    "No other supported files were found in the selected folder" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択したフォルダに他の対応ファイルがありません" } } } },
+    "No supported files were found in the selected folder" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択したフォルダに対応ファイルがありません" } } } },
     "Open" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "開く" } } } },
     "Open a document from Files" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "Filesから書類を開きます" } } } },
     "Open a file or folder from Files" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "Filesからファイルまたはフォルダを開いてください" } } } },
@@ -22,6 +26,7 @@
     "Settings" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "設定" } } } },
     "Show top controls" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "上部コントロールを表示" } } } },
     "Theme" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "テーマ" } } } },
+    "Thumbnail" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "サムネイル" } } } },
     "Unsupported document" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "対応していない書類です" } } } },
     "The document is no longer available" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "書類を利用できなくなりました" } } } },
     "Select the containing folder for this listed file" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "この一覧ファイルを含むフォルダを選択してください" } } } },

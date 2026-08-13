@@ -2,15 +2,16 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
 
-/// Native Files browser used for the primary open action. Copy/move/rename/delete/share
-/// remain owned by UIDocumentBrowserViewController and its File Provider.
+/// Native Files management browser. The primary open action uses the mixed
+/// file/folder document picker; copy/move/rename/delete/share remain owned by
+/// UIDocumentBrowserViewController and its File Provider.
 struct DocumentBrowserView: UIViewControllerRepresentable {
     var onPick: (Result<URL, Error>?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
     func makeUIViewController(context: Context) -> UIDocumentBrowserViewController {
-        // Document Browser grants the selected document only. Folder scope is
-        // requested separately with UIDocumentPickerViewController(.folder).
+        // Management may still open a selected document, but it never implies
+        // access to that document's containing directory.
         let controller = UIDocumentBrowserViewController(forOpening: [UTType.item])
         controller.delegate = context.coordinator
         controller.allowsDocumentCreation = false

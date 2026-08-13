@@ -6,19 +6,118 @@ struct EntryRef: Hashable, Codable, Sendable {
     let opaqueEntryID: String
 }
 
-enum PickerRequest: Identifiable, Hashable {
-    case file
-    case folder
+enum PickerRequest: Hashable {
+    case openTarget
+    case containingFolder
+    case manageFiles
 
-    var id: String {
+    var acceptsFolders: Bool {
         switch self {
-        case .file: "file"
-        case .folder: "folder"
+        case .openTarget, .containingFolder: true
+        case .manageFiles: false
         }
     }
 
     func selectionIsFolder(resourceIsDirectory: Bool) -> Bool {
-        self == .folder || resourceIsDirectory
+        self == .containingFolder || resourceIsDirectory
+    }
+}
+
+struct PickerPresentation: Identifiable, Hashable {
+    let id: UUID
+    let flowID: UUID
+    let request: PickerRequest
+    let initialDirectoryURL: URL?
+}
+
+enum FilesOpenFlowPhase: Equatable {
+    case idle
+    case presenting(PickerRequest)
+    case processing(PickerRequest)
+
+    var blocksViewerInput: Bool { self != .idle }
+}
+
+enum SourceConnectionState: Equatable {
+    case empty
+    case singleFile
+    case folder(enumerated: Int, supported: Int)
+    case archive(entries: Int)
+    case retryableError
+}
+
+/// Serializes UIKit picker completion, SwiftUI dismissal, and a possible
+/// containing-folder follow-up. Every presentation has a unique token, so a
+/// delayed File Provider callback cannot complete a newer flow.
+struct FilesOpenFlowMachine {
+    private(set) var flowID: UUID?
+    private(set) var phase: FilesOpenFlowPhase = .idle
+    private(set) var activePresentationID: UUID?
+    private(set) var activePresentationWasDismissed = false
+    private var queuedRequest: (PickerRequest, URL?)?
+
+    mutating func begin(
+        _ request: PickerRequest,
+        initialDirectoryURL: URL? = nil,
+        flowID requestedFlowID: UUID? = nil
+    ) -> PickerPresentation? {
+        guard phase == .idle else { return nil }
+        let flowID = requestedFlowID ?? UUID()
+        self.flowID = flowID
+        return present(request, initialDirectoryURL: initialDirectoryURL, flowID: flowID)
+    }
+
+    mutating func beginResultProcessing(_ presentation: PickerPresentation) -> Bool {
+        guard presentation.flowID == flowID,
+              presentation.id == activePresentationID,
+              case .presenting(let request) = phase,
+              request == presentation.request else { return false }
+        phase = .processing(request)
+        return true
+    }
+
+    mutating func queueFollowUp(
+        _ request: PickerRequest,
+        initialDirectoryURL: URL?
+    ) -> PickerPresentation? {
+        guard let flowID else { return nil }
+        if activePresentationWasDismissed {
+            return present(request, initialDirectoryURL: initialDirectoryURL, flowID: flowID)
+        }
+        queuedRequest = (request, initialDirectoryURL)
+        return nil
+    }
+
+    mutating func didDismiss(_ presentationID: UUID) -> PickerPresentation? {
+        guard presentationID == activePresentationID else { return nil }
+        activePresentationWasDismissed = true
+        guard let flowID, let queuedRequest else { return nil }
+        self.queuedRequest = nil
+        return present(
+            queuedRequest.0,
+            initialDirectoryURL: queuedRequest.1,
+            flowID: flowID
+        )
+    }
+
+    mutating func finish(flowID: UUID) {
+        guard self.flowID == flowID else { return }
+        self = FilesOpenFlowMachine()
+    }
+
+    private mutating func present(
+        _ request: PickerRequest,
+        initialDirectoryURL: URL?,
+        flowID: UUID
+    ) -> PickerPresentation {
+        let presentation = PickerPresentation(
+            id: UUID(), flowID: flowID, request: request,
+            initialDirectoryURL: initialDirectoryURL
+        )
+        phase = .presenting(request)
+        activePresentationID = presentation.id
+        activePresentationWasDismissed = false
+        return presentation
     }
 }
 

@@ -55,10 +55,12 @@ disk、network、File Provider download、native decode、全画面pixel変換�
 
 ### 3.1 OSファイラーへの全面委譲
 
-ファイラー画面には`UIDocumentBrowserViewController`を使用し、SwiftUIから全画面で提示する。Document Browserが提供するcopy、move、rename、delete、shareを使用し、同等のファイル操作UIをアプリ内に実装しない。
+3×3上中央の標準open actionには、ファイルとフォルダの両方を選択できる`UIDocumentPickerViewController`を使用する。フォルダをsourceとして選択できることを通常導線とし、画像1ファイルのsecurity scopeから親フォルダや兄弟項目を推測しない。
+
+copy、move、rename、delete、shareを行う管理画面には`UIDocumentBrowserViewController`を使用し、long press quick menuの「ファイル管理」から全画面で提示する。同等のファイル操作UIはアプリ内に実装しない。
 
 - 公式仕様: [UIDocumentBrowserAction](https://developer.apple.com/documentation/uikit/uidocumentbrowseraction)
-- ローカル、iCloud、第三者File Providerを同じDocument Browserから扱う
+- ローカル、iCloud、第三者File Providerを同じ混在Document Pickerから扱う
 - Filesで接続済みのSMB serverも同じ入口から扱う
 - SMB接続方法: [Apple Support](https://support.apple.com/en-mide/guide/iphone/iphe9aff429a/ios)
 - 第三者クラウド: [Apple Support](https://support.apple.com/en-euro/102238)
@@ -67,14 +69,15 @@ disk、network、File Provider download、native decode、全画面pixel変換�
 - ファイル操作のためのRoom相当DB、background transfer journal、通知serviceは作らない
 - アプリ内にsource一覧や「最近開いた項目」画面を作らない
 
-Document Browserは対応ファイルの選択に使う。フォルダ自体を閲覧sourceとして選ぶ操作は、追加の「フォルダを開く」ボタンから`UIDocumentPickerViewController`を`.folder`指定で提示して補完する。
+open pickerは`.folder`と`.item`を受け付ける。フォルダ選択時は直下をsourceとして列挙し、ファイル選択時はその項目だけを開く。通常画像を選択した場合に限り、open pickerのdismiss完了後に`.folder` pickerを提示して包含フォルダの許可を追加取得する。
 
 - 公式仕様: [Providing access to directories](https://developer.apple.com/documentation/uikit/providing-access-to-directories)
 - pickerはcopyではなくopen-in-placeで使用する
 - 選択は単一項目とする
 - キャンセルはエラーにせず、直前のviewerを維持する
 - picker表示中に重複してpickerを提示しない
-- cold launch / warm launch / picker resultは`DocumentOpenCoordinator`で直列化する
+- cold launch / warm launch / picker resultはflow ID付きの`DocumentOpenCoordinator`で直列化する
+- providerの遅延callbackはpresentation IDとflow IDが一致する場合だけ採用する
 
 ### 3.2 sourceとentryの識別
 
@@ -106,10 +109,10 @@ EntryRef(sourceId, opaqueEntryId)
 単一ファイルを選択した場合:
 
 - 通常画像はまず1項目だけをsourceとして表示する
-- Document Browserを閉じた後、`.folder`のDocument Pickerで包含フォルダの明示的な許可を求める
+- ファイル／フォルダopen pickerを閉じた後、`.folder`のDocument Pickerで包含フォルダの明示的な許可を求める
 - 包含フォルダの許可後だけ直下の対応項目を列挙し、元の選択画像の位置から前後移動できるようにする
 - 包含フォルダの選択をキャンセルした場合は、単一画像sourceとして表示を維持する
-- folder pickerはDocument Browserのdismiss完了後に直列提示し、選択ファイルの親を初期位置として提案する
+- folder pickerは最初のpickerのdismiss完了後に直列提示し、選択ファイルの親を初期位置として提案する
 - 許可後はFile Providerのresource identifierを優先し、同一ファイル名をfallbackとして元画像のindexを維持する
 - folder bookmarkには選択項目のopaque entry IDとlogical indexを保存し、前後移動や外部変更後に更新する
 - ZIP / LHA / LZHは書庫内entryをページとして扱う
@@ -120,12 +123,16 @@ EntryRef(sourceId, opaqueEntryId)
 フォルダを選択した場合:
 
 - 選択フォルダ直下だけを列挙する
+- File Provider placeholderでは`isRegularFile`が未取得でも除外せず、明確にdirectoryの項目だけを除外する
 - サブフォルダを再帰的に混在させない
 - 対応画像、ZIP、LHA/LZH、`.wmltxt`をsort設定に従って並べる
 - subdirectoryはfilmstripへ表示しない
 - 別フォルダへ移動する場合は再度OSファイラーを開く
 - 選択項目が画像または書庫ならviewerを前面に戻す
 - 空フォルダまたは対応項目がない場合は再選択可能なempty stateを表示する
+- 対応項目が1件だけの場合は、接続成功を維持したまま「他の対応ファイルなし」を表示する
+
+サブフォルダの再帰列挙は初版では実装しない。順序、重複、上限、Provider負荷、フォルダ終端動作を決定した後のTODOとする。
 
 単一選択した`.wmltxt`が兄弟または子孫ファイルを参照する場合、ファイル単体のsecurity scopeでは解決しない。次の手順を使う。
 
@@ -201,7 +208,8 @@ bookmarkは`BookmarkStore`がApplication Supportにatomic保存する。設定�
 
 - portrait / landscapeともviewerを全画面の主画面とする
 - compact landscapeでは上部chromeを非表示にして画像領域を優先する
-- filer actionはDocument Browserを全画面表示する
+- filer actionはファイル／フォルダ混在Document Pickerを全画面表示する
+- Document Browserはlong press quick menuの「ファイル管理」からだけ表示する
 - settingsは全画面sheetまたはnavigation stackで表示する
 - filmstripは下部sheetとして表示する
 - file選択後はdecode完了を待たずviewerへ戻り、loading stateを表示する

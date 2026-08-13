@@ -3,19 +3,22 @@ import UniformTypeIdentifiers
 import UIKit
 
 struct SystemDocumentPicker: UIViewControllerRepresentable {
-    let request: PickerRequest
-    let initialDirectoryURL: URL?
+    let presentation: PickerPresentation
     let completion: (Result<URL, Error>?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let types: [UTType] = request == .folder ? [.folder] : [.item]
+        let types: [UTType] = switch presentation.request {
+        case .openTarget: [.folder, .item]
+        case .containingFolder: [.folder]
+        case .manageFiles: [.item]
+        }
         let controller = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
         controller.delegate = context.coordinator
         controller.allowsMultipleSelection = false
-        if request == .folder {
-            controller.directoryURL = initialDirectoryURL
+        if presentation.request == .containingFolder {
+            controller.directoryURL = presentation.initialDirectoryURL
         }
         return controller
     }

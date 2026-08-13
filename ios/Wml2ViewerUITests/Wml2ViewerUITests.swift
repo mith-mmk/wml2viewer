@@ -31,7 +31,7 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(surface.exists)
     }
 
-    func testSystemDocumentBrowserPresentation() throws {
+    func testMixedFileAndFolderPickerPresentation() throws {
         let app = XCUIApplication()
         app.launch()
 
@@ -44,6 +44,25 @@ final class Wml2ViewerUITests: XCTestCase {
             object: surface
         )
         XCTAssertEqual(XCTWaiter.wait(for: [browserPresented], timeout: 10), .completed)
+    }
+
+    func testQuickMenuKeepsDocumentBrowserAsFileManagementAction() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launch()
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.6)
+        let manageFiles = app.buttons.matching(identifier: "quickMenu.manageFiles").firstMatch
+        XCTAssertTrue(manageFiles.waitForExistence(timeout: 5))
+        manageFiles.tap()
+        let close = app.buttons["documentBrowser.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        XCTAssertFalse(surface.isHittable)
+        close.tap()
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        XCTAssertTrue(surface.isHittable)
     }
 
     func testRotationKeepsViewerControlsInteractive() throws {
@@ -102,12 +121,17 @@ final class Wml2ViewerUITests: XCTestCase {
         let current = app.descendants(matching: .any)["viewer.currentImage"]
         XCTAssertTrue(current.waitForExistence(timeout: 10))
         XCTAssertEqual(current.label, "page-01.png")
+        XCTAssertEqual(app.otherElements["viewer.touchSurface"].value as? String, "1 / 3")
         app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         let next = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'viewer.currentImage' AND label == 'page-02.png'")).firstMatch
         XCTAssertTrue(next.waitForExistence(timeout: 10))
         app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
         let previous = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'viewer.currentImage' AND label == 'page-01.png'")).firstMatch
         XCTAssertTrue(previous.waitForExistence(timeout: 10))
+        app.otherElements["viewer.touchSurface"]
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82)).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["filmstrip.panel"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["filmstrip.thumbnail.0"].waitForExistence(timeout: 10))
     }
 
     func testJapaneseSystemLanguageUsesJapaneseStrings() throws {

@@ -95,6 +95,20 @@ struct FilmstripView: View {
                     store.select(index: index)
                 } label: {
                     HStack {
+                        Group {
+                            if let thumbnail = store.thumbnail(for: item) {
+                                Image(decorative: thumbnail, scale: 1)
+                                    .resizable()
+                                    .scaledToFit()
+                            } else {
+                                Image(systemName: item.isArchive ? "archivebox" : "photo")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(width: 48, height: 56)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(String(localized: "Thumbnail"))
+                        .accessibilityIdentifier("filmstrip.thumbnail.\(index)")
                         Text("\(index + 1)").monospacedDigit().foregroundStyle(.secondary)
                         Text(item.displayName).lineLimit(1)
                         Spacer()
@@ -102,6 +116,7 @@ struct FilmstripView: View {
                     }
                 }
                 .accessibilityAddTraits(index == store.currentIndex ? .isSelected : [])
+                .onAppear { store.requestThumbnail(for: item) }
             }
             .accessibilityIdentifier("filmstrip.list")
             .navigationTitle(String(localized: "Pages"))

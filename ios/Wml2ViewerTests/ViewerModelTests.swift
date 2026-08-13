@@ -71,9 +71,51 @@ final class ViewerModelTests: XCTestCase {
     }
 
     func testFolderPickerContractDoesNotDependOnProviderURLTrailingSlash() {
-        XCTAssertTrue(PickerRequest.folder.selectionIsFolder(resourceIsDirectory: false))
-        XCTAssertTrue(PickerRequest.file.selectionIsFolder(resourceIsDirectory: true))
-        XCTAssertFalse(PickerRequest.file.selectionIsFolder(resourceIsDirectory: false))
+        XCTAssertTrue(PickerRequest.containingFolder.selectionIsFolder(resourceIsDirectory: false))
+        XCTAssertTrue(PickerRequest.openTarget.selectionIsFolder(resourceIsDirectory: true))
+        XCTAssertFalse(PickerRequest.openTarget.selectionIsFolder(resourceIsDirectory: false))
+        XCTAssertTrue(PickerRequest.openTarget.acceptsFolders)
+        XCTAssertFalse(PickerRequest.manageFiles.acceptsFolders)
+    }
+
+    func testFilesOpenFlowSerializesFollowUpAndRejectsStaleCallbacks() {
+        var flow = FilesOpenFlowMachine()
+        let primary = try! XCTUnwrap(flow.begin(.openTarget))
+        XCTAssertEqual(flow.phase, .presenting(.openTarget))
+        XCTAssertTrue(flow.beginResultProcessing(primary))
+        XCTAssertEqual(flow.phase, .processing(.openTarget))
+        XCTAssertNil(flow.queueFollowUp(
+            .containingFolder,
+            initialDirectoryURL: URL(fileURLWithPath: "/provider/folder")
+        ))
+
+        let folder = try! XCTUnwrap(flow.didDismiss(primary.id))
+        XCTAssertEqual(folder.request, .containingFolder)
+        XCTAssertEqual(folder.flowID, primary.flowID)
+        XCTAssertNotEqual(folder.id, primary.id)
+        XCTAssertFalse(flow.beginResultProcessing(primary))
+        XCTAssertTrue(flow.beginResultProcessing(folder))
+        flow.finish(flowID: folder.flowID)
+        XCTAssertEqual(flow.phase, .idle)
+    }
+
+    func testProviderPlaceholderDoesNotRequireRegularFileMetadata() {
+        XCTAssertTrue(DirectoryEntryPolicy.includes(
+            name: "cloud-page.png", isDirectory: false,
+            isRegularFile: nil, declaredMime: "image/png"
+        ))
+        XCTAssertTrue(DirectoryEntryPolicy.includes(
+            name: "smb-page.mag", isDirectory: nil,
+            isRegularFile: nil, declaredMime: nil
+        ))
+        XCTAssertFalse(DirectoryEntryPolicy.includes(
+            name: "looks-like-image.png", isDirectory: true,
+            isRegularFile: nil, declaredMime: "image/png"
+        ))
+        XCTAssertFalse(DirectoryEntryPolicy.includes(
+            name: "notes.txt", isDirectory: false,
+            isRegularFile: nil, declaredMime: "text/plain"
+        ))
     }
 
     func testContainingFolderAuthorizationOnlyFollowsOrdinaryImageSelection() {
@@ -192,7 +234,10 @@ final class ViewerModelTests: XCTestCase {
         let source = SecurityScopedDocumentSource(
             sourceID: UUID(), displayName: "fixture", rootURL: root, isFolder: true
         )
-        let items = try await source.list()
+        let snapshot = try await source.snapshot()
+        let items = snapshot.entries
+        XCTAssertEqual(snapshot.enumeratedItemCount, 5)
+        XCTAssertEqual(snapshot.supportedItemCount, 3)
         XCTAssertEqual(items.map(\.displayName), ["001.jpg", "002.png", "003.mag"])
         XCTAssertEqual(DocumentEntryMatcher.index(
             selectedOpaqueEntryID: DocumentEntryIdentity.opaqueIdentifier(for: selected),
@@ -260,15 +305,19 @@ final class ViewerModelTests: XCTestCase {
     func testFolderPickerIsQueuedUntilDocumentBrowserDismisses() async {
         let store = ViewerStore()
         let selected = URL(fileURLWithPath: "/provider/folder/002.png")
-        store.installQueuedFolderPickerForTest(selectedURL: selected)
+        let primaryID = try! XCTUnwrap(store.installQueuedFolderPickerForTest(selectedURL: selected))
 
         XCTAssertNil(store.pendingPicker)
         XCTAssertTrue(store.isPickerPresented)
-        XCTAssertEqual(store.folderPickerInitialDirectoryURL, selected.deletingLastPathComponent())
+        XCTAssertEqual(store.filesOpenPhase, .processing(.openTarget))
 
-        store.pickerDidDismiss()
+        store.pickerDidDismiss(primaryID)
         await Task.yield()
-        XCTAssertEqual(store.pendingPicker, .folder)
+        XCTAssertEqual(store.pendingPicker?.request, .containingFolder)
+        XCTAssertEqual(
+            store.pendingPicker?.initialDirectoryURL,
+            selected.deletingLastPathComponent()
+        )
         XCTAssertTrue(store.isPickerPresented)
     }
 
@@ -276,14 +325,18 @@ final class ViewerModelTests: XCTestCase {
     func testFolderPickerCancellationKeepsSingleSourceInteractive() {
         let store = ViewerStore()
         let selected = URL(fileURLWithPath: "/provider/folder/002.png")
-        store.installPendingFolderCancellationForTest(selectedURL: selected)
+        let presentation = try! XCTUnwrap(
+            store.installPendingFolderCancellationForTest(selectedURL: selected)
+        )
         let originalPages = store.pages
 
-        store.finishPicker(nil)
+        store.finishPicker(presentation, nil)
 
         XCTAssertEqual(store.pages, originalPages)
         XCTAssertTrue(store.touchReady)
         XCTAssertEqual(store.errorMessage, DocumentSourceError.folderRequired.localizedDescription)
-        XCTAssertNil(store.folderPickerInitialDirectoryURL)
+        XCTAssertEqual(store.sourceConnectionState, .retryableError)
+        store.pickerDidDismiss(presentation.id)
+        XCTAssertEqual(store.filesOpenPhase, .idle)
     }
 }

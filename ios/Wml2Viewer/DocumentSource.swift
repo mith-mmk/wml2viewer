@@ -8,8 +8,21 @@ protocol DocumentSource: Sendable {
     var rootURL: URL { get }
     var isFolder: Bool { get }
 
-    func list() async throws -> [PageItem]
+    func snapshot() async throws -> SourceSnapshot
     func read(_ item: PageItem) async throws -> Data
+}
+
+struct SourceSnapshot: Sendable, Equatable {
+    let entries: [PageItem]
+    let enumeratedItemCount: Int
+
+    var supportedItemCount: Int { entries.count }
+}
+
+extension DocumentSource {
+    func list() async throws -> [PageItem] {
+        try await snapshot().entries
+    }
 }
 
 struct SecurityScopedDocumentSource: DocumentSource, @unchecked Sendable {
@@ -18,76 +31,113 @@ struct SecurityScopedDocumentSource: DocumentSource, @unchecked Sendable {
     let rootURL: URL
     let isFolder: Bool
 
-    func list() async throws -> [PageItem] {
+    func snapshot() async throws -> SourceSnapshot {
         try await withSecurityScope {
             if isFolder {
-                return try coordinatedRead(at: rootURL) { coordinatedRoot in
-                    let keys: Set<URLResourceKey> = [.isRegularFileKey, .isDirectoryKey, .nameKey]
+                return try await coordinatedRead(at: rootURL) { coordinatedRoot in
+                    let keys: Set<URLResourceKey> = [
+                        .isRegularFileKey, .isDirectoryKey, .nameKey, .contentTypeKey,
+                    ]
                     let urls = try FileManager.default.contentsOfDirectory(
                         at: coordinatedRoot,
                         includingPropertiesForKeys: Array(keys),
                         options: [.skipsHiddenFiles]
                     )
-                    return urls.compactMap(Self.pageItem(for:)).sorted {
+                    let entries = urls.compactMap(Self.pageItem(for:)).sorted {
                         $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
                     }
+                    return SourceSnapshot(
+                        entries: entries,
+                        enumeratedItemCount: urls.count
+                    )
                 }
             }
-            return try coordinatedRead(at: rootURL) { coordinatedURL in
-                [PageItem(
-                    id: DocumentEntryIdentity.opaqueIdentifier(for: coordinatedURL),
-                    url: coordinatedURL,
-                    displayName: displayName,
-                    isArchive: Self.isArchive(coordinatedURL)
-                )]
+            return try await coordinatedRead(at: rootURL) { coordinatedURL in
+                SourceSnapshot(
+                    entries: [PageItem(
+                        id: DocumentEntryIdentity.opaqueIdentifier(for: coordinatedURL),
+                        url: coordinatedURL,
+                        displayName: displayName,
+                        isArchive: Self.isArchive(coordinatedURL)
+                    )],
+                    enumeratedItemCount: 1
+                )
             }
         }
     }
 
     func read(_ item: PageItem) async throws -> Data {
         try await withSecurityScope {
-            try coordinatedRead(at: item.url) { coordinatedURL in
+            try await coordinatedRead(at: item.url) { coordinatedURL in
                 try Data(contentsOf: coordinatedURL, options: [.mappedIfSafe])
             }
         }
     }
 
-    private func withSecurityScope<T: Sendable>(_ operation: () throws -> T) async throws -> T {
+    private func withSecurityScope<T: Sendable>(
+        _ operation: () async throws -> T
+    ) async throws -> T {
         let scoped = rootURL.startAccessingSecurityScopedResource()
         defer { if scoped { rootURL.stopAccessingSecurityScopedResource() } }
-        return try operation()
+        return try await operation()
     }
 
-    private func coordinatedRead<T>(at url: URL, operation: (URL) throws -> T) throws -> T {
-        let coordinator = NSFileCoordinator(filePresenter: nil)
-        var coordinationError: NSError?
-        var result: Result<T, Error>?
-        coordinator.coordinate(
-            readingItemAt: url,
-            options: .withoutChanges,
-            error: &coordinationError
-        ) { coordinatedURL in
-            result = Result { try operation(coordinatedURL) }
+    private func coordinatedRead<T: Sendable>(
+        at url: URL,
+        operation: @escaping @Sendable (URL) throws -> T
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            let coordinator = NSFileCoordinator(filePresenter: nil)
+            let intent = NSFileAccessIntent.readingIntent(with: url, options: .withoutChanges)
+            let queue = OperationQueue()
+            queue.qualityOfService = .userInitiated
+            coordinator.coordinate(with: [intent], queue: queue) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(with: Result { try operation(intent.url) })
+            }
         }
-        if let coordinationError { throw coordinationError }
-        guard let result else { throw CocoaError(.fileReadUnknown) }
-        return try result.get()
     }
 
     private static func pageItem(for url: URL) -> PageItem? {
-        guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey]),
-              values.isRegularFile == true else { return nil }
+        let values = try? url.resourceValues(forKeys: [
+            .isDirectoryKey, .isRegularFileKey, .nameKey, .contentTypeKey,
+        ])
+        let name = values?.name ?? url.lastPathComponent
+        guard DirectoryEntryPolicy.includes(
+            name: name,
+            isDirectory: values?.isDirectory,
+            isRegularFile: values?.isRegularFile,
+            declaredMime: values?.contentType?.preferredMIMEType
+        ) else { return nil }
         let item = PageItem(
             id: DocumentEntryIdentity.opaqueIdentifier(for: url),
             url: url,
-            displayName: url.lastPathComponent,
+            displayName: name,
             isArchive: isArchive(url)
         )
-        return item.isSupported ? item : nil
+        return item
     }
 
     private static func isArchive(_ url: URL) -> Bool {
         MobileFileTypePolicy.shared.archiveFormat(for: url.lastPathComponent) != nil
+    }
+}
+
+enum DirectoryEntryPolicy {
+    /// File Provider placeholders frequently omit `isRegularFile` until their
+    /// content is downloaded. Only a positive directory result is exclusionary;
+    /// supported placeholder names must remain navigable and hydrate on read.
+    static func includes(
+        name: String,
+        isDirectory: Bool?,
+        isRegularFile _: Bool?,
+        declaredMime: String?
+    ) -> Bool {
+        guard isDirectory != true else { return false }
+        return MobileFileTypePolicy.shared.isSupported(name, declaredMime: declaredMime)
     }
 }
 
@@ -129,6 +179,8 @@ enum DocumentSourceError: LocalizedError {
     case folderRequired
     case selectedFileNotFound
     case permissionDenied
+    case noSupportedItems
+    case noOtherSupportedItems
 
     var errorDescription: String? {
         switch self {
@@ -136,6 +188,8 @@ enum DocumentSourceError: LocalizedError {
         case .folderRequired: String(localized: "Select the containing folder for this listed file")
         case .selectedFileNotFound: String(localized: "The selected folder does not contain the opened file")
         case .permissionDenied: String(localized: "The document is no longer available")
+        case .noSupportedItems: String(localized: "No supported files were found in the selected folder")
+        case .noOtherSupportedItems: String(localized: "No other supported files were found in the selected folder")
         }
     }
 }

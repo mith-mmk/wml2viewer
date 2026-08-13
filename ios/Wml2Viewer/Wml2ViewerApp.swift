@@ -107,6 +107,8 @@ struct ContentView: View {
             Button(String(localized: "Open")) { store.requestFilePicker() }
             Button(String(localized: "Choose folder")) { store.requestFolderPicker() }
                 .accessibilityIdentifier("quickMenu.folder")
+            Button(String(localized: "Manage Files")) { store.requestFileManagement() }
+                .accessibilityIdentifier("quickMenu.manageFiles")
             Button(String(localized: "Pages")) { store.showFilmstrip = true }
                 .accessibilityIdentifier("quickMenu.pages")
             Button(String(localized: store.animationEnabled ? "Pause animation" : "Play animation")) {
@@ -123,17 +125,31 @@ struct ContentView: View {
             SystemShareSheet(activityItems: [item.url])
         }
         .fullScreenCover(item: $store.pendingPicker, onDismiss: {
-            store.pickerDidDismiss()
-        }) { request in
+            store.pickerCoverDidDismiss()
+        }) { presentation in
             Group {
-                if request == .file {
-                    DocumentBrowserView { result in store.finishPicker(result) }
+                if presentation.request == .manageFiles {
+                    ZStack(alignment: .topTrailing) {
+                        DocumentBrowserView { result in
+                            store.finishPicker(presentation, result)
+                        }
+                        Button {
+                            store.finishPicker(presentation, nil)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title2)
+                                .symbolRenderingMode(.hierarchical)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel(String(localized: "Close"))
+                        .accessibilityIdentifier("documentBrowser.close")
+                        .padding()
+                    }
                 } else {
                     SystemDocumentPicker(
-                        request: request,
-                        initialDirectoryURL: store.folderPickerInitialDirectoryURL
+                        presentation: presentation
                     ) { result in
-                        store.finishPicker(result)
+                        store.finishPicker(presentation, result)
                     }
                 }
             }
@@ -148,6 +164,15 @@ struct ContentView: View {
                     .padding(.bottom, 24)
                     .accessibilityAddTraits(.isStaticText)
                     .accessibilityIdentifier("viewer.error")
+            } else if let notice = store.sourceNoticeMessage {
+                Label(notice, systemImage: "folder.badge.questionmark")
+                    .font(.callout)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.bottom, 24)
+                    .accessibilityAddTraits(.isStaticText)
+                    .accessibilityIdentifier("viewer.sourceNotice")
             }
         }
         .environment(\.locale, store.config.locale)
