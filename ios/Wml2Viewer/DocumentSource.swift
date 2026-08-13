@@ -203,8 +203,13 @@ enum DocumentSourceError: LocalizedError {
 /// rules as the Rust core are applied before any provider URL is read.
 enum WmltxtEntryResolver {
     private static let header = "#!WMLViewer2 ListedFile"
+    private static let maximumManifestBytes = 64 * 1024 * 1024
+    private static let maximumEntries = 20_000
 
     static func paths(from data: Data) throws -> [String] {
+        guard data.count <= maximumManifestBytes else {
+            throw DocumentSourceError.invalidListedFile
+        }
         guard let text = String(data: data, encoding: .utf8) else {
             throw DocumentSourceError.invalidListedFile
         }
@@ -214,11 +219,15 @@ enum WmltxtEntryResolver {
             throw DocumentSourceError.invalidListedFile
         }
         lines.removeFirst()
-        return try lines.compactMap { rawLine in
+        var paths: [String] = []
+        paths.reserveCapacity(min(lines.count, maximumEntries))
+        for rawLine in lines {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty, !line.hasPrefix("#"), !line.hasPrefix("@") else { return nil }
-            return try normalize(line)
+            guard !line.isEmpty, !line.hasPrefix("#"), !line.hasPrefix("@") else { continue }
+            guard paths.count < maximumEntries else { throw DocumentSourceError.invalidListedFile }
+            paths.append(try normalize(line))
         }
+        return paths
     }
 
     static func resolve(_ rawPath: String, under root: URL) throws -> URL {
