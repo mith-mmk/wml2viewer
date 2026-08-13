@@ -154,4 +154,42 @@ final class Wml2ViewerUITests: XCTestCase {
             XCTAssertFalse(app.buttons[identifier].exists, "Unexpected persistent control: \(identifier)")
         }
     }
+
+    func testUnsupportedImageLeavesThreeByThreeSettingsInteractive() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_FIXTURE_UNSUPPORTED"] = "1"
+        app.launch()
+
+        let error = app.descendants(matching: .any)["viewer.error"]
+        XCTAssertTrue(error.waitForExistence(timeout: 15))
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.isHittable)
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["settings.panel"].waitForExistence(timeout: 5))
+    }
+
+    func testZipArchiveDisplaysItsImageEntry() throws {
+        try assertArchiveDisplaysEntry(format: "zip", routing: "OS_ONLY")
+    }
+
+    func testLzhArchiveDisplaysItsImageEntry() throws {
+        try assertArchiveDisplaysEntry(format: "lzh")
+    }
+
+    private func assertArchiveDisplaysEntry(format: String, routing: String? = nil) throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_FIXTURE_ARCHIVE"] = format
+        if let routing {
+            app.launchEnvironment["WML2VIEWER_UI_TEST_CODEC_ROUTING"] = routing
+        }
+        app.launch()
+
+        let image = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier == 'viewer.currentImage' AND label == 'page-01.png'")
+        ).firstMatch
+        XCTAssertTrue(image.waitForExistence(timeout: 15), "\(format) entry was not displayed")
+        XCTAssertFalse(app.descendants(matching: .any)["viewer.error"].exists)
+    }
 }

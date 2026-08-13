@@ -9,7 +9,10 @@ struct DocumentBrowserView: UIViewControllerRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
     func makeUIViewController(context: Context) -> UIDocumentBrowserViewController {
-        let controller = UIDocumentBrowserViewController(forOpening: [UTType.item])
+        // Files can return either a document or a directory from the same browser.
+        // Including `.folder` is required for a folder source; otherwise the
+        // browser only hands us one selected file and folder paging is impossible.
+        let controller = UIDocumentBrowserViewController(forOpening: [UTType.item, UTType.folder])
         controller.delegate = context.coordinator
         controller.allowsDocumentCreation = false
         controller.allowsPickingMultipleItems = false

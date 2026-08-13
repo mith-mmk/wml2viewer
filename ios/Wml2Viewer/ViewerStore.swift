@@ -81,17 +81,52 @@ final class ViewerStore: ObservableObject {
         if ProcessInfo.processInfo.environment["WML2VIEWER_UI_TEST_HIDE_CHROME"] == "1" {
             config.showTopChrome = false
         }
+        if let routing = ProcessInfo.processInfo.environment["WML2VIEWER_UI_TEST_CODEC_ROUTING"] {
+            config.codecRouting = routing
+        }
     }
 
     func installUITestFixtureIfRequested() async {
-        guard ProcessInfo.processInfo.environment["WML2VIEWER_UI_TEST_FIXTURE_FOLDER"] == "1" else { return }
+        let environment = ProcessInfo.processInfo.environment
+        let folderFixture = environment["WML2VIEWER_UI_TEST_FIXTURE_FOLDER"] == "1"
+        let errorFixture = environment["WML2VIEWER_UI_TEST_FIXTURE_UNSUPPORTED"] == "1"
+        let archiveFormat = environment["WML2VIEWER_UI_TEST_FIXTURE_ARCHIVE"]
+        guard folderFixture || errorFixture || archiveFormat != nil else { return }
         do {
             let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("ui-folder-fixture", isDirectory: true)
             try? FileManager.default.removeItem(at: directory)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            if errorFixture {
+                try Data("not an image".utf8).write(
+                    to: directory.appendingPathComponent("unsupported.png"),
+                    options: .atomic
+                )
+            } else if let archiveFormat {
+                let encoded: String
+                switch archiveFormat.lowercased() {
+                case "zip":
+                    encoded = "UEsDBBQAAAAIAAAAIQAvZp0vSwAAAEYAAAALAAAAcGFnZS0wMS5wbmcBRgC5/4lQTkcNChoKAAAADUlIRFIAAAABAAAAAQgGAAAAHxXEiQAAAA1JREFUCNdj+M/A8B8ABQAB/4mZPR0AAAAASUVORK5CYIJQSwECFAMUAAAACAAAACEAL2adL0sAAABGAAAACwAAAAAAAAAAAAAApIEAAAAAcGFnZS0wMS5wbmdQSwUGAAAAAAEAAQA5AAAAdAAAAAAA"
+                case "lzh", "lha":
+                    encoded = "H1otbGgwLUYAAABGAAAAbhl9aiABC3BhZ2UtMDEucG5n+ulVAACJUE5HDQoaCgAAAA1JSERSAAAAAQAAAAEIBgAAAB8VxIkAAAANSURBVAjXY/jPwPAfAAUAAf+JmT0dAAAAAElFTkSuQmCCAA=="
+                default:
+                    throw DocumentSourceError.unsupportedItem
+                }
+                guard let archiveData = Data(base64Encoded: encoded) else {
+                    throw DocumentSourceError.unsupportedItem
+                }
+                let archiveURL = directory.appendingPathComponent("fixture.\(archiveFormat.lowercased())")
+                try archiveData.write(to: archiveURL, options: .atomic)
+                let fixture = SecurityScopedDocumentSource(
+                    sourceID: UUID(), displayName: archiveURL.lastPathComponent,
+                    rootURL: archiveURL, isFolder: false
+                )
+                source = fixture
+                try await open(source: fixture, preferredIndex: 0)
+                return
+            }
             let colors: [[UInt8]] = [[0xE8, 0x4A, 0x5F, 0xFF], [0x4A, 0x90, 0xE2, 0xFF], [0x50, 0xC8, 0x78, 0xFF]]
-            for (index, color) in colors.enumerated() {
+            for (index, color) in (folderFixture ? colors : []).enumerated() {
                 let data = Data(color)
                 guard let provider = CGDataProvider(data: data as CFData),
                       let image = CGImage(
@@ -117,11 +152,13 @@ final class ViewerStore: ObservableObject {
     #endif
 
     func requestFilePicker() {
+        errorMessage = nil
         pendingPicker = .file
         isPickerPresented = true
     }
 
     func requestFolderPicker() {
+        errorMessage = nil
         pendingPicker = .folder
         isPickerPresented = true
     }
@@ -139,8 +176,7 @@ final class ViewerStore: ObservableObject {
                 let url = try result.get()
                 // An explicit folder picker is authoritative. File Provider URLs do
                 // not have to encode directory-ness with a trailing slash.
-                let resourceIsDirectory =
-                    (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                let resourceIsDirectory = Self.isDirectoryURL(url)
                 let isFolder = completedRequest?.selectionIsFolder(
                     resourceIsDirectory: resourceIsDirectory
                 ) ?? resourceIsDirectory
@@ -295,6 +331,16 @@ final class ViewerStore: ObservableObject {
         try await open(source: newSource, preferredIndex: 0)
     }
 
+    private static func isDirectoryURL(_ url: URL) -> Bool {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        var isDirectory = ObjCBool(false)
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
+            return isDirectory.boolValue
+        }
+        return (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true || url.hasDirectoryPath
+    }
+
     private func open(source: SecurityScopedDocumentSource, preferredIndex: Int) async throws {
         nativeArchive?.close()
         nativeSession?.close()
@@ -331,12 +377,15 @@ final class ViewerStore: ObservableObject {
                     let planned = self?.plannedIndices() ?? [index]
                     var decodedByIndex: [Int: [AnimationFrame]] = [:]
                     for plannedIndex in planned {
-                        guard let self, self.archiveEntryIndices.indices.contains(plannedIndex) else { continue }
+                        guard let self,
+                              self.archiveEntryIndices.indices.contains(plannedIndex),
+                              self.pages.indices.contains(plannedIndex) else { continue }
                         let archiveIndex = self.archiveEntryIndices[plannedIndex]
-                        let request = try session.nextRequest()
-                        let nativeImage = try archive.decode(session: session, request: request, index: archiveIndex, mime: nil)
-                        decodedByIndex[plannedIndex] = try Self.decodeNativeFrames(nativeImage)
-                        nativeImage.close()
+                        let entry = self.pages[plannedIndex]
+                        decodedByIndex[plannedIndex] = try self.decodeArchiveFrames(
+                            archive: archive, session: session, index: archiveIndex,
+                            entryName: entry.displayName
+                        )
                     }
                     guard !Task.isCancelled else { return }
                     await MainActor.run {
@@ -409,8 +458,19 @@ final class ViewerStore: ObservableObject {
                 }
             } catch {
                 await MainActor.run { [weak self] in
-                    self?.isLoading = false
-                    self?.errorMessage = error.localizedDescription
+                    guard let self else { return }
+                    guard self.sourceGeneration == generation,
+                          self.viewportGeneration == viewport,
+                          self.currentIndex == index else { return }
+                    // A failed decode must leave the surface interactive so the
+                    // user can return to Files or Settings. Previously touchReady
+                    // stayed false and every gesture was discarded, appearing as
+                    // a frozen app after selecting an unsupported item.
+                    self.isLoading = false
+                    self.touchReady = true
+                    self.image = nil
+                    self.spreadImages = []
+                    self.errorMessage = error.localizedDescription
                 }
             }
         }
@@ -459,6 +519,50 @@ final class ViewerStore: ObservableObject {
         }
         guard !frames.isEmpty else { throw DocumentSourceError.unsupportedItem }
         return frames
+    }
+
+    private static func mimeType(for name: String) -> String? {
+        switch URL(fileURLWithPath: name).pathExtension.lowercased() {
+        case "jpg", "jpeg": "image/jpeg"
+        case "png": "image/png"
+        case "gif": "image/gif"
+        case "webp": "image/webp"
+        case "bmp": "image/bmp"
+        case "tif", "tiff": "image/tiff"
+        case "avif": "image/avif"
+        case "heic": "image/heic"
+        case "heif": "image/heif"
+        default: nil
+        }
+    }
+
+    private func decodeArchiveFrames(
+        archive: NativeArchive, session: NativeSession, index: Int, entryName: String
+    ) throws -> [AnimationFrame] {
+        var lastError: Error = DocumentSourceError.unsupportedItem
+        for backend in ImageIOCodecRouter.decodeOrder(routing: config.codecRouting) {
+            do {
+                let request = try session.nextRequest()
+                switch backend {
+                case .internalCodec:
+                    let nativeImage = try archive.decode(
+                        session: session, request: request, index: index,
+                        mime: Self.mimeType(for: entryName)
+                    )
+                    defer { nativeImage.close() }
+                    return try Self.decodeNativeFrames(nativeImage)
+                case .imageIO:
+                    let bytes = try archive.materialize(
+                        session: session, request: request, index: index
+                    )
+                    defer { bytes.close() }
+                    return try Self.decodeFrames(data: bytes.copy())
+                }
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
     }
 
     private func decodeDocumentFrames(data: Data, item: PageItem) async throws -> [AnimationFrame] {
@@ -519,9 +623,9 @@ final class ViewerStore: ObservableObject {
     }
 
     private func openArchive(data: Data, item: PageItem, generation: Int) async throws {
-        let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("selected-\(UUID().uuidString).\(item.url.pathExtension)")
-        try data.write(to: cache, options: .atomic)
+        let cache = try await MaterializeCache.shared.materialize(
+            data, suggestedExtension: item.url.pathExtension.lowercased()
+        )
         let session = try NativeSession()
         let request = try session.nextRequest()
         let archive = try NativeBridge.openArchive(path: cache, format: item.url.pathExtension.lowercased(), session: session, request: request)

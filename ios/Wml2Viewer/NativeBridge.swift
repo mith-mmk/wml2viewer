@@ -124,6 +124,14 @@ final class NativeArchive {
         return NativeImage(handle: imageHandle)
     }
 
+    func materialize(session: NativeSession, request: UInt64, index: Int) throws -> NativeBytes {
+        let bytesHandle = wml2viewer_ios_archive_entry_materialize(
+            session.handle, request, handle, index
+        )
+        guard bytesHandle != 0 else { throw NativeBridgeError.decodeFailed }
+        return NativeBytes(handle: bytesHandle)
+    }
+
     func close() {
         guard handle != 0 else { return }
         _ = wml2viewer_ios_archive_release(handle)

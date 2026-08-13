@@ -105,6 +105,8 @@ struct ContentView: View {
         }
         .confirmationDialog(String(localized: "Quick menu"), isPresented: $store.showQuickMenu, titleVisibility: .visible) {
             Button(String(localized: "Open")) { store.requestFilePicker() }
+            Button(String(localized: "Choose folder")) { store.requestFolderPicker() }
+                .accessibilityIdentifier("quickMenu.folder")
             Button(String(localized: "Pages")) { store.showFilmstrip = true }
                 .accessibilityIdentifier("quickMenu.pages")
             Button(String(localized: store.animationEnabled ? "Pause animation" : "Play animation")) {
@@ -140,6 +142,7 @@ struct ContentView: View {
                     .background(.ultraThinMaterial, in: Capsule())
                     .padding(.bottom, 24)
                     .accessibilityAddTraits(.isStaticText)
+                    .accessibilityIdentifier("viewer.error")
             }
         }
         .environment(\.locale, store.config.locale)
