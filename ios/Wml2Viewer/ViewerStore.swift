@@ -86,6 +86,10 @@ final class ViewerStore: ObservableObject {
     private var backgroundedPickerID: UUID?
     private var pickerRecoveryTask: Task<Void, Never>?
     private var unexpectedPickerDismissalCount = 0
+    // The affected Document Manager build aborts while constructing its
+    // Favorites sidebar on the third consecutive presentation. Stop before
+    // that known-bad presentation, not after it has already crashed.
+    private static let unexpectedPickerDismissalLimit = 2
     private var configSaveSequence: UInt64 = 0
     private var memoryWarningObserver: NSObjectProtocol?
     private let filesLog = Logger(
@@ -187,7 +191,7 @@ final class ViewerStore: ObservableObject {
 
     private func recordUnexpectedPickerDismissal() {
         unexpectedPickerDismissalCount += 1
-        if unexpectedPickerDismissalCount >= 3 {
+        if unexpectedPickerDismissalCount >= Self.unexpectedPickerDismissalLimit {
             filesPickerRecoveryRequired = true
             sourceNoticeMessage = String(localized: "Files closed repeatedly. Restore the last location or reset Files recovery.")
         }
@@ -807,6 +811,15 @@ final class ViewerStore: ObservableObject {
             pickerFlow.finish(flowID: flowID)
         }
         syncPickerPhase()
+    }
+
+    /// App-owned escape hatch for a Document Manager service that has stopped
+    /// responding without delivering a picker delegate or scene callback.
+    /// The button hosting this call lives in our process, outside the picker
+    /// service, so it remains available when the provider UI is wedged.
+    func recoverUnresponsivePicker(_ presentationID: UUID) {
+        guard pendingPicker?.id == presentationID else { return }
+        pickerDidDismiss(presentationID)
     }
 
     private func waitForPickerDismissal(_ presentationID: UUID) async throws {

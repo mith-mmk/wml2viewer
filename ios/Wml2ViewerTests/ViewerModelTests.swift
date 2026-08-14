@@ -383,6 +383,12 @@ final class ViewerModelTests: XCTestCase {
             request: .openTarget,
             initialDirectoryURL: nil
         )
+        let acceptance = PickerPresentation(
+            id: UUID(),
+            flowID: UUID(),
+            request: .openTarget,
+            initialDirectoryURL: URL(fileURLWithPath: "/provider/folder")
+        )
 
         let followUpMessage = PickerFolderGuidance.message(for: selectedFileFollowUp)
         let standaloneMessage = PickerFolderGuidance.message(for: standaloneFolderPicker)
@@ -390,6 +396,7 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertNotNil(standaloneMessage)
         XCTAssertNotEqual(followUpMessage, standaloneMessage)
         XCTAssertNil(PickerFolderGuidance.message(for: primary))
+        XCTAssertNotNil(PickerFolderGuidance.message(for: acceptance))
     }
 
     func testFilesOpenFlowPresentsArchiveWithoutContainingFolderFollowUp() {
@@ -944,10 +951,10 @@ final class ViewerModelTests: XCTestCase {
     }
 
     @MainActor
-    func testRepeatedUnexpectedPickerDismissalsEnterRecoveryGuard() {
+    func testThirdPickerPresentationIsBlockedAfterTwoUnexpectedDismissals() {
         let store = ViewerStore()
 
-        for _ in 0..<3 {
+        for _ in 0..<2 {
             let presentation = try! XCTUnwrap(store.installPendingPickerForTest())
             store.pickerDidDismiss(presentation.id)
         }
@@ -960,6 +967,40 @@ final class ViewerModelTests: XCTestCase {
         store.resetFilesRecovery()
         XCTAssertFalse(store.filesPickerRecoveryRequired)
         XCTAssertNil(store.sourceNoticeMessage)
+    }
+
+    @MainActor
+    func testOrdinaryPickerCancellationDoesNotTripRecoveryGuard() {
+        let store = ViewerStore()
+
+        for _ in 0..<3 {
+            let presentation = try! XCTUnwrap(store.installPendingPickerForTest())
+            store.finishPicker(presentation, nil)
+            store.pickerDidDismiss(presentation.id)
+        }
+
+        XCTAssertFalse(store.filesPickerRecoveryRequired)
+        store.requestFilePicker()
+        XCTAssertNotNil(store.pendingPicker)
+    }
+
+    @MainActor
+    func testAppOwnedPickerRecoveryReturnsToViewerAndIsIdempotent() {
+        let store = ViewerStore()
+        let presentation = try! XCTUnwrap(store.installPendingPickerForTest())
+        let originalPages = store.pages
+
+        store.recoverUnresponsivePicker(presentation.id)
+        store.recoverUnresponsivePicker(presentation.id)
+
+        XCTAssertNil(store.pendingPicker)
+        XCTAssertEqual(store.filesOpenPhase, .idle)
+        XCTAssertEqual(store.pages, originalPages)
+        XCTAssertTrue(store.touchReady)
+        XCTAssertEqual(
+            store.sourceNoticeMessage,
+            String(localized: "Files closed unexpectedly. The current document remains open.")
+        )
     }
 
     func testBookmarkStoreClearRemovesOnlyAppOwnedRecords() async throws {
@@ -1071,5 +1112,20 @@ final class ViewerModelTests: XCTestCase {
 
         XCTAssertEqual(recoveryCalls, 1)
         XCTAssertEqual(pickCalls, 0)
+    }
+
+    func testSystemDocumentPickerCrashUsesRecoveryClosureOnlyOnce() {
+        var completionCalls = 0
+        var recoveryCalls = 0
+        let coordinator = SystemDocumentPicker.Coordinator(
+            completion: { _ in completionCalls += 1 },
+            onUnexpectedDismissal: { recoveryCalls += 1 }
+        )
+
+        coordinator.notifyUnexpectedDismissalIfNeeded()
+        coordinator.notifyUnexpectedDismissalIfNeeded()
+
+        XCTAssertEqual(recoveryCalls, 1)
+        XCTAssertEqual(completionCalls, 0)
     }
 }

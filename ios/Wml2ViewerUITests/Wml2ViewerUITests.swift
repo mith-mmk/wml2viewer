@@ -70,6 +70,26 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [browserPresented], timeout: 10), .completed)
     }
 
+    func testAppOwnedPickerRecoveryReturnsFromDocumentManager() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_LANGUAGE"] = "en"
+        app.launch()
+
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+
+        let recover = app.buttons["documentPicker.recover"]
+        XCTAssertTrue(recover.waitForExistence(timeout: 10), pickerFailureDescription(app))
+        XCTAssertFalse(surface.isHittable)
+        recover.tap()
+
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        XCTAssertTrue(surface.isHittable)
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.sourceNotice"].waitForExistence(timeout: 5))
+    }
+
     func testOSPickerFolderSelectionConnectsThreePageSource() throws {
         let app = XCUIApplication()
         app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"

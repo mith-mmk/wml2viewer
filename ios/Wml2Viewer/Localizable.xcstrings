@@ -6,6 +6,7 @@
     "Appearance" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "外観" } } } },
     "Choose folder" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "フォルダを選択" } } } },
     "Navigate to the folder you want to browse, then tap Open." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "閲覧するフォルダへ移動し、「開く」をタップしてください。" } } } },
+    "The acceptance folder is ready. Tap Open to continue." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "受入用フォルダを表示しています。「開く」をタップしてください。" } } } },
     "To continue from the selected file, keep its containing folder open and tap Open." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択したファイルから続けて閲覧するには、そのファイルを含むフォルダを表示したまま「開く」をタップしてください。" } } } },
     "Done" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "完了" } } } },
     "Display" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "表示" } } } },

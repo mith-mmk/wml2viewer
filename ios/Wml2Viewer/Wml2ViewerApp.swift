@@ -188,6 +188,22 @@ struct ContentView: View {
                                 .accessibilityIdentifier("documentPicker.folderGuidance")
                         }
                     }
+                    .overlay(alignment: .bottomTrailing) {
+                        // UIDocumentPicker's UI is hosted by Apple's Document
+                        // Manager service. If that service crashes or hangs it
+                        // may send neither delegate nor scene callbacks. Keep
+                        // one escape control in the app process so the viewer
+                        // can always recover without being force-quit.
+                        Button {
+                            store.recoverUnresponsivePicker(presentation.id)
+                        } label: {
+                            Label(String(localized: "Close"), systemImage: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("documentPicker.recover")
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 20)
+                    }
                 }
             }
             // Capture the presentation token in the content itself. A global

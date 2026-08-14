@@ -203,6 +203,12 @@ enum PickerFolderGuidance {
         for presentation: PickerPresentation,
         locale: Locale = .autoupdatingCurrent
     ) -> String? {
+        if presentation.request == .openTarget, presentation.initialDirectoryURL != nil {
+            return String(
+                localized: "The acceptance folder is ready. Tap Open to continue.",
+                locale: locale
+            )
+        }
         guard presentation.request == .containingFolder else { return nil }
         return presentation.initialDirectoryURL == nil
             ? String(localized: "Navigate to the folder you want to browse, then tap Open.", locale: locale)
