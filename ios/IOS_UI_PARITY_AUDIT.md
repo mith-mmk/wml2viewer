@@ -73,6 +73,9 @@ Filesの「最近使った項目」はAppleのDocument Managerが管理してお
 2026-08-14の再受入では、同じiPad A16でlocal Providerを再実行し、
 `status=passed`（列挙25、対応8、前後移動、filmstrip、thumbnail）を回収した。
 これは過去の診断表を置き換える最新local証跡である。
+その後の最新localセッションでも、`status=passed`（列挙19、対応2、前後移動、filmstrip、thumbnail、
+復帰可能エラーからの再表示）を回収した。これは実機でのFiles picker→folder source→連続閲覧の
+再確認結果である。
 続けてiCloud Driveも再実行し、`status=passed`（列挙25、対応8、前後移動、filmstrip、thumbnail、
 復帰可能エラーからの再表示）を回収した。
 第三者Providerの1回目は`status=in-progress`（対応1件）で、複数ページ受入条件を満たさなかったため、
