@@ -53,6 +53,12 @@ local/iCloud/third-partyでは復帰可能エラー後の再表示も確認し�
 
 同じ実機（iPad A16、iOS 26.6、unlocked）で`ios/device-smoke.sh`を再実行し、XCTest、署名build、install、launch、native session/request/cancel/releaseの自己診断が成功した。
 
+なお、Keychainを再設定した後の2026-08-14再確認では、`security find-identity -v -p codesigning`が
+`0 valid identities found`を返し、Provisioning Profileも現行Bundle IDに対して解決できなかった。
+そのため同日後半の実機smoke再実行は署名build開始前に停止している。これは製品コードの失敗ではなく、
+Apple Development証明書／private key／ProfileをXcode Accountsから再取得した後に再試行する環境条件である。
+Simulatorのunsigned buildとunit/UIテストには影響しない。
+
 空ZIPを含むfolderで、失敗項目を方向に応じてスキップし、前後移動後に
 エラー表示と入力ロックが解除される回帰UI testも通過した。現在の作業ツリーは
 製品変更なし（ユーザー所有の`.DS_Store`のみ未追跡）である。
