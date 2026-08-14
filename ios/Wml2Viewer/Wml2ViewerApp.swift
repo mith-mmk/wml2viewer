@@ -178,6 +178,10 @@ struct ContentView: View {
                                 .padding(.bottom, 92)
                                 .allowsHitTesting(false)
                                 .accessibilityElement(children: .combine)
+                                // Keep the explanatory text available as the
+                                // element's label on iOS versions that expose
+                                // Label's icon and text as separate nodes.
+                                .accessibilityLabel(guidance)
                                 .accessibilityIdentifier("documentPicker.folderGuidance")
                         }
                     }
