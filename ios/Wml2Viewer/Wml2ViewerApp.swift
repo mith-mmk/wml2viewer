@@ -207,12 +207,16 @@ struct ContentView: View {
                     Button(String(localized: "Retry")) { store.retryCurrentSource() }
                         .buttonStyle(.borderedProminent)
                         .accessibilityIdentifier("viewer.error.retry")
-                    Button(String(localized: "Open Files")) { store.requestFilePicker() }
-                        .buttonStyle(.borderedProminent)
-                        .accessibilityIdentifier("viewer.error.openFiles")
-                    Button(String(localized: "Choose folder")) { store.requestFolderPicker() }
-                        .buttonStyle(.bordered)
-                        .accessibilityIdentifier("viewer.error.chooseFolder")
+                    if !store.filesPickerRecoveryRequired {
+                        Button(String(localized: "Open Files")) { store.requestFilePicker() }
+                            .buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier("viewer.error.openFiles")
+                    }
+                    if !store.filesPickerRecoveryRequired {
+                        Button(String(localized: "Choose folder")) { store.requestFolderPicker() }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("viewer.error.chooseFolder")
+                    }
                     if store.hasRestorableLocation {
                         Button(String(localized: "Restore last location")) {
                             Task { await store.restoreLastLocation() }
@@ -238,11 +242,13 @@ struct ContentView: View {
                         .font(.callout)
                         .accessibilityAddTraits(.isStaticText)
                         .accessibilityIdentifier("viewer.sourceNotice")
-                    Button(String(localized: "Open Files")) {
-                        store.requestFilePicker()
+                    if !store.filesPickerRecoveryRequired {
+                        Button(String(localized: "Open Files")) {
+                            store.requestFilePicker()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("viewer.sourceNotice.openFiles")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier("viewer.sourceNotice.openFiles")
                     if store.hasRestorableLocation {
                         Button(String(localized: "Restore last location")) {
                             Task { await store.restoreLastLocation() }
