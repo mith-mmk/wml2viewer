@@ -201,6 +201,13 @@ final class ViewerStore: ObservableObject {
     @discardableResult
     private func restoreLastSource(allowDuringProviderAcceptance: Bool) async -> Bool {
         config = await configStore.load()
+        #if DEBUG
+        // Apply UI-test locale/routing overrides immediately after loading the
+        // persisted configuration.  Picker guidance can be presented before
+        // the root task reaches its post-restore override hook, so delaying
+        // this would make the first sheet use the previous device locale.
+        applyUITestOverrides()
+        #endif
         await MaterializeCache.shared.setTotalLimit(config.cacheLimitBytes.map(Int.init))
         #if DEBUG
         // A physical-provider acceptance run must start from an empty source.

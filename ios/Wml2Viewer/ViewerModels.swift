@@ -199,11 +199,14 @@ enum ContainingFolderAuthorizationPolicy {
 }
 
 enum PickerFolderGuidance {
-    static func message(for presentation: PickerPresentation) -> String? {
+    static func message(
+        for presentation: PickerPresentation,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String? {
         guard presentation.request == .containingFolder else { return nil }
         return presentation.initialDirectoryURL == nil
-            ? String(localized: "Navigate to the folder you want to browse, then tap Open.")
-            : String(localized: "To continue from the selected file, keep its containing folder open and tap Open.")
+            ? String(localized: "Navigate to the folder you want to browse, then tap Open.", locale: locale)
+            : String(localized: "To continue from the selected file, keep its containing folder open and tap Open.", locale: locale)
     }
 }
 

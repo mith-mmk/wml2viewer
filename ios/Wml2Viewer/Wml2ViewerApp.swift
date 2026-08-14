@@ -166,7 +166,10 @@ struct ContentView: View {
                         } onUnexpectedDismissal: {
                             store.pickerDidDismiss(presentation.id)
                         }
-                        if let guidance = PickerFolderGuidance.message(for: presentation) {
+                        if let guidance = PickerFolderGuidance.message(
+                            for: presentation,
+                            locale: store.config.locale
+                        ) {
                             Label(guidance, systemImage: "folder.badge.questionmark")
                                 .font(.callout)
                                 .multilineTextAlignment(.leading)

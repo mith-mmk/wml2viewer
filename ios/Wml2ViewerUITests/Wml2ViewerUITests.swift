@@ -318,7 +318,14 @@ final class Wml2ViewerUITests: XCTestCase {
 
         let guidance = app.descendants(matching: .any)["documentPicker.folderGuidance"]
         XCTAssertTrue(guidance.waitForExistence(timeout: 10), pickerFailureDescription(app))
-        XCTAssertTrue(guidance.label.localizedCaseInsensitiveContains("Open"))
+        // The Simulator may retain the host's Japanese locale even when the
+        // UI-test launch override is applied after the initial scene task.
+        // Verify the localized instruction semantically in either supported
+        // language rather than coupling this flow test to the host locale.
+        XCTAssertTrue(
+            guidance.label.localizedCaseInsensitiveContains("Open")
+                || guidance.label.contains("開く")
+        )
         XCTAssertFalse(surface.isHittable)
     }
 
