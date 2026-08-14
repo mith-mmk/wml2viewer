@@ -9,6 +9,10 @@ actor BookmarkStore {
         fileURL = appSupport.appendingPathComponent("bookmarks-v1.json")
     }
 
+    init(fileURL: URL) {
+        self.fileURL = fileURL
+    }
+
     func load() throws -> [BookmarkRecord] {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
         records = try JSONDecoder().decode([BookmarkRecord].self, from: Data(contentsOf: fileURL))

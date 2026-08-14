@@ -971,6 +971,48 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertFalse(store.filesOpenPhase.blocksViewerInput)
     }
 
+    @MainActor
+    func testRestoreLastLocationReopensBookmarkWithoutFilesPicker() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".test-restore-location-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let page = root.appendingPathComponent("001.png")
+        try Data([0]).write(to: page)
+
+        let bookmarkURL = root.appendingPathComponent("bookmarks.json")
+        let configURL = root.appendingPathComponent("config.json")
+        let bookmarkStore = BookmarkStore(fileURL: bookmarkURL)
+        let sourceID = UUID()
+        let bookmark = try root.bookmarkData(
+            options: [.suitableForBookmarkFile],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        try await bookmarkStore.upsert(
+            BookmarkRecord(
+                sourceID: sourceID,
+                bookmark: bookmark,
+                displayName: root.lastPathComponent,
+                isFolder: true,
+                opaqueEntryID: nil,
+                logicalPageIndex: 0
+            )
+        )
+
+        let store = ViewerStore(
+            bookmarks: bookmarkStore,
+            configStore: ConfigStore(fileURL: configURL)
+        )
+        await store.restoreLastLocation()
+
+        XCTAssertTrue(store.hasRestorableLocation)
+        XCTAssertEqual(store.pages.count, 1)
+        XCTAssertEqual(store.pages.first?.displayName, "001.png")
+        XCTAssertNil(store.pendingPicker)
+        XCTAssertFalse(store.filesOpenPhase.blocksViewerInput)
+    }
+
     func testDocumentBrowserCrashUsesRecoveryClosureOnlyOnce() {
         var pickCalls = 0
         var recoveryCalls = 0

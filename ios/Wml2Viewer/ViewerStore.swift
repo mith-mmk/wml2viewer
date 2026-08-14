@@ -49,8 +49,8 @@ final class ViewerStore: ObservableObject {
     @Published private(set) var uiTestPickerFixtureReady = false
     #endif
 
-    private let bookmarks = BookmarkStore()
-    private let configStore = ConfigStore()
+    private let bookmarks: BookmarkStore
+    private let configStore: ConfigStore
     private var source: SecurityScopedDocumentSource?
     private var nativeSession: NativeSession?
     private var nativeArchive: NativeArchive?
@@ -91,7 +91,9 @@ final class ViewerStore: ObservableObject {
         category: "FilesOpenFlow"
     )
 
-    init() {
+    init(bookmarks: BookmarkStore = BookmarkStore(), configStore: ConfigStore = ConfigStore()) {
+        self.bookmarks = bookmarks
+        self.configStore = configStore
         memoryWarningObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
