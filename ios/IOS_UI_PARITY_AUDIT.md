@@ -51,6 +51,23 @@ local/iCloud/third-partyでは復帰可能エラー後の再表示も確認し�
 | third-party | 49 | 6 | 成功 | 成功 | 成功 | passed |
 | SMB | 25 | 8 | 成功 | 成功 | 成功 | passed |
 
+実機受入の証拠範囲は次のとおりである。`passed`は上表の診断レポートで確認済み、
+`pending`はOS UIまたはProvider状態を実際に操作する記録がまだ必要な項目である。
+
+| 実機項目 | 状態 | 根拠 / 次の確認 |
+| --- | --- | --- |
+| local / iCloud / third-party / SMBのfolder列挙、前後移動、filmstrip、thumbnail | passed | iPad A16のProvider acceptance report |
+| local / iCloud / third-partyの復帰可能エラー後の再表示 | passed | 同reportの`errorRecovery` |
+| Files/Document Browserのcopy・move・rename・delete・share | pending | OS標準UIで各操作を実行し、viewer再列挙を記録 |
+| offline、認証切れ、cloud download中断、再接続 | pending | 各Providerを意図的に切断・再認証してretry/reselectを記録 |
+| `.tests/PRO.LZH`の84件MAGを実機で先頭・中間・末尾表示 | pending | Rust/Simulatorでは検証済み、実機Filesからのopen記録が必要 |
+| `.wmltxt`の包含folder許可と相対entry表示 | pending | 実Provider上のmanifestでfolder scopeとcontainmentを記録 |
+| Files側rename/move/delete後のcurrent item再同期 | pending | 外部変更を実機で行い、opaque ID/fallbackの結果を記録 |
+| local/cloud/SMBをexport先にしたsystem picker転送 | pending | 各OS Providerへのexport完了・cancelを実機で記録 |
+| iPhone実機の同一Provider matrix | pending | 現在の実機証拠はiPad A16のみ |
+
+上記`pending`は製品コードの未実装を意味せず、`ios.md`が要求する実Provider操作の証跡不足を意味する。
+
 同じ実機（iPad A16、iOS 26.6、unlocked）で`ios/device-smoke.sh`を再実行し、XCTest、署名build、install、launch、native session/request/cancel/releaseの自己診断が成功した。
 
 なお、Keychainを再設定した後の2026-08-14再確認では、`security find-identity -v -p codesigning`が
