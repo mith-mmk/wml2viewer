@@ -275,6 +275,17 @@ final class ViewerStore: ObservableObject {
         guard providerAcceptance != nil,
               !providerAcceptanceStarted else { return }
         providerAcceptanceStarted = true
+        // Keep physical acceptance away from a stale Files Recents view. The
+        // acceptance fixture is copied into the app's Documents container by
+        // the host-side harness, so the system picker can open at that folder
+        // while still requiring the user to confirm the folder with Open.
+        let acceptanceFolder = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        )[0].appendingPathComponent("local-pages", isDirectory: true)
+        if FileManager.default.fileExists(atPath: acceptanceFolder.path) {
+            uiTestPickerInitialDirectoryURL = acceptanceFolder
+        }
         requestFilePicker()
     }
 
