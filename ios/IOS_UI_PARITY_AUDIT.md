@@ -25,7 +25,7 @@
 
 今回のSimulator結果:
 
-- iPhone 17 Pro: Swift unit 60 passed、UI 21 passed、iPad専用1 skipped、0 failures
+- iPhone 17 Pro: Swift unit 60 passed、UI 22 passed、iPad専用1 skipped、0 failures（Files履歴消去設定UIを含む）
 - iPad Pro 13-inch: Swift unit 60 passed、focused UI 4 passed、0 failures
 - 見開き中央pixel、0pt/設定値のlayout算術、日本語「見開き間隔」、Files picker、ZIP/LZH/MAGを同じsuiteで回帰
 

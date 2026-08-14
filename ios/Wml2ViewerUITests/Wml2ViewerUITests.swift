@@ -36,6 +36,25 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(surface.exists)
     }
 
+    func testSettingsExposeAppOwnedFilesHistoryClear() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_LANGUAGE"] = "en"
+        app.launch()
+
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["settings.panel"].waitForExistence(timeout: 5))
+
+        app.swipeUp()
+        app.swipeUp()
+        let clear = app.buttons["settings.clearSavedFiles"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["This clears app bookmarks, not Apple Files Recents."].exists)
+        clear.tap()
+    }
+
     func testMixedFileAndFolderPickerPresentation() throws {
         let app = XCUIApplication()
         app.launch()

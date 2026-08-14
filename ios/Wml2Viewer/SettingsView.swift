@@ -73,6 +73,7 @@ struct SettingsView: View {
                     Button(String(localized: "Clear saved Files locations", locale: store.config.locale), role: .destructive) {
                         store.clearSavedFileLocations()
                     }
+                    .accessibilityIdentifier("settings.clearSavedFiles")
                     Text(String(localized: "This clears app bookmarks, not Apple Files Recents.", locale: store.config.locale))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -80,6 +81,7 @@ struct SettingsView: View {
                         Button(String(localized: "Reset Files recovery", locale: store.config.locale)) {
                             store.resetFilesRecovery()
                         }
+                        .accessibilityIdentifier("settings.resetFilesRecovery")
                     }
                 }
                 Section(String(localized: "Codec", locale: store.config.locale)) {
