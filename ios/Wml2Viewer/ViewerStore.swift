@@ -150,7 +150,14 @@ final class ViewerStore: ObservableObject {
         guard pendingPicker == nil, sourceOpeningProgress == nil else { return }
         errorMessage = nil
         sourceNoticeMessage = nil
-        await restoreLastSource(allowDuringProviderAcceptance: true)
+        let restored = await restoreLastSource(allowDuringProviderAcceptance: true)
+        if restored {
+            // A direct bookmark restore is a successful recovery path. Do not
+            // leave the picker circuit breaker latched after the source has
+            // been reopened without touching the provider's Recents UI.
+            unexpectedPickerDismissalCount = 0
+            filesPickerRecoveryRequired = false
+        }
     }
 
     /// Removes only the app-owned bookmark/recovery state. Apple Files' own
@@ -191,7 +198,8 @@ final class ViewerStore: ObservableObject {
         filesPickerRecoveryRequired = false
     }
 
-    private func restoreLastSource(allowDuringProviderAcceptance: Bool) async {
+    @discardableResult
+    private func restoreLastSource(allowDuringProviderAcceptance: Bool) async -> Bool {
         config = await configStore.load()
         await MaterializeCache.shared.setTotalLimit(config.cacheLimitBytes.map(Int.init))
         #if DEBUG
@@ -200,24 +208,24 @@ final class ViewerStore: ObservableObject {
         // decode event before Files was opened and makes an untouched device
         // look as though the acceptance flow had partially progressed.
         if providerAcceptance != nil && !allowDuringProviderAcceptance {
-            return
+            return false
         }
         if ProcessInfo.processInfo.environment["WML2VIEWER_UI_TEST_NO_RESTORE"] == "1",
            !allowDuringProviderAcceptance {
-            return
+            return false
         }
         #endif
-        guard config.rememberLastLocation else { return }
+        guard config.rememberLastLocation else { return false }
         let records: [BookmarkRecord]
         do {
             records = try await bookmarks.load()
         } catch {
             hasRestorableLocation = false
             markRestoreFailure()
-            return
+            return false
         }
         hasRestorableLocation = !records.isEmpty
-        guard let record = records.first else { return }
+        guard let record = records.first else { return false }
         var stale = false
         do {
             let resolved = try URL(resolvingBookmarkData: record.bookmark, options: [.withoutUI, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &stale)
@@ -239,8 +247,10 @@ final class ViewerStore: ObservableObject {
                 listedManifestOpaqueEntryID: record.listedManifestOpaqueEntryID,
                 listedManifestFileName: record.listedManifestFileName
             )
+            return true
         } catch {
             markRestoreFailure()
+            return false
         }
     }
 

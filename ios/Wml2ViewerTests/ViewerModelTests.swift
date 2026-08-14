@@ -1047,6 +1047,15 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertEqual(store.pages.first?.displayName, "001.png")
         XCTAssertNil(store.pendingPicker)
         XCTAssertFalse(store.filesOpenPhase.blocksViewerInput)
+
+        for _ in 0..<3 {
+            let presentation = try XCTUnwrap(store.installPendingPickerForTest())
+            store.pickerDidDismiss(presentation.id)
+        }
+        XCTAssertTrue(store.filesPickerRecoveryRequired)
+
+        await store.restoreLastLocation()
+        XCTAssertFalse(store.filesPickerRecoveryRequired)
     }
 
     func testDocumentBrowserCrashUsesRecoveryClosureOnlyOnce() {
