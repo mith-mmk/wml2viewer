@@ -81,6 +81,8 @@ final class ViewerStore: ObservableObject {
     private var failedFolderPageIDs: Set<String> = []
     private var folderTraversalDirection: FolderTraversalDirection = .forward
     private var flowToFinishAfterDismissal: UUID?
+    private var backgroundedPickerID: UUID?
+    private var pickerRecoveryTask: Task<Void, Never>?
     private var configSaveSequence: UInt64 = 0
     private var memoryWarningObserver: NSObjectProtocol?
     private let filesLog = Logger(
@@ -103,6 +105,7 @@ final class ViewerStore: ObservableObject {
     deinit {
         sourceOpenCancellation?.cancel()
         sourceOpenTask?.cancel()
+        pickerRecoveryTask?.cancel()
         thumbnailTasks.values.forEach { $0.cancel() }
         if let memoryWarningObserver {
             NotificationCenter.default.removeObserver(memoryWarningObserver)
@@ -404,6 +407,11 @@ final class ViewerStore: ObservableObject {
         _ presentation: PickerPresentation,
         _ result: Result<URL, Error>?
     ) {
+        if backgroundedPickerID == presentation.id {
+            backgroundedPickerID = nil
+            pickerRecoveryTask?.cancel()
+            pickerRecoveryTask = nil
+        }
         guard pickerFlow.beginResultProcessing(presentation) else { return }
         pendingPicker = nil
         syncPickerPhase()
@@ -671,6 +679,11 @@ final class ViewerStore: ObservableObject {
     }
 
     func pickerDidDismiss(_ presentationID: UUID) {
+        if backgroundedPickerID == presentationID {
+            backgroundedPickerID = nil
+            pickerRecoveryTask?.cancel()
+            pickerRecoveryTask = nil
+        }
         let disappearedWithoutCallback = pendingPicker?.id == presentationID
         if disappearedWithoutCallback {
             // File Provider extensions can terminate while the system picker
@@ -948,6 +961,7 @@ final class ViewerStore: ObservableObject {
         currentScenePhase = phase
         switch phase {
         case .active:
+            schedulePickerRecoveryIfNeeded()
             guard animationEnabled, animationFrames.count > 1 else { return }
             startAnimation(
                 animationFrames,
@@ -956,6 +970,9 @@ final class ViewerStore: ObservableObject {
                 spreadPosition: animationFrameSpreadPosition
             )
         case .inactive, .background:
+            if let pendingPicker {
+                backgroundedPickerID = pendingPicker.id
+            }
             thumbnailTasks.values.forEach { $0.cancel() }
             thumbnailTasks.removeAll()
             thumbnailRequests.removeAll()
@@ -963,6 +980,28 @@ final class ViewerStore: ObservableObject {
             animationTask = nil
         @unknown default:
             break
+        }
+    }
+
+    /// A File Provider crash can terminate Document Manager while the
+    /// UIDocumentPicker controller remains bound to the SwiftUI cover. In
+    /// that case UIKit may not send either delegate completion or dismantle.
+    /// If the app returns active with the same untouched presentation, treat
+    /// it as an unexpected dismissal after a short grace period. Normal
+    /// picker results clear `backgroundedPickerID` before this runs, and a
+    /// queued containing-folder picker has a different presentation token.
+    private func schedulePickerRecoveryIfNeeded() {
+        guard let expectedID = backgroundedPickerID else { return }
+        backgroundedPickerID = nil
+        pickerRecoveryTask?.cancel()
+        pickerRecoveryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled, let self,
+                  self.currentScenePhase == .active,
+                  self.pendingPicker?.id == expectedID,
+                  case .presenting = self.filesOpenPhase else { return }
+            self.filesLog.warning("picker returned active without completion; recovering presentation")
+            self.pickerDidDismiss(expectedID)
         }
     }
 

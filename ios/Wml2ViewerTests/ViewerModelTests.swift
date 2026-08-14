@@ -943,6 +943,25 @@ final class ViewerModelTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testSceneReturnRecoversPickerWithNoDelegateCallback() async {
+        let store = ViewerStore()
+        let presentation = try! XCTUnwrap(store.installPendingPickerForTest())
+
+        store.handleScenePhase(.inactive)
+        store.handleScenePhase(.active)
+        try? await Task.sleep(nanoseconds: 500_000_000)
+
+        XCTAssertNil(store.pendingPicker)
+        XCTAssertEqual(store.filesOpenPhase, .idle)
+        XCTAssertTrue(store.touchReady)
+        XCTAssertEqual(
+            store.sourceNoticeMessage,
+            String(localized: "Files closed unexpectedly. The current document remains open.")
+        )
+        XCTAssertNotEqual(store.pendingPicker?.id, presentation.id)
+    }
+
     func testDocumentBrowserCrashUsesRecoveryClosureOnlyOnce() {
         var pickCalls = 0
         var recoveryCalls = 0
