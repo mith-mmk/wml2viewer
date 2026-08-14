@@ -942,4 +942,19 @@ final class ViewerModelTests: XCTestCase {
             String(localized: "Files closed unexpectedly. The current document remains open.")
         )
     }
+
+    func testDocumentBrowserCrashUsesRecoveryClosureOnlyOnce() {
+        var pickCalls = 0
+        var recoveryCalls = 0
+        let coordinator = DocumentBrowserView.Coordinator(
+            onPick: { _ in pickCalls += 1 },
+            onUnexpectedDismissal: { recoveryCalls += 1 }
+        )
+
+        coordinator.notifyUnexpectedDismissalIfNeeded()
+        coordinator.notifyUnexpectedDismissalIfNeeded()
+
+        XCTAssertEqual(recoveryCalls, 1)
+        XCTAssertEqual(pickCalls, 0)
+    }
 }

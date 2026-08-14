@@ -7,8 +7,11 @@ import UIKit
 /// UIDocumentBrowserViewController and its File Provider.
 struct DocumentBrowserView: UIViewControllerRepresentable {
     var onPick: (Result<URL, Error>?) -> Void
+    var onUnexpectedDismissal: () -> Void = {}
 
-    func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick, onUnexpectedDismissal: onUnexpectedDismissal)
+    }
     static func dismantleUIViewController(_ controller: UIDocumentBrowserViewController, coordinator: Coordinator) {
         coordinator.notifyUnexpectedDismissalIfNeeded()
     }
@@ -25,9 +28,16 @@ struct DocumentBrowserView: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, UIDocumentBrowserViewControllerDelegate {
         let onPick: (Result<URL, Error>?) -> Void
+        let onUnexpectedDismissal: () -> Void
         private let completionGate = PickerCompletionGate()
         private var didDismissUnexpectedly = false
-        init(onPick: @escaping (Result<URL, Error>?) -> Void) { self.onPick = onPick }
+        init(
+            onPick: @escaping (Result<URL, Error>?) -> Void,
+            onUnexpectedDismissal: @escaping () -> Void = {}
+        ) {
+            self.onPick = onPick
+            self.onUnexpectedDismissal = onUnexpectedDismissal
+        }
         func documentBrowser(_ controller: UIDocumentBrowserViewController, didPickDocumentsAt documentURLs: [URL]) {
             completionGate.perform { onPick(documentURLs.first.map { .success($0) }) }
         }
@@ -42,7 +52,7 @@ struct DocumentBrowserView: UIViewControllerRepresentable {
         func notifyUnexpectedDismissalIfNeeded() {
             guard !completionGate.isCompleted, !didDismissUnexpectedly else { return }
             didDismissUnexpectedly = true
-            completionGate.perform { onPick(nil) }
+            completionGate.perform { onUnexpectedDismissal() }
         }
     }
 }

@@ -136,6 +136,8 @@ struct ContentView: View {
                     ZStack(alignment: .topTrailing) {
                         DocumentBrowserView { result in
                             store.finishPicker(presentation, result)
+                        } onUnexpectedDismissal: {
+                            store.pickerDidDismiss(presentation.id)
                         }
                         Button {
                             store.finishPicker(presentation, nil)
