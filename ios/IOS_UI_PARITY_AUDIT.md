@@ -23,10 +23,10 @@
 | LIFE-02 | 外部rename | opaque IDで現在項目を維持 | `fileResourceIdentifier`をopaque IDへハッシュし、resource identifierを返すlocal/providerではrename後も維持する回帰を追加。identifierを返さないProviderは名前fallbackのため実機確認が必要 |
 | ERROR-01 | Provider failure UX | offline / 認証切れ / 一時停止を再試行可能な状態で表示 | File ProviderとURLの代表的なエラーコードを安定した英日メッセージへ正規化し、現在sourceの「再試行」とFiles再選択を常に提示。単体テストを追加。実Providerが返す個別コードの実機確認は受入時に行う |
 
-今回のSimulator結果:
+今回のSimulator結果（2026-08-14 20:26 JST、最新ソース）:
 
-- iPhone 17 Pro: Swift unit 60 passed、UI 22 passed、iPad専用1 skipped、0 failures（Files履歴消去設定UIを含む）
-- iPad Pro 13-inch: Swift unit 60 passed、focused UI 4 passed、0 failures
+- iPhone 17 Pro: Swift unit 72 passed、UI 23 passed、iPad専用1 skipped、0 failures（Files履歴消去設定UIを含む）
+- iPad Pro 13-inch: Swift unit 72 passed、UI 23 passed、0 failures
 - 見開き中央pixel、0pt/設定値のlayout算術、日本語「見開き間隔」、Files picker、ZIP/LZH/MAGを同じsuiteで回帰
 
 最新のiPhone Simulator focused UIでは、folderの左右移動・filmstrip、空ZIP後の復帰、設定画面の3件を連続実行し、3/3 passed。英日String Catalogと`.strings`のkey集合は77件で一致する。
@@ -34,7 +34,7 @@
 設定カテゴリ統合後のiPhone Japanese UI test（設定表示・見開き間隔）は1/1 passed。
 ジェスチャー仲裁の依存関係（pinch > pan > swipe > long press > double tap > single zone tap）を明示した後、同じiPhone focused UI 3件とDocument Browser管理導線1件がそれぞれ成功した。device向けarm64 Debug buildも成功した。
 
-3x3の既定割当を`TouchMapConfig`として`MobileConfigV1`へ追加し、Androidと同じ安全な`ViewerAction`集合（前後、先頭/末尾、zoom、fit、animation、grayscale、manga、Files、設定、filmstrip、quick menu、export、reload、disabled）を設定画面から変更できるようにした。double tap / long pressも同じdispatcherへ接続し、旧設定JSONは既定値へ移行する。追加Swift unitを含むViewerModelTests 67件が0 failuresで通過した。scene backgroundでthumbnail/animationを停止し、active復帰で再開するlifecycle unitも追加した。Files/Document ManagerがProviderクラッシュでdelegateを返さない場合は、同じpicker presentationが残ったままactiveへ戻ったことを検出し、350msの猶予後にpickerをキャンセル相当で閉じてviewerへ復帰するwatchdogも追加した。既に許可済みのbookmarkがある場合は、履歴画面を再表示せず「最後に開いた場所を復元」から直接sourceを再開できる。bookmarkを一時fixtureへ保存してFiles Pickerを一度も提示せずフォルダsourceを再構築するpositive testも通過した。
+3x3の既定割当を`TouchMapConfig`として`MobileConfigV1`へ追加し、Androidと同じ安全な`ViewerAction`集合（前後、先頭/末尾、zoom、fit、animation、grayscale、manga、Files、設定、filmstrip、quick menu、export、reload、disabled）を設定画面から変更できるようにした。double tap / long pressも同じdispatcherへ接続し、旧設定JSONは既定値へ移行する。追加Swift unitを含むViewerModelTests 72件が0 failuresで通過した。scene backgroundでthumbnail/animationを停止し、active復帰で再開するlifecycle unitも追加した。Files/Document ManagerがProviderクラッシュでdelegateを返さない場合は、同じpicker presentationが残ったままactiveへ戻ったことを検出し、350msの猶予後にpickerをキャンセル相当で閉じてviewerへ復帰するwatchdogも追加した。既に許可済みのbookmarkがある場合は、履歴画面を再表示せず「最後に開いた場所を復元」から直接sourceを再開できる。bookmarkを一時fixtureへ保存してFiles Pickerを一度も提示せずフォルダsourceを再構築するpositive testも通過した。
 
 Filesの「最近使った項目」はAppleのDocument Managerが管理しており、アプリから消去する公開APIはない。そのため設定の「保存したFilesの場所を消去」はアプリが保持するbookmarkと復旧状態だけをatomicに消去し、Apple FilesのRecentsは消去しないことを明示する。既知のOS障害が3回目のFavorites表示で発生するため、Document Managerが2回連続でdelegateを返さず閉じた時点で3回目のpicker表示を停止する回路遮断を有効にし、既存bookmarkの直接復元または「Files復旧状態をリセット」から再試行できるようにした。通常のCancel／選択callbackは失敗回数をリセットするため、正常なpicker利用はこの遮断の対象にならない。bookmark復元が成功した場合も回路遮断を自動解除する。
 
