@@ -38,6 +38,8 @@
 
 Filesの「最近使った項目」はAppleのDocument Managerが管理しており、アプリから消去する公開APIはない。そのため設定の「保存したFilesの場所を消去」はアプリが保持するbookmarkと復旧状態だけをatomicに消去し、Apple FilesのRecentsは消去しないことを明示する。既知のOS障害が3回目のFavorites表示で発生するため、Document Managerが2回連続でdelegateを返さず閉じた時点で3回目のpicker表示を停止する回路遮断を有効にし、既存bookmarkの直接復元または「Files復旧状態をリセット」から再試行できるようにした。通常のCancel／選択callbackは失敗回数をリセットするため、正常なpicker利用はこの遮断の対象にならない。bookmark復元が成功した場合も回路遮断を自動解除する。
 
+この回路遮断の失敗回数は`MobileConfigV1`の`filesPickerUnexpectedDismissals`へatomic保存するため、アプリ再起動後も3回目のFavorites/Recents表示を事前に止める。設定のリセット、bookmarkからの正常復元、通常の選択・Cancel callbackで保存値を0へ戻す。再起動をまたぐ保存・clamp・リセットはSwift unitで検証した。
+
 ## 2026-08-14 実機Provider受入追記
 
 `ios/device-provider-acceptance.sh` のarm/collectを、実機 iPad A16 でProviderごとに
