@@ -240,6 +240,8 @@ jobs:
           if-no-files-found: error
       - name: verify iOS C ABI header
         run: clang -fsyntax-only -x c -std=c17 -Wall -Wextra -Werror crates/wml2viewer-ios/include/wml2viewer_ios.h
+      - name: verify iOS localization key sets
+        run: ios/verify-localization.sh
 
   android-samba-integration:
     runs-on: ubuntu-24.04
