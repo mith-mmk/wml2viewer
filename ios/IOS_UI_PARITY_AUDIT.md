@@ -58,6 +58,8 @@ local/iCloud/third-partyでは復帰可能エラー後の再表示も確認し�
 そのため同日後半の実機smoke再実行は署名build開始前に停止している。これは製品コードの失敗ではなく、
 Apple Development証明書／private key／ProfileをXcode Accountsから再取得した後に再試行する環境条件である。
 Simulatorのunsigned buildとunit/UIテストには影響しない。
+その後の`device-smoke.sh`再試行では、Profile解析fallbackによりBundle ID用Profileは検出できたが、
+CoreDeviceServiceの初期化timeoutで端末操作へ進めなかった。
 
 空ZIPを含むfolderで、失敗項目を方向に応じてスキップし、前後移動後に
 エラー表示と入力ロックが解除される回帰UI testも通過した。現在の作業ツリーは
