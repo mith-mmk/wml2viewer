@@ -351,6 +351,10 @@ struct MobileConfigV1: Codable, Equatable {
     var touchMap = TouchMapConfig()
     var doubleTapAction: ViewerAction = .toggleFitMode
     var longPressAction: ViewerAction = .openContextMenu
+    /// App-owned circuit-breaker state for a repeatedly crashing Files
+    /// Document Manager. This is intentionally not shown as user content and
+    /// is reset by normal picker callbacks or the Files recovery setting.
+    var filesPickerUnexpectedDismissals = 0
 
     var locale: Locale {
         language == "system" ? .autoupdatingCurrent : Locale(identifier: language)
@@ -360,7 +364,8 @@ struct MobileConfigV1: Codable, Equatable {
         case schemaVersion, fit, showTopChrome, showFilmstrip, keepScreenOn, mangaEnabled, mangaRTL,
              coverAlone, prefetchSpreads, mangaPageSpacing, theme, language, rememberLastLocation, cacheLimitBytes,
              codecRouting, touchZonesEnabled, swipeEnabled, pinchZoomEnabled, panEnabled,
-             longPressQuickMenuEnabled, touchMap, doubleTapAction, longPressAction
+             longPressQuickMenuEnabled, touchMap, doubleTapAction, longPressAction,
+             filesPickerUnexpectedDismissals
     }
 
     init() {}
@@ -393,6 +398,10 @@ struct MobileConfigV1: Codable, Equatable {
         touchMap = try c.decodeIfPresent(TouchMapConfig.self, forKey: .touchMap) ?? TouchMapConfig()
         doubleTapAction = try c.decodeIfPresent(ViewerAction.self, forKey: .doubleTapAction) ?? .toggleFitMode
         longPressAction = try c.decodeIfPresent(ViewerAction.self, forKey: .longPressAction) ?? .openContextMenu
+        filesPickerUnexpectedDismissals = min(
+            max(try c.decodeIfPresent(Int.self, forKey: .filesPickerUnexpectedDismissals) ?? 0, 0),
+            2
+        )
     }
 }
 

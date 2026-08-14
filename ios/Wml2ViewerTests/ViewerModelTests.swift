@@ -99,6 +99,54 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertEqual(MangaPageSpacing.clamp(.infinity), MangaPageSpacing.defaultPoints)
     }
 
+    func testFilesRecoveryDismissalCountMigratesAndClamps() throws {
+        let restored = try JSONDecoder().decode(
+            MobileConfigV1.self,
+            from: Data(#"{"schemaVersion":1,"filesPickerUnexpectedDismissals":99}"#.utf8)
+        )
+        XCTAssertEqual(restored.filesPickerUnexpectedDismissals, 2)
+
+        let legacy = try JSONDecoder().decode(
+            MobileConfigV1.self,
+            from: Data(#"{"schemaVersion":1}"#.utf8)
+        )
+        XCTAssertEqual(legacy.filesPickerUnexpectedDismissals, 0)
+    }
+
+    @MainActor
+    func testFilesRecoveryCircuitPersistsAcrossStoreReload() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".test-files-recovery-(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let configStore = ConfigStore(fileURL: directory.appendingPathComponent("mobile-config-v1.json"))
+
+        let first = ViewerStore(configStore: configStore)
+        for _ in 0..<2 {
+            let presentation = try XCTUnwrap(first.installPendingPickerForTest())
+            first.pickerDidDismiss(presentation.id)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // Recreate the actor as an app relaunch would; ConfigStore's
+        // monotonic in-process save sequence is intentionally not shared
+        // across launches.
+        let reloaded = ViewerStore(
+            configStore: ConfigStore(fileURL: directory.appendingPathComponent("mobile-config-v1.json"))
+        )
+        await reloaded.restoreLastSource()
+        XCTAssertTrue(reloaded.filesPickerRecoveryRequired)
+        XCTAssertNil(reloaded.pendingPicker)
+
+        reloaded.resetFilesRecovery()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let cleared = ViewerStore(
+            configStore: ConfigStore(fileURL: directory.appendingPathComponent("mobile-config-v1.json"))
+        )
+        await cleared.restoreLastSource()
+        XCTAssertFalse(cleared.filesPickerRecoveryRequired)
+    }
+
     func testConfigStoreRejectsLateOlderSpacingSave() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(".test-config-\(UUID().uuidString)", isDirectory: true)

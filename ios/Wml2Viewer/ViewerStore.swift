@@ -161,6 +161,7 @@ final class ViewerStore: ObservableObject {
             // been reopened without touching the provider's Recents UI.
             unexpectedPickerDismissalCount = 0
             filesPickerRecoveryRequired = false
+            persistFilesRecoveryState()
         }
     }
 
@@ -176,6 +177,8 @@ final class ViewerStore: ObservableObject {
             activeBookmark = nil
             filesPickerRecoveryRequired = false
             unexpectedPickerDismissalCount = 0
+            config.filesPickerUnexpectedDismissals = 0
+            persistConfig()
             sourceNoticeMessage = String(localized: "Saved Files locations were cleared.")
         }
     }
@@ -185,12 +188,19 @@ final class ViewerStore: ObservableObject {
     func resetFilesRecovery() {
         unexpectedPickerDismissalCount = 0
         filesPickerRecoveryRequired = false
+        config.filesPickerUnexpectedDismissals = 0
+        persistConfig()
         sourceNoticeMessage = nil
         errorMessage = nil
     }
 
     private func recordUnexpectedPickerDismissal() {
         unexpectedPickerDismissalCount += 1
+        config.filesPickerUnexpectedDismissals = min(
+            unexpectedPickerDismissalCount,
+            Self.unexpectedPickerDismissalLimit
+        )
+        persistConfig()
         if unexpectedPickerDismissalCount >= Self.unexpectedPickerDismissalLimit {
             filesPickerRecoveryRequired = true
             sourceNoticeMessage = String(localized: "Files closed repeatedly. Restore the last location or reset Files recovery.")
@@ -200,11 +210,23 @@ final class ViewerStore: ObservableObject {
     private func markPickerCallbackReceived() {
         unexpectedPickerDismissalCount = 0
         filesPickerRecoveryRequired = false
+        if config.filesPickerUnexpectedDismissals != 0 {
+            config.filesPickerUnexpectedDismissals = 0
+            persistConfig()
+        }
     }
 
     @discardableResult
     private func restoreLastSource(allowDuringProviderAcceptance: Bool) async -> Bool {
         config = await configStore.load()
+        unexpectedPickerDismissalCount = min(
+            max(config.filesPickerUnexpectedDismissals, 0),
+            Self.unexpectedPickerDismissalLimit
+        )
+        filesPickerRecoveryRequired = unexpectedPickerDismissalCount >= Self.unexpectedPickerDismissalLimit
+        if filesPickerRecoveryRequired {
+            sourceNoticeMessage = String(localized: "Files closed repeatedly. Restore the last location or reset Files recovery.")
+        }
         #if DEBUG
         // Apply UI-test locale/routing overrides immediately after loading the
         // persisted configuration.  Picker guidance can be presented before
@@ -1292,10 +1314,19 @@ final class ViewerStore: ObservableObject {
         let readingChanged = config.mangaEnabled != self.config.mangaEnabled ||
             config.mangaRTL != self.config.mangaRTL || config.coverAlone != self.config.coverAlone
         self.config = config
+        persistConfig()
+        if readingChanged { loadCurrent() }
+    }
+
+    private func persistConfig() {
         configSaveSequence &+= 1
         let saveSequence = configSaveSequence
-        Task { try? await configStore.save(config, sequence: saveSequence) }
-        if readingChanged { loadCurrent() }
+        let snapshot = config
+        Task { try? await configStore.save(snapshot, sequence: saveSequence) }
+    }
+
+    private func persistFilesRecoveryState() {
+        persistConfig()
     }
 
     func updateViewport(_ size: CGSize) {
