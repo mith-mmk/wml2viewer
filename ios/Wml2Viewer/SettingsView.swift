@@ -66,10 +66,10 @@ struct SettingsView: View {
                 }
                 Section(String(localized: "Files and restoration", locale: store.config.locale)) {
                     Toggle(String(localized: "Remember last location", locale: store.config.locale), isOn: Binding(get: { store.config.rememberLastLocation }, set: { var c = store.config; c.rememberLastLocation = $0; store.update(c) }))
-                    Button(String(localized: "Choose folder", locale: store.config.locale)) {
-                        store.showSettings = false
-                        store.requestFolderPicker()
+                    Button(String(localized: "Manage registered locations", locale: store.config.locale)) {
+                        store.presentSourceChooserAfterClosingSettings()
                     }
+                    .accessibilityIdentifier("settings.registeredSources")
                     Button(String(localized: "Clear saved Files locations", locale: store.config.locale), role: .destructive) {
                         store.clearSavedFileLocations()
                     }

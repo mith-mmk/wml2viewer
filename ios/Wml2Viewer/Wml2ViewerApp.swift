@@ -101,11 +101,18 @@ struct ContentView: View {
                     .presentationDetents([.medium, .large])
             }
         }
-        .sheet(isPresented: $store.showSettings) {
+        .sheet(isPresented: $store.showSettings, onDismiss: { store.settingsDidDismiss() }) {
             SettingsView(store: store)
         }
+        .sheet(
+            isPresented: $store.showSourceChooser,
+            onDismiss: { store.sourceChooserDidDismiss() }
+        ) {
+            SourceChooserView(store: store)
+        }
         .confirmationDialog(String(localized: "Quick menu"), isPresented: $store.showQuickMenu, titleVisibility: .visible) {
-            Button(String(localized: "Open")) { store.requestFilePicker() }
+            Button(String(localized: "Registered locations")) { store.presentSourceChooser() }
+                .accessibilityIdentifier("quickMenu.registeredSources")
             Button(String(localized: "Choose folder")) { store.requestFolderPicker() }
                 .accessibilityIdentifier("quickMenu.folder")
             if store.hasRestorableLocation {
@@ -211,7 +218,10 @@ struct ContentView: View {
             // first picker for the automatically queued containing-folder
             // picker and close the new presentation.
             .onDisappear {
-                store.pickerDidDismiss(presentation.id)
+                Task { @MainActor in
+                    await Task.yield()
+                    store.pickerDidDismiss(presentation.id)
+                }
             }
         }
         .overlay(alignment: .bottom) {
@@ -227,9 +237,9 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent)
                         .accessibilityIdentifier("viewer.error.retry")
                     if !store.filesPickerRecoveryRequired {
-                        Button(String(localized: "Open Files")) { store.requestFilePicker() }
+                        Button(String(localized: "Registered locations")) { store.presentSourceChooser() }
                             .buttonStyle(.borderedProminent)
-                            .accessibilityIdentifier("viewer.error.openFiles")
+                            .accessibilityIdentifier("viewer.error.registeredSources")
                     }
                     if !store.filesPickerRecoveryRequired {
                         Button(String(localized: "Choose folder")) { store.requestFolderPicker() }
@@ -262,11 +272,11 @@ struct ContentView: View {
                         .accessibilityAddTraits(.isStaticText)
                         .accessibilityIdentifier("viewer.sourceNotice")
                     if !store.filesPickerRecoveryRequired {
-                        Button(String(localized: "Open Files")) {
-                            store.requestFilePicker()
+                        Button(String(localized: "Registered locations")) {
+                            store.presentSourceChooser()
                         }
                         .buttonStyle(.borderedProminent)
-                        .accessibilityIdentifier("viewer.sourceNotice.openFiles")
+                        .accessibilityIdentifier("viewer.sourceNotice.registeredSources")
                     }
                     if store.hasRestorableLocation {
                         Button(String(localized: "Restore last location")) {

@@ -13,8 +13,8 @@ enum PickerRequest: Hashable {
 
     var acceptsFolders: Bool {
         switch self {
-        case .openTarget, .containingFolder: true
-        case .manageFiles: false
+        case .containingFolder: true
+        case .openTarget, .manageFiles: false
         }
     }
 
@@ -195,6 +195,31 @@ enum ContainingFolderAuthorizationPolicy {
         isSelfContainedArchive: Bool
     ) -> Bool {
         !isFolder && isSupported && !isSelfContainedArchive
+    }
+}
+
+/// A folder is usable once its coordinated snapshot has been committed. An
+/// archive is only usable after one of its entries has decoded successfully;
+/// registering it earlier would leave empty or corrupt containers in the
+/// user's long-lived locations list. Ordinary image files remain transient
+/// until their containing folder is explicitly authorized.
+enum RegisteredSourceRegistrationPolicy {
+    static func requiresSuccessfulInitialDisplay(_ kind: RegisteredSourceKind) -> Bool {
+        kind == .archive
+    }
+
+    static func isAutomaticallyRegistered(
+        _ kind: RegisteredSourceKind,
+        initialDisplaySucceeded: Bool
+    ) -> Bool {
+        switch kind {
+        case .folder:
+            true
+        case .archive:
+            initialDisplaySucceeded
+        case .transientFile:
+            false
+        }
     }
 }
 
@@ -527,17 +552,136 @@ enum TouchZoneResolver {
     }
 }
 
-struct BookmarkRecord: Codable, Equatable, Sendable {
-    let sourceID: UUID
-    let bookmark: Data
+enum RegisteredSourceKind: String, Codable, Equatable, Sendable {
+    case folder
+    case archive
+    case transientFile
+}
+
+enum RegisteredSourceStatus: String, Codable, Equatable, Sendable {
+    case unknown
+    case available
+    case offline
+    case authenticationRequired
+    case permissionRevoked
+    case providerUnavailable
+}
+
+/// Bookmark metadata safe to publish to SwiftUI. It deliberately excludes the
+/// security-scoped bookmark and all URL/provider identifiers.
+struct RegisteredSourceSummary: Identifiable, Equatable, Sendable {
+    let id: UUID
     let displayName: String
-    let isFolder: Bool
+    let kind: RegisteredSourceKind
+    let registeredAt: Date?
+    let lastOpenedAt: Date?
+    let status: RegisteredSourceStatus
+
+    init(record: BookmarkRecord) {
+        id = record.sourceID
+        displayName = record.displayName
+        kind = record.sourceKind
+        registeredAt = record.registeredAt
+        lastOpenedAt = record.lastOpenedAt
+        status = record.lastKnownStatus
+    }
+}
+
+struct BookmarkRecord: Codable, Equatable, Sendable {
+    var sourceID: UUID
+    var bookmark: Data
+    var displayName: String
+    var isFolder: Bool
     var opaqueEntryID: String?
     var logicalPageIndex: Int
     /// Optional manifest identity for provider-backed `.wmltxt` sources.
     /// Missing fields decode as nil for pre-manifest bookmarks.
     var listedManifestOpaqueEntryID: String? = nil
     var listedManifestFileName: String? = nil
+    var sourceKind: RegisteredSourceKind
+    var isRegistered: Bool
+    var registeredAt: Date?
+    var lastOpenedAt: Date?
+    var providerDomainOpaqueID: String?
+    var providerItemOpaqueID: String?
+    var lastKnownStatus: RegisteredSourceStatus
+
+    init(
+        sourceID: UUID,
+        bookmark: Data,
+        displayName: String,
+        isFolder: Bool,
+        opaqueEntryID: String?,
+        logicalPageIndex: Int,
+        listedManifestOpaqueEntryID: String? = nil,
+        listedManifestFileName: String? = nil,
+        sourceKind: RegisteredSourceKind? = nil,
+        isRegistered: Bool? = nil,
+        registeredAt: Date? = nil,
+        lastOpenedAt: Date? = nil,
+        providerDomainOpaqueID: String? = nil,
+        providerItemOpaqueID: String? = nil,
+        lastKnownStatus: RegisteredSourceStatus = .unknown
+    ) {
+        let inferredKind: RegisteredSourceKind
+        if let sourceKind {
+            inferredKind = sourceKind
+        } else if isFolder {
+            inferredKind = .folder
+        } else if MobileFileTypePolicy.shared.isSelfContainedArchive(displayName) {
+            inferredKind = .archive
+        } else {
+            inferredKind = .transientFile
+        }
+        self.sourceID = sourceID
+        self.bookmark = bookmark
+        self.displayName = displayName
+        self.isFolder = isFolder
+        self.opaqueEntryID = opaqueEntryID
+        self.logicalPageIndex = max(0, logicalPageIndex)
+        self.listedManifestOpaqueEntryID = listedManifestOpaqueEntryID
+        self.listedManifestFileName = listedManifestFileName
+        self.sourceKind = inferredKind
+        self.isRegistered = isRegistered ?? (inferredKind != .transientFile)
+        self.registeredAt = registeredAt
+        self.lastOpenedAt = lastOpenedAt
+        self.providerDomainOpaqueID = providerDomainOpaqueID
+        self.providerItemOpaqueID = providerItemOpaqueID
+        self.lastKnownStatus = lastKnownStatus
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sourceID, bookmark, displayName, isFolder, opaqueEntryID, logicalPageIndex
+        case listedManifestOpaqueEntryID, listedManifestFileName
+        case sourceKind, isRegistered, registeredAt, lastOpenedAt
+        case providerDomainOpaqueID, providerItemOpaqueID, lastKnownStatus
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let sourceID = try values.decode(UUID.self, forKey: .sourceID)
+        let bookmark = try values.decode(Data.self, forKey: .bookmark)
+        let displayName = try values.decode(String.self, forKey: .displayName)
+        let isFolder = try values.decode(Bool.self, forKey: .isFolder)
+        let decodedKind = try values.decodeIfPresent(RegisteredSourceKind.self, forKey: .sourceKind)
+        self.init(
+            sourceID: sourceID,
+            bookmark: bookmark,
+            displayName: displayName,
+            isFolder: isFolder,
+            opaqueEntryID: try values.decodeIfPresent(String.self, forKey: .opaqueEntryID),
+            logicalPageIndex: try values.decodeIfPresent(Int.self, forKey: .logicalPageIndex) ?? 0,
+            listedManifestOpaqueEntryID: try values.decodeIfPresent(String.self, forKey: .listedManifestOpaqueEntryID),
+            listedManifestFileName: try values.decodeIfPresent(String.self, forKey: .listedManifestFileName),
+            sourceKind: decodedKind,
+            isRegistered: try values.decodeIfPresent(Bool.self, forKey: .isRegistered),
+            registeredAt: try values.decodeIfPresent(Date.self, forKey: .registeredAt),
+            lastOpenedAt: try values.decodeIfPresent(Date.self, forKey: .lastOpenedAt),
+            providerDomainOpaqueID: try values.decodeIfPresent(String.self, forKey: .providerDomainOpaqueID),
+            providerItemOpaqueID: try values.decodeIfPresent(String.self, forKey: .providerItemOpaqueID),
+            lastKnownStatus: try values.decodeIfPresent(RegisteredSourceStatus.self, forKey: .lastKnownStatus) ?? .unknown
+        )
+    }
 }
 
 struct PageItem: Identifiable, Hashable, Sendable {

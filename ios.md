@@ -10,7 +10,7 @@
 - デスクトップ版: UI、`config.toml`、プラグイン仕様を変更しない
 - Android版: Compose UI、JNI名、native library名、Kotlin ABIを変更しない
 
-iOS版で最も重要なAndroid版との差は、アプリ内ファイラーと独自SMB実装を持たず、ファイルの探索・管理・クラウド接続・SMB接続をOSのFiles / Document Browserへ委譲する点である。アプリが所有するのは、選択されたファイルまたはフォルダを読み取って表示する処理、閲覧中sourceのfilmstrip、viewer設定、復元情報だけである。
+iOS版で最も重要なAndroid版との差は、アプリ内ファイラーと独自SMB実装を持たず、ファイルの探索・管理・クラウド接続・SMB接続をOSのFiles / Document Browserへ委譲する点である。アプリが所有するのは、選択されたファイルまたはフォルダを読み取って表示する処理、ユーザーが明示許可したsourceの登録一覧、閲覧中sourceのfilmstrip、viewer設定、復元情報だけである。FilesのRecents / Favoritesは複製しない。
 
 ## 1. 旧iOS案からの再実装方針
 
@@ -55,23 +55,26 @@ disk、network、File Provider download、native decode、全画面pixel変換�
 
 ### 3.1 OSファイラーへの全面委譲
 
-3×3上中央の標準open actionには、ファイルとフォルダの両方を選択できる`UIDocumentPickerViewController`を使用する。フォルダをsourceとして選択できることを通常導線とし、画像1ファイルのsecurity scopeから親フォルダや兄弟項目を推測しない。
+3×3上中央の標準open actionは、アプリ内の「登録した場所」chooserを表示する。chooserには登録済みフォルダ／書庫と、「フォルダを追加」「ファイルを開く」「ファイル管理」を分離して表示する。「フォルダを追加」は`.folder`専用Document Picker、「ファイルを開く」は`.item`専用Document Picker、「ファイル管理」はDocument Browserを使用する。画像1ファイルのsecurity scopeから親フォルダや兄弟項目を推測しない。
 
 `UIFileSharingEnabled`を有効にし、アプリのDocumentsを「このiPhone/iPad内」とFinderのファイル共有へ公開する。ユーザーがFiles経由でWML2ViewerのDocumentsへ配置したフォルダも、他のFile Providerと同じDocument Picker入口から選択できるようにする。設定、bookmark、cache、一時materializeはDocumentsへ保存せず、Application SupportまたはCachesへ分離する。
 
 copy、move、rename、delete、shareを行う管理画面には`UIDocumentBrowserViewController`を使用し、long press quick menuの「ファイル管理」から全画面で提示する。同等のファイル操作UIはアプリ内に実装しない。
 
 - 公式仕様: [UIDocumentBrowserAction](https://developer.apple.com/documentation/uikit/uidocumentbrowseraction)
-- ローカル、iCloud、第三者File Providerを同じ混在Document Pickerから扱う
+- ローカル、iCloud、第三者File Providerを同じOSのDocument Pickerから扱う
 - Filesで接続済みのSMB serverも同じ入口から扱う
 - SMB接続方法: [Apple Support](https://support.apple.com/en-mide/guide/iphone/iphe9aff429a/ios)
 - 第三者クラウド: [Apple Support](https://support.apple.com/en-euro/102238)
 - 操作可否、進捗、認証、衝突確認、provider間転送はOSとFile Providerに任せる
 - providerが禁止する操作をアプリ独自のcopy/move処理で迂回しない
 - ファイル操作のためのRoom相当DB、background transfer journal、通知serviceは作らない
-- アプリ内にsource一覧や「最近開いた項目」画面を作らない
+- FilesのRecents / Favoritesをアプリ内に複製しない
+- 正常に許可されたfolderとZIP / LHA / LZH書庫だけを「登録した場所」として表示する
+- 書庫は内部ページを1件以上decodeできた時点で登録を確定し、空・破損書庫は登録しない
+- 通常画像は包含フォルダへ昇格した後だけ登録し、単一画像bookmarkは最後の場所として最新1件だけを保持する
 
-open pickerは`.folder`と`.item`を受け付ける。フォルダ選択時は直下をsourceとして列挙し、ファイル選択時はその項目だけを開く。通常画像を選択した場合に限り、open pickerのdismiss完了後に`.folder` pickerを提示して包含フォルダの許可を追加取得する。
+folder pickerとfile pickerは別のpresentationとして直列化する。フォルダ選択時は直下をsourceとして列挙し、ファイル選択時はその項目だけを開く。通常画像を選択した場合に限り、file pickerのdismiss完了後に`.folder` pickerを提示して包含フォルダの許可を追加取得する。
 
 - 公式仕様: [Providing access to directories](https://developer.apple.com/documentation/uikit/providing-access-to-directories)
 - pickerはcopyではなくopen-in-placeで使用する
@@ -80,6 +83,22 @@ open pickerは`.folder`と`.item`を受け付ける。フォルダ選択時は�
 - picker表示中に重複してpickerを提示しない
 - cold launch / warm launch / picker resultはflow ID付きの`DocumentOpenCoordinator`で直列化する
 - providerの遅延callbackはpresentation IDとflow IDが一致する場合だけ採用する
+
+### 3.1.1 登録した場所と第三者Provider
+
+フォルダまたは自己完結書庫を正常に開いた時点でsecurity-scoped bookmarkを自動登録する。以後、その行を選択した場合はFiles UIを提示せず、選択された1件のbookmarkだけを`.withoutUI`でresolveしてsourceを再構成する。
+
+- chooserの一覧生成時にbookmarkをresolve、folderを列挙、Providerへ接続しない
+- 登録数を自動制限せず、個別の登録解除と全消去を提供する
+- 同一項目の判定はFile Provider domain / item identifierをSHA-256したopaque IDで行い、取得不能時はbookmark dataのhashへfallbackする
+- URL、path、raw provider identifier、bookmark bytesをUI、Rust、ログへ出さない
+- 再認証では既存source IDとlogical indexを維持し、bookmarkだけを置換する
+- 保存状態は`unknown`、`available`、`offline`、`authenticationRequired`、`permissionRevoked`、`providerUnavailable`へ正規化する
+- 状態確認は行を選択した時だけ行い、失敗時も現在表示中のsourceと3×3入力を維持する
+- Files Pickerの回路遮断中も、登録済みbookmarkの直接復元は許可する
+- 通常Cancelは失敗回数へ加算せず、delegateなしdismiss、watchdog、手動復旧だけを加算する
+
+OneDrive、Dropbox等にも専用SDK、OAuth、Graph API、独自ログイン、資格情報保存を追加しない。Apple Document ManagerまたはProvider extensionが異常終了した場合はchooserへ戻し、既に登録済みのsourceを直接開ける状態を維持する。初回許可前のOS / Provider障害を迂回して権限を得る方法は実装しない。Provider名によるblacklistは作らず、実機受入を「確認済み」「制限あり」「未確認」で管理する。
 
 ### 3.2 sourceとentryの識別
 
@@ -155,7 +174,7 @@ security-scoped URLへのアクセスは処理単位で開始し、必ず同じ�
 - coordination callback内のURLだけをその処理で使用する
 - scene破棄後のcallbackはgenerationで棄却する
 
-bookmarkは`BookmarkStore`がApplication Supportにatomic保存する。設定とは別ファイルにし、UIには履歴として表示しない。
+bookmarkは`BookmarkStore`がApplication Supportにatomic保存する。設定とは別ファイルにし、OS履歴は複製せず、ユーザーが明示許可した登録sourceだけをUIへ安全なsummaryとして表示する。
 
 保存する情報:
 
@@ -166,6 +185,9 @@ bookmarkは`BookmarkStore`がApplication Supportにatomic保存する。設定�
 - current entryのprovider-opaque ID
 - archiveかどうか
 - logical page index
+- source kind、登録有無、登録日時、最終open日時
+- hash化したprovider domain / item opaque ID
+- 正規化済み最終status
 
 保存しない情報:
 
@@ -210,7 +232,8 @@ bookmarkは`BookmarkStore`がApplication Supportにatomic保存する。設定�
 
 - portrait / landscapeともviewerを全画面の主画面とする
 - compact landscapeでは上部chromeを非表示にして画像領域を優先する
-- filer actionはファイル／フォルダ混在Document Pickerを全画面表示する
+- filer actionは「登録した場所」chooserを表示する
+- chooserの「フォルダを追加」「ファイルを開く」から用途別Document Pickerを表示する
 - Document Browserはlong press quick menuの「ファイル管理」からだけ表示する
 - settingsは全画面sheetまたはnavigation stackで表示する
 - filmstripは下部sheetとして表示する
@@ -228,7 +251,7 @@ bookmarkは`BookmarkStore`がApplication Supportにatomic保存する。設定�
 
 ### 5.4 panel入力遮断
 
-settings、filmstrip、quick menu、export sheet、alert、Document Browser上ではviewerの3x3 tapを発火しない。overlay表示中はviewer gesture bridge全体を無効化する。overlayを閉じたpointer sequenceをsingle tapへ降格させない。
+settings、source chooser、filmstrip、quick menu、export sheet、alert、Document Picker、Document Browser上ではviewerの3x3 tapを発火しない。overlay表示中はviewer gesture bridge全体を無効化する。overlayを閉じたpointer sequenceをsingle tapへ降格させない。
 
 ## 6. 3x3タッチとgesture
 
@@ -238,7 +261,7 @@ settings、filmstrip、quick menu、export sheet、alert、Document Browser上�
 
 | 左列 | 中央列 | 右列 |
 |---|---|---|
-| 前 | OSファイラー | 次 |
+| 前 | 登録した場所 | 次 |
 | 前 | 設定 | 次 |
 | 前 | filmstrip | 次 |
 
@@ -251,7 +274,7 @@ settings、filmstrip、quick menu、export sheet、alert、Document Browser上�
 - animation切替
 - grayscale切替
 - manga mode切替
-- OSファイラー
+- 登録した場所
 - settings
 - filmstrip
 - quick menu
@@ -675,7 +698,7 @@ iPhoneとiPadで次を確認する。
 
 provider固有操作、SMB、cloud latencyはSimulator CIだけで合格としない。
 
-実機のfolder連続閲覧はDEBUG限定の受入レポートでも証跡化する。`ios/device-provider-acceptance.sh arm DEVICE_ID PROVIDER`で`local`、`icloud`、`third-party`、`smb`のセッションを個別に開始し、実機で2件以上を含むfolderを開いて前後移動とfilmstrip表示を行った後、`collect`で結果を回収する。レポートはProviderラベル、列挙件数、対応件数、decode・前後移動・filmstrip・thumbnail・error復帰の成否だけを保持し、URL、path、file名、bookmark、credentialを保存しない。Release buildにはこの診断経路を含めない。
+実機のfolder連続閲覧はDEBUG限定の受入レポートでも証跡化する。`ios/device-provider-acceptance.sh arm DEVICE_ID PROVIDER initial`で初回Files許可、続いて`reopen`で登録bookmarkからFiles UIを開かない直接再表示を個別に確認し、各操作後に`collect`で結果を回収する。レポートはProviderラベル、phase、列挙件数、対応件数、decode・前後移動・filmstrip・thumbnail・error復帰の成否だけを保持し、URL、path、file名、bookmark、credentialを保存しない。両phase成功を「確認済み」、reopenだけ成功を「制限あり」、証跡なしを「未確認」とする。Release buildにはこの診断経路を含めない。
 
 ### 16.5 回帰
 
@@ -725,7 +748,7 @@ App Store archive、TestFlight、製品署名、provisioning profile、tag push�
 - LAN server自動探索
 - SMB資格情報のKeychain保存
 - アプリ内の汎用ファイラー
-- アプリ内の最近開いた項目一覧
+- FilesのRecents / Favoritesを複製した一覧
 - File Providerが禁止する操作の迂回実装
 - folder全体のsnapshot / offline固定保存
 - background transfer journal

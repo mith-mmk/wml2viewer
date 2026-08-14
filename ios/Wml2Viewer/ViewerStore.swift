@@ -31,6 +31,7 @@ final class ViewerStore: ObservableObject {
     @Published var showSettings = false
     @Published var showFilmstrip = false
     @Published var showQuickMenu = false
+    @Published var showSourceChooser = false
     @Published var exportItem: ExportItem?
     @Published private(set) var animationEnabled = true
     @Published var grayscaleEnabled = false
@@ -39,6 +40,7 @@ final class ViewerStore: ObservableObject {
     @Published private(set) var sourceConnectionState: SourceConnectionState = .empty
     @Published private(set) var sourceOpeningProgress: SourceOpeningProgress?
     @Published private(set) var hasRestorableLocation = false
+    @Published private(set) var registeredSources: [RegisteredSourceSummary] = []
     @Published private(set) var filesPickerRecoveryRequired = false
     @Published private(set) var thumbnails: [String: CGImage] = [:]
     @Published var zoom: CGFloat = 1
@@ -58,6 +60,7 @@ final class ViewerStore: ObservableObject {
     private var archiveURL: URL?
     private var archiveParentPages: [PageItem]?
     private var archiveEntryIndices: [Int] = []
+    private var pendingArchiveRestoreIndex: Int?
     private var listedManifestItem: PageItem?
     private var loadTask: Task<Void, Never>?
     private var animationTask: Task<Void, Never>?
@@ -91,6 +94,10 @@ final class ViewerStore: ObservableObject {
     // that known-bad presentation, not after it has already crashed.
     private static let unexpectedPickerDismissalLimit = 2
     private var configSaveSequence: UInt64 = 0
+    private var reauthorizingSourceID: UUID?
+    private var pendingArchiveRegistration: PendingArchiveRegistration?
+    private var deferredSourceChooserAction: SourceChooserAction?
+    private var sourceChooserAfterSettings = false
     private var memoryWarningObserver: NSObjectProtocol?
     private let filesLog = Logger(
         subsystem: "io.github.mith-mmk.wml2viewer",
@@ -130,16 +137,230 @@ final class ViewerStore: ObservableObject {
 
     var isPickerPresented: Bool { filesOpenPhase.blocksViewerInput }
 
+    func presentSourceChooser() {
+        errorMessage = nil
+        sourceNoticeMessage = nil
+        showQuickMenu = false
+        showSourceChooser = true
+        Task { await refreshRegisteredSources() }
+    }
+
+    func presentSourceChooserAfterClosingSettings() {
+        sourceChooserAfterSettings = true
+        showSettings = false
+    }
+
+    func settingsDidDismiss() {
+        guard sourceChooserAfterSettings else { return }
+        sourceChooserAfterSettings = false
+        presentSourceChooser()
+    }
+
+    func addFolderFromSourceChooser() {
+        deferSourceChooserAction(.addFolder)
+    }
+
+    func openFileFromSourceChooser() {
+        deferSourceChooserAction(.openFile)
+    }
+
+    func manageFilesFromSourceChooser() {
+        deferSourceChooserAction(.manageFiles)
+    }
+
+    func openRegisteredSource(_ sourceID: UUID) {
+        if showSourceChooser {
+            deferSourceChooserAction(.open(sourceID))
+        } else {
+            beginOpeningRegisteredSource(sourceID)
+        }
+    }
+
+    func retryRegisteredSource(_ sourceID: UUID) {
+        openRegisteredSource(sourceID)
+    }
+
+    func reauthorizeRegisteredSource(_ sourceID: UUID) {
+        if showSourceChooser {
+            deferSourceChooserAction(.reauthorize(sourceID))
+        } else {
+            beginReauthorizingRegisteredSource(sourceID)
+        }
+    }
+
+    func removeRegisteredSource(_ sourceID: UUID) {
+        Task { [weak self] in
+            guard let self else { return }
+            try? await bookmarks.remove(sourceID: sourceID)
+            if activeBookmark?.record.sourceID == sourceID {
+                activeBookmark = nil
+            }
+            await refreshRegisteredSources()
+            let allRecords = (try? await bookmarks.load()) ?? []
+            hasRestorableLocation = !allRecords.isEmpty
+        }
+    }
+
+    func sourceChooserDidDismiss() {
+        guard let action = deferredSourceChooserAction else { return }
+        deferredSourceChooserAction = nil
+        switch action {
+        case .open(let sourceID):
+            beginOpeningRegisteredSource(sourceID)
+        case .reauthorize(let sourceID):
+            beginReauthorizingRegisteredSource(sourceID)
+        case .addFolder:
+            requestFolderPicker()
+        case .openFile:
+            requestFilePicker()
+        case .manageFiles:
+            requestFileManagement()
+        }
+    }
+
+    private func deferSourceChooserAction(_ action: SourceChooserAction) {
+        deferredSourceChooserAction = action
+        showSourceChooser = false
+    }
+
+    private func refreshRegisteredSources() async {
+        registeredSources = (try? await bookmarks.registeredSources()) ?? []
+        let allRecords = (try? await bookmarks.load()) ?? []
+        hasRestorableLocation = !allRecords.isEmpty
+    }
+
+    private func beginReauthorizingRegisteredSource(_ sourceID: UUID) {
+        guard !filesPickerRecoveryRequired,
+              let summary = registeredSources.first(where: { $0.id == sourceID }) else {
+            sourceNoticeMessage = String(localized: "Files browsing is unavailable. Registered locations can still be opened directly.")
+            return
+        }
+        reauthorizingSourceID = sourceID
+        switch summary.kind {
+        case .folder:
+            requestFolderPicker()
+        case .archive, .transientFile:
+            requestFilePicker()
+        }
+    }
+
+    private func beginOpeningRegisteredSource(_ sourceID: UUID) {
+        guard pendingPicker == nil, sourceOpeningProgress == nil else { return }
+        cancelSourceOpeningForReplacement()
+        let operationID = UUID()
+        let cancellation = DocumentSourceCancellation()
+        sourceOpenOperationID = operationID
+        sourceOpenCancellation = cancellation
+        sourceOpenPickerContext = nil
+        sourceOpenTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                guard var record = try await bookmarks.record(sourceID: sourceID),
+                      record.isRegistered else {
+                    throw DocumentSourceError.permissionDenied
+                }
+                sourceOpeningProgress = SourceOpeningProgress(
+                    isFolder: record.isFolder,
+                    processedItemCount: 0,
+                    totalItemCount: nil
+                )
+                var stale = false
+                let resolved = try URL(
+                    resolvingBookmarkData: record.bookmark,
+                    options: [.withoutUI, .withoutMounting],
+                    relativeTo: nil,
+                    bookmarkDataIsStale: &stale
+                )
+                try Task.checkCancellation()
+                try cancellation.checkCancellation()
+                if stale {
+                    let renewed = try resolved.bookmarkData(
+                        options: [.suitableForBookmarkFile],
+                        includingResourceValuesForKeys: nil,
+                        relativeTo: nil
+                    )
+                    record.bookmark = renewed
+                }
+                let reopenedSource = SecurityScopedDocumentSource(
+                    sourceID: record.sourceID,
+                    displayName: record.displayName,
+                    rootURL: resolved,
+                    isFolder: record.isFolder
+                )
+                pendingArchiveRestoreIndex = record.sourceKind == .archive
+                    ? record.logicalPageIndex : nil
+                try await open(
+                    source: reopenedSource,
+                    preferredOpaqueEntryID: record.opaqueEntryID,
+                    preferredFileName: nil,
+                    preferredIndex: record.logicalPageIndex,
+                    listedManifestOpaqueEntryID: record.listedManifestOpaqueEntryID,
+                    listedManifestFileName: record.listedManifestFileName
+                )
+                try Task.checkCancellation()
+                guard sourceOpenOperationID == operationID else { return }
+                record.lastOpenedAt = Date()
+                record.lastKnownStatus = .available
+                activeBookmark = ActiveBookmark(record: record)
+                try await bookmarks.upsert(record)
+                await refreshRegisteredSources()
+                unexpectedPickerDismissalCount = 0
+                filesPickerRecoveryRequired = false
+                persistFilesRecoveryState()
+                errorMessage = nil
+                sourceNoticeMessage = nil
+                finishSourceOpening(operationID: operationID)
+            } catch is CancellationError {
+                guard sourceOpenOperationID == operationID else { return }
+                finishSourceOpening(operationID: operationID)
+                touchReady = !pages.isEmpty
+                sourceNoticeMessage = String(localized: "Opening was cancelled. The current document remains open.")
+            } catch {
+                guard sourceOpenOperationID == operationID else { return }
+                let status = Self.registeredSourceStatus(for: error)
+                try? await bookmarks.updateStatus(sourceID: sourceID, status: status)
+                await refreshRegisteredSources()
+                sourceConnectionState = .retryableError
+                errorMessage = DocumentSourceError.normalized(error).localizedDescription
+                touchReady = true
+                finishSourceOpening(operationID: operationID)
+            }
+        }
+    }
+
+    private static func registeredSourceStatus(for error: Error) -> RegisteredSourceStatus {
+        guard let normalized = DocumentSourceError.normalized(error) as? DocumentSourceError else {
+            return .unknown
+        }
+        switch normalized {
+        case .providerOffline: return .offline
+        case .providerAuthenticationRequired: return .authenticationRequired
+        case .permissionDenied: return .permissionRevoked
+        case .providerUnavailable: return .providerUnavailable
+        default: return .unknown
+        }
+    }
+
     private struct FolderAuthorizationContext {
         let selectedOpaqueEntryID: String
         let selectedFileName: String
     }
 
     private struct ActiveBookmark {
-        let sourceID: UUID
-        let data: Data
-        let displayName: String
-        let isFolder: Bool
+        var record: BookmarkRecord
+    }
+
+    private struct PendingArchiveRegistration {
+        let record: BookmarkRecord
+        let previousRecord: BookmarkRecord?
+    }
+
+    private enum SourceChooserAction {
+        case open(UUID)
+        case reauthorize(UUID)
+        case addFolder
+        case openFile
+        case manageFiles
     }
 
     func restoreLastSource() async {
@@ -174,6 +395,7 @@ final class ViewerStore: ObservableObject {
             guard let self else { return }
             try? await bookmarks.clear()
             hasRestorableLocation = false
+            registeredSources = []
             activeBookmark = nil
             filesPickerRecoveryRequired = false
             unexpectedPickerDismissalCount = 0
@@ -245,9 +467,20 @@ final class ViewerStore: ObservableObject {
         }
         if ProcessInfo.processInfo.environment["WML2VIEWER_UI_TEST_NO_RESTORE"] == "1",
            !allowDuringProviderAcceptance {
+            // UI tests share one Simulator app container. A test that
+            // intentionally exercises an unexpected picker dismissal must
+            // not leave the persisted two-strike circuit breaker latched for
+            // the next independent test process.
+            unexpectedPickerDismissalCount = 0
+            filesPickerRecoveryRequired = false
+            config.filesPickerUnexpectedDismissals = 0
+            configSaveSequence &+= 1
+            try? await configStore.save(config, sequence: configSaveSequence)
+            await refreshRegisteredSources()
             return false
         }
         #endif
+        await refreshRegisteredSources()
         guard config.rememberLastLocation else { return false }
         let records: [BookmarkRecord]
         do {
@@ -258,20 +491,18 @@ final class ViewerStore: ObservableObject {
             return false
         }
         hasRestorableLocation = !records.isEmpty
+        registeredSources = (try? await bookmarks.registeredSources()) ?? []
         guard let record = records.first else { return false }
         var stale = false
         do {
+            var updatedRecord = record
             let resolved = try URL(resolvingBookmarkData: record.bookmark, options: [.withoutUI, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &stale)
             let newSource = SecurityScopedDocumentSource(sourceID: record.sourceID, displayName: record.displayName, rootURL: resolved, isFolder: record.isFolder)
-            var activeBookmarkData = record.bookmark
             if stale, let renewed = try? resolved.bookmarkData(options: [.suitableForBookmarkFile], includingResourceValuesForKeys: nil, relativeTo: nil) {
-                activeBookmarkData = renewed
-                try? await bookmarks.upsert(BookmarkRecord(sourceID: record.sourceID, bookmark: renewed, displayName: record.displayName, isFolder: record.isFolder, opaqueEntryID: record.opaqueEntryID, logicalPageIndex: record.logicalPageIndex, listedManifestOpaqueEntryID: record.listedManifestOpaqueEntryID, listedManifestFileName: record.listedManifestFileName))
+                updatedRecord.bookmark = renewed
             }
-            activeBookmark = ActiveBookmark(
-                sourceID: record.sourceID, data: activeBookmarkData,
-                displayName: record.displayName, isFolder: record.isFolder
-            )
+            pendingArchiveRestoreIndex = record.sourceKind == .archive
+                ? record.logicalPageIndex : nil
             try await open(
                 source: newSource,
                 preferredOpaqueEntryID: record.opaqueEntryID,
@@ -280,8 +511,41 @@ final class ViewerStore: ObservableObject {
                 listedManifestOpaqueEntryID: record.listedManifestOpaqueEntryID,
                 listedManifestFileName: record.listedManifestFileName
             )
+            #if DEBUG
+            if allowDuringProviderAcceptance {
+                switch sourceConnectionState {
+                case .folder(let enumerated, let supported):
+                    providerAcceptance?.registeredSourceRestored(
+                        enumerated: enumerated,
+                        supported: supported
+                    )
+                case .archive(let entries):
+                    providerAcceptance?.registeredSourceRestored(
+                        enumerated: entries,
+                        supported: entries
+                    )
+                case .singleFile:
+                    providerAcceptance?.registeredSourceRestored(
+                        enumerated: pages.count,
+                        supported: pages.count
+                    )
+                case .empty, .retryableError:
+                    break
+                }
+            }
+            #endif
+            updatedRecord.lastOpenedAt = Date()
+            updatedRecord.lastKnownStatus = .available
+            activeBookmark = ActiveBookmark(record: updatedRecord)
+            _ = try? await bookmarks.upsert(updatedRecord)
+            registeredSources = (try? await bookmarks.registeredSources()) ?? []
             return true
         } catch {
+            try? await bookmarks.updateStatus(
+                sourceID: record.sourceID,
+                status: Self.registeredSourceStatus(for: error)
+            )
+            registeredSources = (try? await bookmarks.registeredSources()) ?? []
             markRestoreFailure()
             return false
         }
@@ -301,6 +565,13 @@ final class ViewerStore: ObservableObject {
         guard providerAcceptance != nil,
               !providerAcceptanceStarted else { return }
         providerAcceptanceStarted = true
+        if providerAcceptance?.phase == .registeredReopen {
+            providerAcceptance?.registeredRestoreRequested()
+            Task { [weak self] in
+                await self?.restoreLastLocation()
+            }
+            return
+        }
         // Keep physical acceptance away from a stale Files Recents view. The
         // acceptance fixture is copied into the app's Documents container by
         // the host-side harness, so the system picker can open at that folder
@@ -312,7 +583,7 @@ final class ViewerStore: ObservableObject {
         if FileManager.default.fileExists(atPath: acceptanceFolder.path) {
             uiTestPickerInitialDirectoryURL = acceptanceFolder
         }
-        requestFilePicker()
+        requestFolderPicker()
     }
 
     func applyUITestOverrides() {
@@ -343,6 +614,9 @@ final class ViewerStore: ObservableObject {
     func installUITestFixtureIfRequested() async {
         let environment = ProcessInfo.processInfo.environment
         let folderFixture = environment["WML2VIEWER_UI_TEST_FIXTURE_FOLDER"] == "1"
+        let registerFolderFixture = environment[
+            "WML2VIEWER_UI_TEST_REGISTER_FOLDER_FIXTURE"
+        ] == "1"
         let errorFixture = environment["WML2VIEWER_UI_TEST_FIXTURE_UNSUPPORTED"] == "1"
         let archiveFormat = environment["WML2VIEWER_UI_TEST_FIXTURE_ARCHIVE"]
         let pickerFolderName = environment["WML2VIEWER_UI_TEST_PICKER_FOLDER_NAME"]
@@ -352,7 +626,7 @@ final class ViewerStore: ObservableObject {
         let folderIncludesEmptyArchive = environment[
             "WML2VIEWER_UI_TEST_FOLDER_EMPTY_ARCHIVE"
         ] == "1"
-        guard folderFixture || errorFixture || archiveFormat != nil || pickerFolderName != nil || folderIncludesEmptyArchive else {
+        guard folderFixture || registerFolderFixture || errorFixture || archiveFormat != nil || pickerFolderName != nil || folderIncludesEmptyArchive else {
             return
         }
         do {
@@ -400,7 +674,7 @@ final class ViewerStore: ObservableObject {
                 return
             }
             let colors = Self.uiTestFixtureColors
-            for (index, color) in (folderFixture ? colors : []).enumerated() {
+            for (index, color) in ((folderFixture || registerFolderFixture) ? colors : []).enumerated() {
                 let url = directory.appendingPathComponent(String(format: "page-%02d.png", index + 1))
                 try Self.writeUITestPNG(color: color, to: url)
             }
@@ -414,11 +688,15 @@ final class ViewerStore: ObservableObject {
                     options: .atomic
                 )
             }
-            let fixture = SecurityScopedDocumentSource(
-                sourceID: UUID(), displayName: "UI fixture", rootURL: directory, isFolder: true
-            )
-            source = fixture
-            try await open(source: fixture, preferredIndex: 0)
+            if registerFolderFixture {
+                _ = try await accept(url: directory, isFolder: true)
+            } else {
+                let fixture = SecurityScopedDocumentSource(
+                    sourceID: UUID(), displayName: "UI fixture", rootURL: directory, isFolder: true
+                )
+                source = fixture
+                try await open(source: fixture, preferredIndex: 0)
+            }
         } catch {
             errorMessage = DocumentSourceError.normalized(error).localizedDescription
         }
@@ -496,7 +774,11 @@ final class ViewerStore: ObservableObject {
 
     func requestFolderPicker() {
         folderAuthorizationContext = nil
+        #if DEBUG
+        beginPicker(.containingFolder, initialDirectoryURL: uiTestPickerInitialDirectoryURL)
+        #else
         beginPicker(.containingFolder)
+        #endif
     }
 
     func requestFileManagement() {
@@ -536,6 +818,7 @@ final class ViewerStore: ObservableObject {
         pendingPicker = nil
         syncPickerPhase()
         guard let result else {
+            reauthorizingSourceID = nil
             #if DEBUG
             providerAcceptance?.pickerCancelled()
             #endif
@@ -563,6 +846,8 @@ final class ViewerStore: ObservableObject {
         // retaining the scope across dismissal keeps that grant alive until a
         // bookmark and the first coordinated snapshot have both completed.
         let selectedURL = try? result.get()
+        let replacementSourceID = reauthorizingSourceID
+        reauthorizingSourceID = nil
         let retainedSelectionScope = selectedURL?.startAccessingSecurityScopedResource() == true
         sourceOpenTask = Task { @MainActor [weak self] in
             defer {
@@ -615,12 +900,19 @@ final class ViewerStore: ObservableObject {
                 if presentation.request == .containingFolder {
                     folderAuthorizationContext = nil
                 }
+                let replacementRecord: BookmarkRecord? = if let replacementSourceID {
+                    try await bookmarks.record(sourceID: replacementSourceID)
+                } else {
+                    nil
+                }
                 var snapshot = try await accept(
                     url: url,
                     isFolder: isFolder,
-                    preferredOpaqueEntryID: authorization?.selectedOpaqueEntryID,
+                    preferredOpaqueEntryID: authorization?.selectedOpaqueEntryID ?? replacementRecord?.opaqueEntryID,
                     preferredFileName: authorization?.selectedFileName,
+                    preferredLogicalIndex: replacementRecord?.logicalPageIndex,
                     requiresPreferredItem: authorization != nil,
+                    replacingRecord: replacementRecord,
                     cancellation: cancellation,
                     progress: { [weak self] processed, total in
                         Task { @MainActor in
@@ -680,6 +972,7 @@ final class ViewerStore: ObservableObject {
                     )
                     guard self.sourceOpenOperationID == operationID else { return }
                     if !displayed {
+                        discardPendingArchiveRegistration()
                         finishFlowWhenDismissed(
                             flowID: presentation.flowID,
                             presentationID: presentation.id
@@ -687,6 +980,7 @@ final class ViewerStore: ObservableObject {
                         finishSourceOpening(operationID: operationID)
                         return
                     }
+                    try await finalizePendingArchiveRegistration()
                 }
                 if shouldRequestContainingFolder {
                     queueContainingFolderAuthorization(
@@ -702,6 +996,7 @@ final class ViewerStore: ObservableObject {
                 finishSourceOpening(operationID: operationID)
             } catch is CancellationError {
                 guard self.sourceOpenOperationID == operationID else { return }
+                discardPendingArchiveRegistration()
                 finishCancelledSourceOpening(
                     operationID: operationID,
                     flowID: presentation.flowID,
@@ -709,6 +1004,7 @@ final class ViewerStore: ObservableObject {
                 )
             } catch {
                 guard self.sourceOpenOperationID == operationID else { return }
+                discardPendingArchiveRegistration()
                 if presentation.request == .containingFolder {
                     folderAuthorizationContext = nil
                 }
@@ -743,6 +1039,7 @@ final class ViewerStore: ObservableObject {
         sourceOpenCancellation = nil
         sourceOpenPickerContext = nil
         sourceOpeningProgress = nil
+        discardPendingArchiveRegistration()
         folderAuthorizationContext = nil
         errorMessage = nil
         sourceNoticeMessage = pages.isEmpty
@@ -778,6 +1075,27 @@ final class ViewerStore: ObservableObject {
         sourceOpenCancellation = nil
         sourceOpenPickerContext = nil
         sourceOpeningProgress = nil
+    }
+
+    private func finalizePendingArchiveRegistration() async throws {
+        guard let pendingArchiveRegistration else { return }
+        var record = pendingArchiveRegistration.record
+        record.opaqueEntryID = nil
+        record.logicalPageIndex = max(0, currentIndex)
+        record.lastOpenedAt = Date()
+        try await bookmarks.upsert(record)
+        self.pendingArchiveRegistration = nil
+        activeBookmark = ActiveBookmark(record: record)
+        await refreshRegisteredSources()
+        hasRestorableLocation = true
+    }
+
+    private func discardPendingArchiveRegistration() {
+        guard let pendingArchiveRegistration else { return }
+        self.pendingArchiveRegistration = nil
+        activeBookmark = pendingArchiveRegistration.previousRecord.map {
+            ActiveBookmark(record: $0)
+        }
     }
 
     private func waitForInitialDisplay(
@@ -833,6 +1151,14 @@ final class ViewerStore: ObservableObject {
             pickerFlow.finish(flowID: flowID)
         }
         syncPickerPhase()
+        if disappearedWithoutCallback {
+            Task { @MainActor [weak self] in
+                await Task.yield()
+                guard let self, self.pendingPicker == nil else { return }
+                self.showSourceChooser = true
+                await self.refreshRegisteredSources()
+            }
+        }
     }
 
     /// App-owned escape hatch for a Document Manager service that has stopped
@@ -949,9 +1275,11 @@ final class ViewerStore: ObservableObject {
                     )
                     guard self.sourceOpenOperationID == operationID else { return }
                     if !displayed {
+                        self.discardPendingArchiveRegistration()
                         self.finishSourceOpening(operationID: operationID)
                         return
                     }
+                    try await self.finalizePendingArchiveRegistration()
                 }
                 if shouldRequestContainingFolder {
                     self.queueContainingFolderAuthorization(for: url, flowID: nil)
@@ -961,6 +1289,7 @@ final class ViewerStore: ObservableObject {
                 self.finishSourceOpening(operationID: operationID)
             } catch is CancellationError {
                 guard self.sourceOpenOperationID == operationID else { return }
+                self.discardPendingArchiveRegistration()
                 self.sourceNoticeMessage = self.pages.isEmpty
                     ? String(localized: "Opening was cancelled.")
                     : String(localized: "Opening was cancelled. The current document remains open.")
@@ -968,6 +1297,7 @@ final class ViewerStore: ObservableObject {
                 self.finishSourceOpening(operationID: operationID)
             } catch {
                 guard self.sourceOpenOperationID == operationID else { return }
+                self.discardPendingArchiveRegistration()
                 self.sourceConnectionState = .retryableError
                 self.errorMessage = DocumentSourceError.normalized(error).localizedDescription
                 self.isLoading = false
@@ -990,6 +1320,7 @@ final class ViewerStore: ObservableObject {
         sourceOpenCancellation = nil
         sourceOpenPickerContext = nil
         sourceOpeningProgress = nil
+        discardPendingArchiveRegistration()
         if let pickerContext {
             finishFlowWhenDismissed(
                 flowID: pickerContext.flowID,
@@ -1016,10 +1347,10 @@ final class ViewerStore: ObservableObject {
         persistCurrentLocation()
     }
 
-    /// Executes an Android-compatible safe viewer action. File management
-    /// remains OS-owned: the only file action exposed here is opening the
-    /// mixed Files picker, while destructive operations stay in Document
-    /// Browser's quick-menu entry.
+    /// Executes an Android-compatible safe viewer action. Source selection
+    /// starts in the app-owned registered-locations chooser, while file
+    /// management and destructive operations remain in the OS Document
+    /// Browser entry.
     func perform(_ action: ViewerAction) {
         switch action {
         case .none:
@@ -1053,7 +1384,7 @@ final class ViewerStore: ObservableObject {
             updated.mangaEnabled.toggle()
             update(updated)
         case .openFiler:
-            requestFilePicker()
+            presentSourceChooser()
         case .settings:
             showSettings = true
         case .filmstrip:
@@ -1406,7 +1737,7 @@ final class ViewerStore: ObservableObject {
         errorMessage = nil
         sourceNoticeMessage = nil
         guard source != nil else {
-            requestFilePicker()
+            presentSourceChooser()
             return
         }
         if nativeArchive != nil {
@@ -1423,10 +1754,13 @@ final class ViewerStore: ObservableObject {
         isFolder: Bool,
         preferredOpaqueEntryID: String? = nil,
         preferredFileName: String? = nil,
+        preferredLogicalIndex: Int? = nil,
         requiresPreferredItem: Bool = false,
+        replacingRecord: BookmarkRecord? = nil,
         cancellation: DocumentSourceCancellation? = nil,
         progress: (@Sendable (_ processed: Int, _ total: Int) -> Void)? = nil
     ) async throws -> SourceSnapshot {
+        pendingArchiveRegistration = nil
         try SelectedDocumentPolicy.validate(url: url, isFolder: isFolder)
         try cancellation?.checkCancellation()
         let bookmark = try await Task.detached(priority: .userInitiated) {
@@ -1439,7 +1773,37 @@ final class ViewerStore: ObservableObject {
             )
         }.value
         try cancellation?.checkCancellation()
-        let newSource = SecurityScopedDocumentSource(sourceID: UUID(), displayName: url.lastPathComponent, rootURL: url, isFolder: isFolder)
+        let sourceKind: RegisteredSourceKind = if isFolder {
+            .folder
+        } else if MobileFileTypePolicy.shared.isSelfContainedArchive(url.lastPathComponent) {
+            .archive
+        } else {
+            .transientFile
+        }
+        if let replacingRecord, replacingRecord.sourceKind != sourceKind {
+            throw DocumentSourceError.unsupportedItem
+        }
+        let providerIdentity = await ProviderOpaqueIdentity.resolve(for: url, bookmark: bookmark)
+        let matchingRegistration: BookmarkRecord? = if replacingRecord == nil,
+                                                        sourceKind != .transientFile {
+            try await bookmarks.registeredRecord(
+                providerDomainOpaqueID: providerIdentity.domainID,
+                providerItemOpaqueID: providerIdentity.itemID
+            )
+        } else {
+            nil
+        }
+        let retainedRecord = replacingRecord ?? matchingRegistration
+        if let retainedRecord, retainedRecord.sourceKind != sourceKind {
+            throw DocumentSourceError.unsupportedItem
+        }
+        let sourceID = retainedRecord?.sourceID ?? UUID()
+        let newSource = SecurityScopedDocumentSource(
+            sourceID: sourceID,
+            displayName: url.lastPathComponent,
+            rootURL: url,
+            isFolder: isFolder
+        )
         let snapshot: SourceSnapshot
         do {
             snapshot = try await newSource.snapshot(
@@ -1464,30 +1828,27 @@ final class ViewerStore: ObservableObject {
             throw isFolder ? DocumentSourceError.noSupportedItems : DocumentSourceError.unsupportedItem
         }
         let preferredIndex: Int
-        if let preferredFileName {
+        if preferredOpaqueEntryID != nil || preferredFileName != nil {
             if let matched = DocumentEntryMatcher.index(
                 selectedOpaqueEntryID: preferredOpaqueEntryID,
-                selectedFileName: preferredFileName,
+                selectedFileName: preferredFileName ?? "",
                 in: listedPages
             ) {
                 preferredIndex = matched
             } else {
                 guard !requiresPreferredItem else { throw DocumentSourceError.selectedFileNotFound }
-                preferredIndex = 0
+                preferredIndex = min(max(preferredLogicalIndex ?? 0, 0), listedPages.count - 1)
             }
         } else {
-            preferredIndex = 0
+            preferredIndex = min(max(preferredLogicalIndex ?? 0, 0), listedPages.count - 1)
+        }
+        if RegisteredSourceRegistrationPolicy.requiresSuccessfulInitialDisplay(sourceKind) {
+            pendingArchiveRestoreIndex = replacingRecord?.logicalPageIndex
         }
         try cancellation?.checkCancellation()
         try commitOpen(source: newSource, listedPages: listedPages, preferredIndex: preferredIndex)
-        if let previous = activeBookmark, previous.sourceID != newSource.sourceID {
-            try? await bookmarks.remove(sourceID: previous.sourceID)
-        }
-        activeBookmark = ActiveBookmark(
-            sourceID: newSource.sourceID, data: bookmark,
-            displayName: newSource.displayName, isFolder: isFolder
-        )
-        try await bookmarks.upsert(BookmarkRecord(
+        let now = Date()
+        let record = BookmarkRecord(
             sourceID: newSource.sourceID,
             bookmark: bookmark,
             displayName: newSource.displayName,
@@ -1495,9 +1856,30 @@ final class ViewerStore: ObservableObject {
             opaqueEntryID: pages[currentIndex].id,
             logicalPageIndex: currentIndex,
             listedManifestOpaqueEntryID: listedManifestItem.map { DocumentEntryIdentity.opaqueIdentifier(for: $0.url) },
-            listedManifestFileName: listedManifestItem?.displayName
-        ))
-        hasRestorableLocation = true
+            listedManifestFileName: listedManifestItem?.displayName,
+            sourceKind: sourceKind,
+            isRegistered: sourceKind != .transientFile,
+            registeredAt: retainedRecord?.registeredAt ?? (sourceKind != .transientFile ? now : nil),
+            lastOpenedAt: now,
+            providerDomainOpaqueID: providerIdentity.domainID,
+            providerItemOpaqueID: providerIdentity.itemID,
+            lastKnownStatus: .available
+        )
+        activeBookmark = ActiveBookmark(record: record)
+        if sourceKind == .archive {
+            // A top-level archive snapshot only proves that the container
+            // file is readable. Register it after at least one internal page
+            // has actually decoded, so empty/corrupt archives never become a
+            // permanent registered location.
+            pendingArchiveRegistration = PendingArchiveRegistration(
+                record: record,
+                previousRecord: retainedRecord
+            )
+        } else {
+            try await bookmarks.upsert(record)
+            await refreshRegisteredSources()
+            hasRestorableLocation = true
+        }
         sourceConnectionState = isFolder
             ? .folder(
                 enumerated: snapshot.enumeratedItemCount,
@@ -1533,20 +1915,21 @@ final class ViewerStore: ObservableObject {
     }
 
     private func persistCurrentLocation() {
-        guard nativeArchive == nil,
-              let activeBookmark,
+        guard var activeBookmark,
               pages.indices.contains(currentIndex) else { return }
-        let record = BookmarkRecord(
-            sourceID: activeBookmark.sourceID,
-            bookmark: activeBookmark.data,
-            displayName: activeBookmark.displayName,
-            isFolder: activeBookmark.isFolder,
-            opaqueEntryID: pages[currentIndex].id,
-            logicalPageIndex: currentIndex,
-            listedManifestOpaqueEntryID: listedManifestItem.map { DocumentEntryIdentity.opaqueIdentifier(for: $0.url) },
-            listedManifestFileName: listedManifestItem?.displayName
-        )
-        Task { try? await bookmarks.upsert(record) }
+        activeBookmark.record.opaqueEntryID = nativeArchive == nil ? pages[currentIndex].id : nil
+        activeBookmark.record.logicalPageIndex = currentIndex
+        activeBookmark.record.listedManifestOpaqueEntryID = listedManifestItem.map {
+            DocumentEntryIdentity.opaqueIdentifier(for: $0.url)
+        }
+        activeBookmark.record.listedManifestFileName = listedManifestItem?.displayName
+        activeBookmark.record.lastOpenedAt = Date()
+        self.activeBookmark = activeBookmark
+        let record = activeBookmark.record
+        Task { [weak self] in
+            _ = try? await self?.bookmarks.upsert(record)
+            await self?.refreshRegisteredSources()
+        }
     }
 
     nonisolated private static func isDirectoryURL(_ url: URL) -> Bool {
@@ -2181,7 +2564,11 @@ final class ViewerStore: ObservableObject {
             }
             self.archiveParentPages = self.pages
             self.pages = entries
-            self.currentIndex = 0
+            self.currentIndex = min(
+                max(self.pendingArchiveRestoreIndex ?? 0, 0),
+                entries.count - 1
+            )
+            self.pendingArchiveRestoreIndex = nil
             self.archiveURL = cache
             self.nativeSession = session
             self.nativeArchive = archive

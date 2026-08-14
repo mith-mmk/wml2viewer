@@ -17,7 +17,7 @@ struct SystemDocumentPicker: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         let types: [UTType] = switch presentation.request {
-        case .openTarget: [.folder, .item]
+        case .openTarget: [.item]
         case .containingFolder: [.folder]
         case .manageFiles: [.item]
         }

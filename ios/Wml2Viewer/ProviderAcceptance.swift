@@ -8,16 +8,23 @@ enum ProviderAcceptanceKind: String, Codable, CaseIterable {
     case smb
 }
 
+enum ProviderAcceptancePhase: String, Codable, CaseIterable {
+    case initialAuthorization = "initial"
+    case registeredReopen = "reopen"
+}
+
 struct ProviderAcceptanceReport: Codable, Equatable {
-    static let schemaVersion = 1
+    static let schemaVersion = 2
 
     let schemaVersion: Int
     let token: String
     let provider: ProviderAcceptanceKind
+    let phase: ProviderAcceptancePhase
     private(set) var sequence: Int
     private(set) var status: String
     private(set) var pickerRequested = false
     private(set) var pickerCancelled = false
+    private(set) var registeredRestoreRequested = false
     private(set) var folderEnumeratedItemCount = 0
     private(set) var folderSupportedItemCount = 0
     private(set) var decodedPageCount = 0
@@ -29,10 +36,15 @@ struct ProviderAcceptanceReport: Codable, Equatable {
     private(set) var inputReadyAfterError = false
     private(set) var recoveredAfterError = false
 
-    init(token: String, provider: ProviderAcceptanceKind) {
+    init(
+        token: String,
+        provider: ProviderAcceptanceKind,
+        phase: ProviderAcceptancePhase = .initialAuthorization
+    ) {
         schemaVersion = Self.schemaVersion
         self.token = token
         self.provider = provider
+        self.phase = phase
         sequence = 0
         status = "in-progress"
     }
@@ -47,41 +59,51 @@ struct ProviderAcceptanceReport: Codable, Equatable {
         advance()
     }
 
+    mutating func recordRegisteredRestoreRequested() {
+        guard phase == .registeredReopen else { return }
+        registeredRestoreRequested = true
+        advance()
+    }
+
     mutating func recordFolderSnapshot(enumerated: Int, supported: Int) {
-        guard pickerRequested else { return }
+        guard hasSourceRequest else { return }
         folderEnumeratedItemCount = max(0, enumerated)
         folderSupportedItemCount = max(0, supported)
         advance()
     }
 
     mutating func recordDecodeReady(pageCount: Int) {
-        guard pickerRequested else { return }
+        guard hasSourceRequest else { return }
         decodedPageCount = max(decodedPageCount, max(0, pageCount))
+        if phase == .registeredReopen {
+            folderEnumeratedItemCount = max(folderEnumeratedItemCount, max(0, pageCount))
+            folderSupportedItemCount = max(folderSupportedItemCount, max(0, pageCount))
+        }
         if recoverableErrorObserved { recoveredAfterError = true }
         advance()
     }
 
     mutating func recordNavigation(from: Int, to: Int) {
-        guard pickerRequested else { return }
+        guard hasSourceRequest else { return }
         if to > from { movedForward = true }
         if to < from { movedBackward = true }
         advance()
     }
 
     mutating func recordFilmstripOpened() {
-        guard pickerRequested else { return }
+        guard hasSourceRequest else { return }
         filmstripOpened = true
         advance()
     }
 
     mutating func recordThumbnailDecoded() {
-        guard pickerRequested else { return }
+        guard hasSourceRequest else { return }
         thumbnailDecoded = true
         advance()
     }
 
     mutating func recordRecoverableError(inputReady: Bool) {
-        guard pickerRequested else { return }
+        guard hasSourceRequest else { return }
         recoverableErrorObserved = true
         inputReadyAfterError = inputReadyAfterError || inputReady
         advance()
@@ -89,12 +111,25 @@ struct ProviderAcceptanceReport: Codable, Equatable {
 
     private mutating func advance() {
         sequence &+= 1
-        status = pickerRequested &&
+        let openedThroughExpectedRoute = switch phase {
+        case .initialAuthorization:
+            pickerRequested
+        case .registeredReopen:
+            registeredRestoreRequested && !pickerRequested
+        }
+        status = openedThroughExpectedRoute &&
             folderSupportedItemCount >= 2 &&
             decodedPageCount >= 1 &&
             movedForward && movedBackward &&
             filmstripOpened && thumbnailDecoded
             ? "passed" : "in-progress"
+    }
+
+    private var hasSourceRequest: Bool {
+        switch phase {
+        case .initialAuthorization: pickerRequested
+        case .registeredReopen: registeredRestoreRequested
+        }
     }
 }
 
@@ -104,6 +139,7 @@ final class ProviderAcceptanceRecorder {
 
     private var report: ProviderAcceptanceReport
     private let destination: URL
+    var phase: ProviderAcceptancePhase { report.phase }
 
     static func fromProcessArguments(
         _ arguments: [String] = ProcessInfo.processInfo.arguments,
@@ -112,12 +148,17 @@ final class ProviderAcceptanceRecorder {
         guard let flag = arguments.firstIndex(of: "--provider-acceptance") else { return nil }
         let tokenIndex = arguments.index(after: flag)
         let providerIndex = arguments.index(after: tokenIndex)
+        let phaseIndex = arguments.index(after: providerIndex)
         guard arguments.indices.contains(tokenIndex),
               arguments.indices.contains(providerIndex),
               isSafeToken(arguments[tokenIndex]),
               let provider = ProviderAcceptanceKind(rawValue: arguments[providerIndex]) else {
             return nil
         }
+        let phase = arguments.indices.contains(phaseIndex)
+            ? ProviderAcceptancePhase(rawValue: arguments[phaseIndex])
+            : .initialAuthorization
+        guard let phase else { return nil }
         let directory: URL
         if let cachesDirectory {
             directory = cachesDirectory
@@ -133,6 +174,7 @@ final class ProviderAcceptanceRecorder {
         return ProviderAcceptanceRecorder(
             token: arguments[tokenIndex],
             provider: provider,
+            phase: phase,
             destination: directory.appendingPathComponent(resultFileName)
         )
     }
@@ -143,8 +185,13 @@ final class ProviderAcceptanceRecorder {
         }
     }
 
-    init(token: String, provider: ProviderAcceptanceKind, destination: URL) {
-        report = ProviderAcceptanceReport(token: token, provider: provider)
+    init(
+        token: String,
+        provider: ProviderAcceptanceKind,
+        phase: ProviderAcceptancePhase = .initialAuthorization,
+        destination: URL
+    ) {
+        report = ProviderAcceptanceReport(token: token, provider: provider, phase: phase)
         self.destination = destination
         persist()
     }
@@ -159,11 +206,21 @@ final class ProviderAcceptanceRecorder {
         persist()
     }
 
+    func registeredRestoreRequested() {
+        report.recordRegisteredRestoreRequested()
+        persist()
+    }
+
     func folderCommitted(_ snapshot: SourceSnapshot) {
         report.recordFolderSnapshot(
             enumerated: snapshot.enumeratedItemCount,
             supported: snapshot.supportedItemCount
         )
+        persist()
+    }
+
+    func registeredSourceRestored(enumerated: Int, supported: Int) {
+        report.recordFolderSnapshot(enumerated: enumerated, supported: supported)
         persist()
     }
 

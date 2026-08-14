@@ -110,6 +110,24 @@
     "This clears app bookmarks, not Apple Files Recents." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "アプリのbookmarkだけを消去し、Apple Filesの「最近使った項目」は消去しません。" } } } },
     "Reset Files recovery" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "Files復旧状態をリセット" } } } },
     "Saved Files locations were cleared." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "保存したFilesの場所を消去しました。" } } } },
-    "Files closed repeatedly. Restore the last location or reset Files recovery." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "Filesが繰り返し終了しました。最後に開いた場所を復元するか、Files復旧状態をリセットしてください。" } } } }
+    "Files closed repeatedly. Restore the last location or reset Files recovery." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "Filesが繰り返し終了しました。最後に開いた場所を復元するか、Files復旧状態をリセットしてください。" } } } },
+    "Registered locations" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "登録した場所" } } } },
+    "No registered locations" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "登録した場所はありません" } } } },
+    "Folders and archives are registered after they open successfully." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "正常に開いたフォルダと書庫は、ここへ自動的に登録されます。" } } } },
+    "Remove registration" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "登録を解除" } } } },
+    "Reauthorize" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "再認証" } } } },
+    "Add from Files" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "Filesから追加" } } } },
+    "Add folder" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "フォルダを追加" } } } },
+    "Open file" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "ファイルを開く" } } } },
+    "Files recovery" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "Filesの復旧" } } } },
+    "Files browsing is unavailable. Registered locations can still be opened directly." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "Filesの参照は一時停止中です。登録した場所は直接開けます。" } } } },
+    "Not checked" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "未確認" } } } },
+    "Available" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "利用可能" } } } },
+    "Offline" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "オフライン" } } } },
+    "Sign-in required" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "サインインが必要" } } } },
+    "Permission required" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "再認証が必要" } } } },
+    "Provider unavailable" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "提供元を利用できません" } } } },
+    "Manage registered locations" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "登録した場所を管理" } } } },
+    "Actions" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "操作" } } } }
   }
 }

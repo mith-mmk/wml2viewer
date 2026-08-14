@@ -71,7 +71,10 @@ struct ViewerSurface: View {
                 .accessibilityIdentifier("viewer.touchSurface")
                 .accessibilityLabel(String(localized: "Viewer"))
                 .accessibilityValue(store.pagePositionAccessibilityValue)
-                .allowsHitTesting(!store.showSettings && (!store.showFilmstrip || filmstripIsPinned) && !store.isPickerPresented)
+                .allowsHitTesting(
+                    !store.showSettings && !store.showSourceChooser &&
+                        (!store.showFilmstrip || filmstripIsPinned) && !store.isPickerPresented
+                )
             }
             .onAppear { store.updateViewport(geometry.size) }
             .onChange(of: geometry.size) { _, size in store.updateViewport(size) }

@@ -229,6 +229,43 @@ final class ViewerModelTests: XCTestCase {
         report.recordThumbnailDecoded()
         XCTAssertEqual(report.status, "passed")
     }
+
+    func testProviderAcceptanceSeparatesRegisteredReopenFromInitialFilesAuthorization() {
+        var report = ProviderAcceptanceReport(
+            token: "reopen-token",
+            provider: .thirdParty,
+            phase: .registeredReopen
+        )
+        report.recordRegisteredRestoreRequested()
+        report.recordFolderSnapshot(enumerated: 4, supported: 3)
+        report.recordDecodeReady(pageCount: 3)
+        report.recordNavigation(from: 1, to: 2)
+        report.recordNavigation(from: 2, to: 1)
+        report.recordFilmstripOpened()
+        report.recordThumbnailDecoded()
+
+        XCTAssertEqual(report.phase, .registeredReopen)
+        XCTAssertTrue(report.registeredRestoreRequested)
+        XCTAssertFalse(report.pickerRequested)
+        XCTAssertEqual(report.status, "passed")
+
+        // A Files presentation during the reopen phase invalidates the
+        // direct-bookmark acceptance even if page interaction succeeds.
+        report.recordPickerRequested()
+        XCTAssertEqual(report.status, "in-progress")
+    }
+
+    @MainActor
+    func testProviderAcceptanceRecorderParsesExplicitReopenPhase() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".test-provider-acceptance-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recorder = try XCTUnwrap(ProviderAcceptanceRecorder.fromProcessArguments(
+            ["app", "--provider-acceptance", "safe-token", "third-party", "reopen"],
+            cachesDirectory: directory
+        ))
+        XCTAssertEqual(recorder.phase, .registeredReopen)
+    }
     #endif
 
     func testConfigRoundTrip() throws {
@@ -347,7 +384,8 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertTrue(PickerRequest.containingFolder.selectionIsFolder(resourceIsDirectory: false))
         XCTAssertTrue(PickerRequest.openTarget.selectionIsFolder(resourceIsDirectory: true))
         XCTAssertFalse(PickerRequest.openTarget.selectionIsFolder(resourceIsDirectory: false))
-        XCTAssertTrue(PickerRequest.openTarget.acceptsFolders)
+        XCTAssertFalse(PickerRequest.openTarget.acceptsFolders)
+        XCTAssertTrue(PickerRequest.containingFolder.acceptsFolders)
         XCTAssertFalse(PickerRequest.manageFiles.acceptsFolders)
     }
 
@@ -586,6 +624,36 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertNil(restored.listedManifestOpaqueEntryID)
         XCTAssertNil(restored.listedManifestFileName)
         XCTAssertEqual(restored.logicalPageIndex, 2)
+        XCTAssertEqual(restored.sourceKind, .folder)
+        XCTAssertTrue(restored.isRegistered)
+        XCTAssertEqual(restored.lastKnownStatus, .unknown)
+    }
+
+    func testLegacyArchiveIsRegisteredButOrdinaryFileRemainsTransient() throws {
+        let archiveID = UUID()
+        let archive = try JSONSerialization.data(withJSONObject: [
+            "sourceID": archiveID.uuidString,
+            "bookmark": "AQID",
+            "displayName": "Book.LZH",
+            "isFolder": false,
+            "logicalPageIndex": 9,
+        ])
+        let restoredArchive = try JSONDecoder().decode(BookmarkRecord.self, from: archive)
+        XCTAssertEqual(restoredArchive.sourceKind, .archive)
+        XCTAssertTrue(restoredArchive.isRegistered)
+        XCTAssertEqual(restoredArchive.logicalPageIndex, 9)
+
+        let fileID = UUID()
+        let file = try JSONSerialization.data(withJSONObject: [
+            "sourceID": fileID.uuidString,
+            "bookmark": "AQID",
+            "displayName": "page.png",
+            "isFolder": false,
+            "logicalPageIndex": 0,
+        ])
+        let restoredFile = try JSONDecoder().decode(BookmarkRecord.self, from: file)
+        XCTAssertEqual(restoredFile.sourceKind, .transientFile)
+        XCTAssertFalse(restoredFile.isRegistered)
     }
 
     func testFolderEntryMatcherPrefersOpaqueProviderIdentityThenFileName() {
@@ -1068,6 +1136,162 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertTrue(records.isEmpty)
     }
 
+    func testBookmarkStoreKeepsMultipleRegisteredSourcesAndOnlyLatestTransientFile() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".test-bookmark-multiple-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = BookmarkStore(fileURL: directory.appendingPathComponent("bookmarks.json"))
+        let folderID = UUID()
+        let archiveID = UUID()
+        let oldTransientID = UUID()
+        let newTransientID = UUID()
+
+        try await store.upsert(BookmarkRecord(
+            sourceID: folderID, bookmark: Data([1]), displayName: "Folder",
+            isFolder: true, opaqueEntryID: "folder-page", logicalPageIndex: 2,
+            providerDomainOpaqueID: "domain-a", providerItemOpaqueID: "folder-a"
+        ))
+        try await store.upsert(BookmarkRecord(
+            sourceID: archiveID, bookmark: Data([2]), displayName: "Book.zip",
+            isFolder: false, opaqueEntryID: "archive", logicalPageIndex: 7,
+            providerDomainOpaqueID: "domain-a", providerItemOpaqueID: "archive-a"
+        ))
+        try await store.upsert(BookmarkRecord(
+            sourceID: oldTransientID, bookmark: Data([3]), displayName: "old.png",
+            isFolder: false, opaqueEntryID: "old", logicalPageIndex: 0
+        ))
+        try await store.upsert(BookmarkRecord(
+            sourceID: newTransientID, bookmark: Data([4]), displayName: "new.png",
+            isFolder: false, opaqueEntryID: "new", logicalPageIndex: 0
+        ))
+
+        let records = try await store.load()
+        XCTAssertEqual(Set(records.filter(\.isRegistered).map(\.sourceID)), Set([folderID, archiveID]))
+        XCTAssertEqual(records.filter { !$0.isRegistered }.map(\.sourceID), [newTransientID])
+    }
+
+    func testRegisteredSourceCommitPolicyWaitsForAnArchivePageToDisplay() {
+        XCTAssertTrue(
+            RegisteredSourceRegistrationPolicy.isAutomaticallyRegistered(
+                .folder,
+                initialDisplaySucceeded: false
+            )
+        )
+        XCTAssertFalse(
+            RegisteredSourceRegistrationPolicy.isAutomaticallyRegistered(
+                .archive,
+                initialDisplaySucceeded: false
+            )
+        )
+        XCTAssertTrue(
+            RegisteredSourceRegistrationPolicy.isAutomaticallyRegistered(
+                .archive,
+                initialDisplaySucceeded: true
+            )
+        )
+        XCTAssertFalse(
+            RegisteredSourceRegistrationPolicy.isAutomaticallyRegistered(
+                .transientFile,
+                initialDisplaySucceeded: true
+            )
+        )
+        XCTAssertTrue(
+            RegisteredSourceRegistrationPolicy.requiresSuccessfulInitialDisplay(.archive)
+        )
+        XCTAssertFalse(
+            RegisteredSourceRegistrationPolicy.requiresSuccessfulInitialDisplay(.folder)
+        )
+    }
+
+    func testBookmarkStoreDeduplicatesRegisteredProviderIdentityWithoutResolvingBookmark() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".test-bookmark-dedupe-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = BookmarkStore(fileURL: directory.appendingPathComponent("bookmarks.json"))
+        let oldID = UUID()
+        let newID = UUID()
+        let registeredAt = Date(timeIntervalSince1970: 1_700_000_000)
+
+        try await store.upsert(BookmarkRecord(
+            sourceID: oldID, bookmark: Data("not-a-resolvable-bookmark".utf8), displayName: "Old",
+            isFolder: true, opaqueEntryID: nil, logicalPageIndex: 0,
+            registeredAt: registeredAt,
+            providerDomainOpaqueID: "opaque-domain", providerItemOpaqueID: "opaque-item"
+        ))
+        let duplicateLookup = try await store.registeredRecord(
+            providerDomainOpaqueID: "opaque-domain",
+            providerItemOpaqueID: "opaque-item"
+        )
+        XCTAssertEqual(duplicateLookup?.sourceID, oldID)
+        try await store.upsert(BookmarkRecord(
+            sourceID: newID, bookmark: Data("also-not-resolvable".utf8), displayName: "Renamed",
+            isFolder: true, opaqueEntryID: "current", logicalPageIndex: 4,
+            registeredAt: registeredAt,
+            providerDomainOpaqueID: "opaque-domain", providerItemOpaqueID: "opaque-item"
+        ))
+
+        // registeredSources is a metadata-only operation. Invalid bookmark
+        // bytes prove that showing the chooser does not contact a Provider.
+        let summaries = try await store.registeredSources()
+        XCTAssertEqual(summaries.map(\.id), [newID])
+        XCTAssertEqual(summaries.first?.displayName, "Renamed")
+        XCTAssertEqual(summaries.first?.status, .unknown)
+        let removedDuplicate = try await store.record(sourceID: oldID)
+        let retainedRegistration = try await store.record(sourceID: newID)
+        XCTAssertNil(removedDuplicate)
+        XCTAssertEqual(retainedRegistration?.logicalPageIndex, 4)
+    }
+
+    func testBookmarkStoreStatusAndRemovalAffectOnlySelectedRegistration() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".test-bookmark-status-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = BookmarkStore(fileURL: directory.appendingPathComponent("bookmarks.json"))
+        let firstID = UUID()
+        let secondID = UUID()
+        for (id, name) in [(firstID, "First"), (secondID, "Second")] {
+            try await store.upsert(BookmarkRecord(
+                sourceID: id, bookmark: Data([1]), displayName: name,
+                isFolder: true, opaqueEntryID: nil, logicalPageIndex: 0,
+                providerDomainOpaqueID: "domain", providerItemOpaqueID: id.uuidString
+            ))
+        }
+
+        try await store.updateStatus(sourceID: firstID, status: .authenticationRequired)
+        let firstUpdated = try await store.record(sourceID: firstID)
+        let secondUnchanged = try await store.record(sourceID: secondID)
+        XCTAssertEqual(firstUpdated?.lastKnownStatus, .authenticationRequired)
+        XCTAssertEqual(secondUnchanged?.lastKnownStatus, .unknown)
+        try await store.remove(sourceID: firstID)
+        let firstRemoved = try await store.record(sourceID: firstID)
+        let secondRetained = try await store.record(sourceID: secondID)
+        XCTAssertNil(firstRemoved)
+        XCTAssertNotNil(secondRetained)
+    }
+
+    func testBookmarkManifestDoesNotPersistURLPathOrRawProviderIdentifiers() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".test-bookmark-privacy-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("bookmarks.json")
+        let store = BookmarkStore(fileURL: fileURL)
+        let rawDomain = "raw-provider-domain-identifier"
+        let rawItem = "raw-provider-item-identifier"
+        let rawPath = "/private/provider/account/folder"
+        try await store.upsert(BookmarkRecord(
+            sourceID: UUID(), bookmark: Data(rawPath.utf8), displayName: "Folder",
+            isFolder: true, opaqueEntryID: "opaque-entry", logicalPageIndex: 0,
+            providerDomainOpaqueID: "0d0a1n-hash", providerItemOpaqueID: "1t3m-hash"
+        ))
+
+        let persisted = try String(contentsOf: fileURL, encoding: .utf8)
+        XCTAssertFalse(persisted.contains(rawPath))
+        XCTAssertFalse(persisted.contains(rawDomain))
+        XCTAssertFalse(persisted.contains(rawItem))
+        let summaries = try await store.registeredSources()
+        XCTAssertEqual(summaries.first?.displayName, "Folder")
+    }
+
     @MainActor
     func testSceneReturnRecoversPickerWithNoDelegateCallback() async {
         let store = ViewerStore()
@@ -1144,6 +1368,49 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertTrue(store.filesPickerRecoveryRequired)
 
         await store.restoreLastLocation()
+        XCTAssertFalse(store.filesPickerRecoveryRequired)
+    }
+
+    @MainActor
+    func testRegisteredSourceOpensDirectlyWhileFilesPickerCircuitIsBlocked() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".test-registered-direct-open-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data([0]).write(to: root.appendingPathComponent("001.png"))
+        let bookmarkStore = BookmarkStore(fileURL: root.appendingPathComponent("bookmarks.json"))
+        let sourceID = UUID()
+        let bookmark = try root.bookmarkData(
+            options: [.suitableForBookmarkFile],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        try await bookmarkStore.upsert(BookmarkRecord(
+            sourceID: sourceID, bookmark: bookmark, displayName: "Registered folder",
+            isFolder: true, opaqueEntryID: nil, logicalPageIndex: 0,
+            providerDomainOpaqueID: "opaque-domain", providerItemOpaqueID: "opaque-folder"
+        ))
+        let store = ViewerStore(
+            bookmarks: bookmarkStore,
+            configStore: ConfigStore(fileURL: root.appendingPathComponent("config.json"))
+        )
+        await store.restoreLastSource()
+        XCTAssertEqual(store.registeredSources.map(\.id), [sourceID])
+
+        for _ in 0..<2 {
+            let presentation = try XCTUnwrap(store.installPendingPickerForTest())
+            store.pickerDidDismiss(presentation.id)
+        }
+        XCTAssertTrue(store.filesPickerRecoveryRequired)
+        store.presentSourceChooser()
+        store.openRegisteredSource(sourceID)
+        XCTAssertFalse(store.showSourceChooser)
+        store.sourceChooserDidDismiss()
+
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertNil(store.pendingPicker)
+        XCTAssertFalse(store.filesOpenPhase.blocksViewerInput)
+        XCTAssertEqual(store.pages.first?.displayName, "001.png")
         XCTAssertFalse(store.filesPickerRecoveryRequired)
     }
 

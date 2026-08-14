@@ -55,19 +55,44 @@ final class Wml2ViewerUITests: XCTestCase {
         clear.tap()
     }
 
-    func testMixedFileAndFolderPickerPresentation() throws {
+    func testSourceChooserSeparatesFolderFileAndManagementEntries() throws {
         let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_LANGUAGE"] = "en"
         app.launch()
 
         let surface = app.otherElements["viewer.touchSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
         surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["sourceChooser.panel"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["sourceChooser.addFolder"].isHittable)
+        XCTAssertTrue(app.buttons["sourceChooser.openFile"].isHittable)
+        XCTAssertTrue(app.buttons["sourceChooser.manageFiles"].isHittable)
+        XCTAssertFalse(surface.isHittable)
+    }
 
-        let browserPresented = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "isHittable == false"),
-            object: surface
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [browserPresented], timeout: 10), .completed)
+    func testRegisteredFolderReopensDirectlyWithoutPresentingFiles() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["WML2VIEWER_UI_TEST_NO_RESTORE"] = "1"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_LANGUAGE"] = "en"
+        app.launchEnvironment["WML2VIEWER_UI_TEST_REGISTER_FOLDER_FIXTURE"] = "1"
+        app.launch()
+
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        XCTAssertEqual(surface.value as? String, "1 / 3")
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["sourceChooser.panel"].waitForExistence(timeout: 5))
+        let registered = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] 'ui-folder-fixture'")
+        ).firstMatch
+        XCTAssertTrue(registered.waitForExistence(timeout: 5))
+        registered.tap()
+
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        XCTAssertEqual(surface.value as? String, "1 / 3")
+        XCTAssertFalse(app.buttons["documentPicker.recover"].exists)
+        XCTAssertFalse(app.buttons["documentBrowser.close"].exists)
     }
 
     func testAppOwnedPickerRecoveryReturnsFromDocumentManager() throws {
@@ -78,14 +103,17 @@ final class Wml2ViewerUITests: XCTestCase {
 
         let surface = app.otherElements["viewer.touchSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
-        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        openPickerFromSourceChooser(app, surface: surface, action: "sourceChooser.openFile")
 
         let recover = app.buttons["documentPicker.recover"]
         XCTAssertTrue(recover.waitForExistence(timeout: 10), pickerFailureDescription(app))
         XCTAssertFalse(surface.isHittable)
         recover.tap()
 
-        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["sourceChooser.panel"].waitForExistence(timeout: 10))
+        XCTAssertFalse(surface.isHittable)
+        app.buttons["sourceChooser.done"].tap()
+        XCTAssertTrue(surface.waitForExistence(timeout: 5))
         XCTAssertTrue(surface.isHittable)
         XCTAssertTrue(app.descendants(matching: .any)["viewer.sourceNotice"].waitForExistence(timeout: 5))
     }
@@ -104,7 +132,7 @@ final class Wml2ViewerUITests: XCTestCase {
         )
         let surface = app.otherElements["viewer.touchSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
-        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        openPickerFromSourceChooser(app, surface: surface, action: "sourceChooser.addFolder")
 
         let folder = app.cells.matching(
             NSPredicate(format: "identifier == %@", "\(PickerFixture.folderName), Folder")
@@ -162,7 +190,7 @@ final class Wml2ViewerUITests: XCTestCase {
         )
         let surface = app.otherElements["viewer.touchSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
-        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        openPickerFromSourceChooser(app, surface: surface, action: "sourceChooser.openFile")
 
         let folder = app.cells.matching(
             NSPredicate(format: "identifier == %@", "\(PickerFixture.folderName), Folder")
@@ -240,7 +268,7 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["uiTest.pickerFixtureReady"].waitForExistence(timeout: 10))
         let surface = app.otherElements["viewer.touchSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
-        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        openPickerFromSourceChooser(app, surface: surface, action: "sourceChooser.openFile")
 
         let folder = app.cells.matching(
             NSPredicate(format: "identifier == %@", "\(PickerFixture.folderName), Folder")
@@ -275,7 +303,7 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["uiTest.pickerFixtureReady"].waitForExistence(timeout: 10))
         let surface = app.otherElements["viewer.touchSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
-        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        openPickerFromSourceChooser(app, surface: surface, action: "sourceChooser.addFolder")
         let folder = app.cells.matching(
             NSPredicate(format: "identifier == %@", "\(PickerFixture.folderName), Folder")
         ).firstMatch
@@ -295,7 +323,7 @@ final class Wml2ViewerUITests: XCTestCase {
         cancel.tap()
         XCTAssertFalse(app.descendants(matching: .any)["sourceOpening.progress"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.descendants(matching: .any)["viewer.sourceNotice"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["viewer.sourceNotice.openFiles"].isHittable)
+        XCTAssertTrue(app.buttons["viewer.sourceNotice.registeredSources"].isHittable)
         XCTAssertTrue(surface.isHittable)
     }
 
@@ -490,6 +518,13 @@ final class Wml2ViewerUITests: XCTestCase {
         let spacing = app.steppers["settings.mangaPageSpacing"]
         XCTAssertTrue(spacing.waitForExistence(timeout: 5))
         XCTAssertTrue(spacing.label.contains("見開き間隔"))
+        app.buttons.matching(NSPredicate(format: "label == '完了'")).firstMatch.tap()
+        let surface = app.otherElements["viewer.touchSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        XCTAssertTrue(app.navigationBars["登録した場所"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["sourceChooser.addFolder"].label.contains("フォルダを追加"))
+        XCTAssertTrue(app.buttons["sourceChooser.openFile"].label.contains("ファイルを開く"))
     }
 
     func testWideIPadShowsPinnedFilmstripWithoutOpeningSheet() throws {
@@ -580,6 +615,22 @@ final class Wml2ViewerUITests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
         return "UIDocumentPicker hierarchy:\n\(app.debugDescription)"
+    }
+
+    private func openPickerFromSourceChooser(
+        _ app: XCUIApplication,
+        surface: XCUIElement,
+        action: String
+    ) {
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["sourceChooser.panel"].waitForExistence(timeout: 5),
+            "Registered locations chooser did not open"
+        )
+        let button = app.buttons[action]
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        XCTAssertTrue(button.isHittable)
+        button.tap()
     }
 
     private func pixelRGBA(in image: UIImage, at point: CGPoint) throws -> [UInt8] {

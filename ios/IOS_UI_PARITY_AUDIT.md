@@ -112,6 +112,21 @@ Simulatorでは復旧unit 5件、通常Cancel非遮断を含むSwift unit全70�
 
 同じ実機（iPad A16、iOS 26.6、unlocked）で`ios/device-smoke.sh`を再実行し、XCTest、署名build、install、launch、native session/request/cancel/releaseの自己診断が成功した。
 
+2026-08-14 20:41〜20:48 JSTのOneDrive再試行では、アプリの受入レポートが
+`pickerRequested=true`のまま`folderEnumeratedItemCount=0`、`pickerCancelled=false`で止まり、
+選択callbackがアプリへ返らなかった。同じ時刻のiPad `systemCrashLogs`から
+`com.apple.DocumentManager.Service`を取得して確認したところ、5件すべてが
+`com.apple.DocumentManagerUICore.Service`のSIGABRTで、スタックは
+`DOCSidebarViewController.reloadOutlineDiffableData`→
+`BUG_IN_CLIENT_OF_DIFFABLE_DATA_SOURCE__DUPLICATE_ITEM_IDENTIFIERS_IN_SECTION_SNAPSHOT`
+だった。WML2Viewerのbundle ID／Rust bridgeはクラッシュスタックに存在せず、OneDriveのFile Providerを
+選択したときにApple Filesサイドバー（Favorites/履歴を含む）が落ちるProvider/OS側障害と判定する。
+同じ端末で`ios/device-smoke.sh`を再実行し、XCTest・署名build・install・launch・native
+session/request/cancel/releaseは20:56 JSTに再び成功した。アプリ側はpickerのdismantle/watchdog、
+「閉じる」復旧ボタン、2回後の回路遮断、bookmarkからの「最後に開いた場所を復元」を提供するが、
+Apple Document ManagerのDiffable Data Source assertion自体をアプリから修復する公開APIはない。
+OneDriveのfolder列挙・連続閲覧はこのクラッシュが解消されるまで実機合格扱いにしない。
+
 2026-08-14 19:40 JSTの再開では、Keychain復旧後に標準Provisioning Profile配置を再確認し、
 証明書名末尾の識別子ではなくProfileの`TeamIdentifier=YR527W4764`を指定した。
 同じiPad A16（UDID `00008120-000C4D9421500032`、unlocked、Developer Mode enabled）で
@@ -133,8 +148,25 @@ CoreDeviceServiceの初期化timeoutで端末操作へ進めなかった。
 製品ビルド失敗の証拠として扱わない。
 
 空ZIPを含むfolderで、失敗項目を方向に応じてスキップし、前後移動後に
-エラー表示と入力ロックが解除される回帰UI testも通過した。現在の作業ツリーは
-製品変更なし（ユーザー所有の`.DS_Store`のみ未追跡）である。
+エラー表示と入力ロックが解除される回帰UI testも通過した。この時点の作業ツリーは
+製品変更なし（ユーザー所有の`.DS_Store`のみ未追跡）だった。
+
+## 2026-08-14 登録した場所／第三者Provider再設計
+
+FilesのRecents / Favoritesへの依存を避けるため、3×3上中央をアプリ内の「登録した場所」chooserへ変更した。chooserの一覧は安全なmetadata summaryだけを読み、bookmark resolve、folder列挙、Provider接続を行わない。「フォルダを追加」は`.folder` Picker、「ファイルを開く」は`.item` Picker、「ファイル管理」はDocument Browserへ分離した。
+
+正常に開いたfolderとZIP / LHA / LZH書庫は自動登録し、通常画像は包含folderへ昇格した後だけ登録する。書庫はcontainer snapshotだけでは登録せず、最初の内部ページのdecode成功後に確定するため、空・破損書庫は登録一覧へ残らない。複数登録を保持し、未登録単一画像は最新1件だけを残す。同一Provider項目はdomain / item identifierのSHA-256 opaque IDで重複排除し、取得不能時はbookmark hashへfallbackする。登録行を選んだ時はその1件だけを`.withoutUI`でresolveするため、Files Pickerの回路遮断中でも直接再表示できる。statusはunknown / available / offline / authenticationRequired / permissionRevoked / providerUnavailableへ正規化し、再試行、再認証、登録解除を各行から実行できる。
+
+Picker / Document Managerのdelegateなし終了時はviewerを維持してchooserへ戻す。通常Cancelと正常selection callbackは回路遮断回数へ加算しない。OneDrive固有blacklist、Microsoft Graph、MSAL、Dropbox SDK、独自credential保存は追加していない。
+
+自動検証結果:
+
+- iPhone 17 Pro Simulator: Swift unit 81件成功。bookmark旧形式移行、folder/archive登録、空・破損archiveの登録延期、単一画像非登録、複数保持、opaque ID重複排除、metadata-only一覧、status更新、Files回路遮断中の直接open、受入phase分離を含む。
+- iPhone 17 Pro Simulator: chooser入口分離、登録folderのFilesなし直接再表示、日本語chooser、実UIDocumentPickerのfolder 3ページ接続、単一画像→包含folder昇格、Picker異常→chooser→viewer復旧が個別に成功。
+- iPad Pro 13-inch (M5) Simulator: chooser入口分離と登録folderのFilesなし直接再表示が成功。
+- `device-provider-acceptance.sh`はschema v2とし、`initial`（初回Files許可）と`reopen`（登録bookmark直接再表示）を別レポートにした。reopen中にFiles Pickerが提示された場合は不合格とする。両phase成功を「確認済み」、reopenだけ成功を「制限あり」、証跡なしを「未確認」とする。
+
+未完の実機証跡: OneDriveおよび別の第三者Providerで、OS側の初回folder許可と登録source直接再表示を新schemaで再実行する必要がある。Apple Document Managerの既知SIGABRT自体は公開APIで修復できないため、初回許可がクラッシュするが既存bookmarkの直接再表示だけ成功する場合は「制限あり」と判定する。
 
 以下の表は初回監査時点の失敗を残す履歴である。
 
