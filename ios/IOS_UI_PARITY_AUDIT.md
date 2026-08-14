@@ -81,6 +81,15 @@ delegate callbackが無いままpicker view controllerが破棄された場合�
 現在source・ページ・3x3入力を維持し、再選択可能な通知を表示する。`testPickerCrashDismissalReturnsToViewerAndPreservesSource`
 がSimulatorで成功している。これはOneDrive extension自体を修復するものではなく、OS側クラッシュ後にアプリが固まらないための復旧経路である。
 
+同日10:40 JSTの第三者Provider受入では、OneDriveの履歴を複数回表示した直後に
+`com.apple.DocumentManager.Service` が5回連続で終了した。端末のsystemCrashLogsでは
+アプリのbundle IDではなくAppleの`com.apple.DocumentManagerUICore.Service`が
+`SIGABRT`し、`DOCSidebarViewController.reloadOutlineDiffableData`内の
+`DUPLICATE_ITEM_IDENTIFIERS_IN_SECTION_SNAPSHOT` assertionが終了理由だった。
+このためfolder commit前の受入レポートは列挙0・対応0となり、OneDrive Providerの内容を
+アプリが読めなかった。アプリのpicker復旧経路は保持されるが、Appleの履歴UI assertion自体を
+アプリから回避するAPIはなく、OS/Provider側の修正または履歴を開かない導線での再受入が必要である。
+
 上記`pending`は製品コードの未実装を意味せず、`ios.md`が要求する実Provider操作の証跡不足を意味する。
 
 同じ実機（iPad A16、iOS 26.6、unlocked）で`ios/device-smoke.sh`を再実行し、XCTest、署名build、install、launch、native session/request/cancel/releaseの自己診断が成功した。
