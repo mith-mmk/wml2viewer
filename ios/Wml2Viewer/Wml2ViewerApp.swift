@@ -207,14 +207,21 @@ struct ContentView: View {
                 .background(.ultraThinMaterial, in: Capsule())
                 .padding(.bottom, 24)
             } else if let notice = store.sourceNoticeMessage {
-                Label(notice, systemImage: "folder.badge.questionmark")
-                    .font(.callout)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .padding(.bottom, 24)
-                    .accessibilityAddTraits(.isStaticText)
-                    .accessibilityIdentifier("viewer.sourceNotice")
+                HStack(spacing: 10) {
+                    Label(notice, systemImage: "folder.badge.questionmark")
+                        .font(.callout)
+                        .accessibilityAddTraits(.isStaticText)
+                        .accessibilityIdentifier("viewer.sourceNotice")
+                    Button(String(localized: "Open Files")) {
+                        store.requestFilePicker()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("viewer.sourceNotice.openFiles")
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.bottom, 24)
             }
         }
         .overlay {

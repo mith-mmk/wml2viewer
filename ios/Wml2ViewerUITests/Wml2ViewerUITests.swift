@@ -256,6 +256,7 @@ final class Wml2ViewerUITests: XCTestCase {
         cancel.tap()
         XCTAssertFalse(app.descendants(matching: .any)["sourceOpening.progress"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.descendants(matching: .any)["viewer.sourceNotice"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["viewer.sourceNotice.openFiles"].isHittable)
         XCTAssertTrue(surface.isHittable)
     }
 

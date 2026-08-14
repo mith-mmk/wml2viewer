@@ -38,17 +38,15 @@
 
 ## 2026-08-14 実機Provider受入追記
 
-`ios/device-provider-acceptance.sh` のarm/collectを、実機 iPad A16 で
-local、iCloud、third-party、SMBの各Providerについて個別に実行した。4件とも
-`status=passed` で、folder列挙、対応項目数、thumbnail、filmstrip、前後移動を確認した。
-local/iCloud/third-partyでは復帰可能エラー後の再表示も確認し、SMBではエラーなしの
-正常経路を確認した。レポートにはURL、path、file名、bookmark、credentialを保存していない。
+`ios/device-provider-acceptance.sh` のarm/collectを、実機 iPad A16 でProviderごとに
+個別実行した。過去セッションではlocal、iCloud、third-party、SMBの正常経路を確認したが、
+最新セッションの証跡を優先する。レポートにはURL、path、file名、bookmark、credentialを保存していない。
 
 | Provider | 列挙 | 対応 | 前後移動 | filmstrip | thumbnail | 結果 |
 | --- | ---: | ---: | --- | --- | --- | --- |
-| local | 49 | 6 | 成功 | 成功 | 成功 | passed |
-| iCloud | 49 | 6 | 成功 | 成功 | 成功 | passed |
-| third-party | 49 | 6 | 成功 | 成功 | 成功 | passed |
+| local | 25 | 8 | 成功 | 成功 | 成功 | passed |
+| iCloud | 25 | 8 | 成功 | 成功 | 成功 | passed |
+| third-party / OneDrive | 0 | 0 | 未確認 | 未確認 | 未確認 | in-progress |
 | SMB | 25 | 8 | 成功 | 成功 | 成功 | passed |
 
 実機受入の証拠範囲は次のとおりである。`passed`は上表の診断レポートで確認済み、
@@ -56,8 +54,9 @@ local/iCloud/third-partyでは復帰可能エラー後の再表示も確認し�
 
 | 実機項目 | 状態 | 根拠 / 次の確認 |
 | --- | --- | --- |
-| local / iCloud / third-party / SMBのfolder列挙、前後移動、filmstrip、thumbnail | passed | iPad A16のProvider acceptance report |
-| local / iCloud / third-partyの復帰可能エラー後の再表示 | passed | 同reportの`errorRecovery` |
+| local / iCloud / SMBのfolder列挙、前後移動、filmstrip、thumbnail | passed | iPad A16のProvider acceptance report |
+| third-party / OneDriveのfolder列挙、前後移動、filmstrip、thumbnail | pending | 最新セッションはDocument Manager/Filesクラッシュ前に0件で停止 |
+| local / iCloudの復帰可能エラー後の再表示 | passed | 同reportの`errorRecovery` |
 | Files/Document Browserのcopy・move・rename・delete・share | pending | OS標準UIで各操作を実行し、viewer再列挙を記録 |
 | offline、認証切れ、cloud download中断、再接続 | pending | 各Providerを意図的に切断・再認証してretry/reselectを記録 |
 | `.tests/PRO.LZH`の84件MAGを実機で先頭・中間・末尾表示 | pending | Rust/Simulatorでは検証済み、実機Filesからのopen記録が必要 |
