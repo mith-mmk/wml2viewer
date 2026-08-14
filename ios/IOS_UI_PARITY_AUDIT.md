@@ -100,7 +100,16 @@ viewer・3x3入力を戻せるが、OS/Provider側の修正または履歴を開
 
 同じ実機（iPad A16、iOS 26.6、unlocked）で`ios/device-smoke.sh`を再実行し、XCTest、署名build、install、launch、native session/request/cancel/releaseの自己診断が成功した。
 
-なお、Keychainを再設定した後の2026-08-14再確認では、`security find-identity -v -p codesigning`が
+2026-08-14 19:40 JSTの再開では、Keychain復旧後に標準Provisioning Profile配置を再確認し、
+証明書名末尾の識別子ではなくProfileの`TeamIdentifier=YR527W4764`を指定した。
+同じiPad A16（UDID `00008120-000C4D9421500032`、unlocked、Developer Mode enabled）で
+`Wml2ViewerUnitTests`を実機実行し、Swift unit 67件が0 failuresで完了した。
+続けて`ios/device-smoke.sh`を実行し、XCTest、署名build、install、launch、native
+session/request/cancel/release自己診断がすべて成功した。現在はlocal Providerの受入セッションを
+`ios/device-provider-acceptance.sh arm`で起動済みで、端末上のフォルダ選択、前後移動、filmstrip、
+thumbnail操作後に`collect`する段階である。Provider操作未実施のため、このセッションはまだ合格証跡へ昇格していない。
+
+過去の環境障害記録として、Keychainを再設定した直後の2026-08-14再確認では、`security find-identity -v -p codesigning`が
 `0 valid identities found`を返し、Provisioning Profileも現行Bundle IDに対して解決できなかった。
 そのため同日後半の実機smoke再実行は署名build開始前に停止している。これは製品コードの失敗ではなく、
 Apple Development証明書／private key／ProfileをXcode Accountsから再取得した後に再試行する環境条件である。
