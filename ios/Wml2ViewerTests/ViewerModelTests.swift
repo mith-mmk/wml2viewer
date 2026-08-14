@@ -962,6 +962,15 @@ final class ViewerModelTests: XCTestCase {
         XCTAssertNotEqual(store.pendingPicker?.id, presentation.id)
     }
 
+    @MainActor
+    func testRestoreLastLocationNeverPresentsFilesPicker() async {
+        let store = ViewerStore()
+        await store.restoreLastLocation()
+
+        XCTAssertNil(store.pendingPicker)
+        XCTAssertFalse(store.filesOpenPhase.blocksViewerInput)
+    }
+
     func testDocumentBrowserCrashUsesRecoveryClosureOnlyOnce() {
         var pickCalls = 0
         var recoveryCalls = 0

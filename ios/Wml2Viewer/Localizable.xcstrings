@@ -29,6 +29,7 @@
     "Open a file or folder from Files" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "Filesからファイルまたはフォルダを開いてください" } } } },
     "Pages" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "ページ" } } } },
     "Remember last location" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "最後に開いた場所を記憶" } } } },
+    "Restore last location" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "最後に開いた場所を復元" } } } },
     "Right to left" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "右から左へ読む" } } } },
     "Settings" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "設定" } } } },
     "Show top controls" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "上部コントロールを表示" } } } },

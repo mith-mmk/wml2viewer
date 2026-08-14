@@ -108,6 +108,12 @@ struct ContentView: View {
             Button(String(localized: "Open")) { store.requestFilePicker() }
             Button(String(localized: "Choose folder")) { store.requestFolderPicker() }
                 .accessibilityIdentifier("quickMenu.folder")
+            if store.hasRestorableLocation {
+                Button(String(localized: "Restore last location")) {
+                    Task { await store.restoreLastLocation() }
+                }
+                .accessibilityIdentifier("quickMenu.restoreLastLocation")
+            }
             Button(String(localized: "Manage Files")) { store.requestFileManagement() }
                 .accessibilityIdentifier("quickMenu.manageFiles")
             Button(String(localized: "Pages")) { store.openFilmstrip() }
@@ -203,6 +209,13 @@ struct ContentView: View {
                     Button(String(localized: "Choose folder")) { store.requestFolderPicker() }
                         .buttonStyle(.bordered)
                         .accessibilityIdentifier("viewer.error.chooseFolder")
+                    if store.hasRestorableLocation {
+                        Button(String(localized: "Restore last location")) {
+                            Task { await store.restoreLastLocation() }
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("viewer.error.restoreLastLocation")
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -219,6 +232,13 @@ struct ContentView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("viewer.sourceNotice.openFiles")
+                    if store.hasRestorableLocation {
+                        Button(String(localized: "Restore last location")) {
+                            Task { await store.restoreLastLocation() }
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("viewer.sourceNotice.restoreLastLocation")
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)

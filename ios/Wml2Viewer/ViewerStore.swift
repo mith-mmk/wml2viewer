@@ -38,6 +38,7 @@ final class ViewerStore: ObservableObject {
     @Published private(set) var filesOpenPhase: FilesOpenFlowPhase = .idle
     @Published private(set) var sourceConnectionState: SourceConnectionState = .empty
     @Published private(set) var sourceOpeningProgress: SourceOpeningProgress?
+    @Published private(set) var hasRestorableLocation = false
     @Published private(set) var thumbnails: [String: CGImage] = [:]
     @Published var zoom: CGFloat = 1
     @Published var pan: CGSize = .zero
@@ -134,6 +135,21 @@ final class ViewerStore: ObservableObject {
     }
 
     func restoreLastSource() async {
+        await restoreLastSource(allowDuringProviderAcceptance: false)
+    }
+
+    /// Reopens the most recent bookmark without presenting Files. This is a
+    /// recovery path for a File Provider/Document Manager crash in its
+    /// Recents or history UI: the app already has a user-granted bookmark, so
+    /// no new provider navigation is needed.
+    func restoreLastLocation() async {
+        guard pendingPicker == nil, sourceOpeningProgress == nil else { return }
+        errorMessage = nil
+        sourceNoticeMessage = nil
+        await restoreLastSource(allowDuringProviderAcceptance: true)
+    }
+
+    private func restoreLastSource(allowDuringProviderAcceptance: Bool) async {
         config = await configStore.load()
         await MaterializeCache.shared.setTotalLimit(config.cacheLimitBytes.map(Int.init))
         #if DEBUG
@@ -141,10 +157,11 @@ final class ViewerStore: ObservableObject {
         // Restoring a previously opened single file can otherwise produce a
         // decode event before Files was opened and makes an untouched device
         // look as though the acceptance flow had partially progressed.
-        if providerAcceptance != nil {
+        if providerAcceptance != nil && !allowDuringProviderAcceptance {
             return
         }
-        if ProcessInfo.processInfo.environment["WML2VIEWER_UI_TEST_NO_RESTORE"] == "1" {
+        if ProcessInfo.processInfo.environment["WML2VIEWER_UI_TEST_NO_RESTORE"] == "1",
+           !allowDuringProviderAcceptance {
             return
         }
         #endif
@@ -153,9 +170,11 @@ final class ViewerStore: ObservableObject {
         do {
             records = try await bookmarks.load()
         } catch {
+            hasRestorableLocation = false
             markRestoreFailure()
             return
         }
+        hasRestorableLocation = !records.isEmpty
         guard let record = records.first else { return }
         var stale = false
         do {
@@ -1358,6 +1377,7 @@ final class ViewerStore: ObservableObject {
             listedManifestOpaqueEntryID: listedManifestItem.map { DocumentEntryIdentity.opaqueIdentifier(for: $0.url) },
             listedManifestFileName: listedManifestItem?.displayName
         ))
+        hasRestorableLocation = true
         sourceConnectionState = isFolder
             ? .folder(
                 enumerated: snapshot.enumeratedItemCount,
