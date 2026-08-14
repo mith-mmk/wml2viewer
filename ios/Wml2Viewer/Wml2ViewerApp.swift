@@ -155,6 +155,8 @@ struct ContentView: View {
                             presentation: presentation
                         ) { result in
                             store.finishPicker(presentation, result)
+                        } onUnexpectedDismissal: {
+                            store.pickerDidDismiss(presentation.id)
                         }
                         if let guidance = PickerFolderGuidance.message(for: presentation) {
                             Label(guidance, systemImage: "folder.badge.questionmark")

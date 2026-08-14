@@ -671,12 +671,31 @@ final class ViewerStore: ObservableObject {
     }
 
     func pickerDidDismiss(_ presentationID: UUID) {
+        let disappearedWithoutCallback = pendingPicker?.id == presentationID
+        if disappearedWithoutCallback {
+            // File Provider extensions can terminate while the system picker
+            // is visible. SwiftUI may dismantle the controller without a
+            // delegate callback, leaving the binding and flow in a stuck
+            // presenting state. Treat that as a cancelled picker, preserve
+            // the current source, and return the 3x3 surface to the user.
+            pendingPicker = nil
+            folderAuthorizationContext = nil
+            sourceOpeningProgress = nil
+            touchReady = true
+            sourceNoticeMessage = pages.isEmpty
+                ? String(localized: "Files closed before a selection was made.")
+                : String(localized: "Files closed unexpectedly. The current document remains open.")
+        }
         let next = pickerFlow.didDismiss(presentationID)
         if let next {
             pendingPicker = next
         } else if let flowID = flowToFinishAfterDismissal,
                   pickerFlow.flowID == flowID {
             flowToFinishAfterDismissal = nil
+            pickerFlow.finish(flowID: flowID)
+        } else if disappearedWithoutCallback,
+                  let flowID = pickerFlow.flowID {
+            // No result was delivered and no follow-up is pending.
             pickerFlow.finish(flowID: flowID)
         }
         syncPickerPhase()
@@ -2038,6 +2057,16 @@ final class ViewerStore: ObservableObject {
             .containingFolder,
             initialDirectoryURL: selectedURL.deletingLastPathComponent()
         ) else { return nil }
+        pendingPicker = presentation
+        syncPickerPhase()
+        return presentation
+    }
+
+    @discardableResult
+    func installPendingPickerForTest() -> PickerPresentation? {
+        installTestPages(count: 2)
+        touchReady = true
+        guard let presentation = pickerFlow.begin(.openTarget) else { return nil }
         pendingPicker = presentation
         syncPickerPhase()
         return presentation

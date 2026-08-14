@@ -43,6 +43,8 @@
 "Folder selection was cancelled. The selected file remains open by itself." = "フォルダ選択をキャンセルしました。選択したファイルだけを表示します。";
 "Opening was cancelled." = "読み込みをキャンセルしました。";
 "Opening was cancelled. The current document remains open." = "読み込みをキャンセルしました。現在の書類はそのまま表示します。";
+"Files closed before a selection was made." = "Filesが選択前に終了しました。もう一度ファイルを選択してください。";
+"Files closed unexpectedly. The current document remains open." = "Filesが予期せず終了しました。現在の書類はそのまま表示します。";
 "The document is no longer available" = "書類を利用できなくなりました";
 "Select the containing folder for this listed file" = "この一覧ファイルを含むフォルダを選択してください";
 "The selected folder does not contain the opened file" = "選択したフォルダに開いたファイルがありません";

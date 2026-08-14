@@ -924,4 +924,22 @@ final class ViewerModelTests: XCTestCase {
         store.pickerDidDismiss(presentation.id)
         XCTAssertEqual(store.filesOpenPhase, .idle)
     }
+
+    @MainActor
+    func testPickerCrashDismissalReturnsToViewerAndPreservesSource() {
+        let store = ViewerStore()
+        let presentation = try! XCTUnwrap(store.installPendingPickerForTest())
+        let originalPages = store.pages
+
+        store.pickerDidDismiss(presentation.id)
+
+        XCTAssertNil(store.pendingPicker)
+        XCTAssertEqual(store.pages, originalPages)
+        XCTAssertEqual(store.filesOpenPhase, .idle)
+        XCTAssertTrue(store.touchReady)
+        XCTAssertEqual(
+            store.sourceNoticeMessage,
+            String(localized: "Files closed unexpectedly. The current document remains open.")
+        )
+    }
 }

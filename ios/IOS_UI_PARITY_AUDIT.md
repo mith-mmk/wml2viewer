@@ -34,7 +34,7 @@
 設定カテゴリ統合後のiPhone Japanese UI test（設定表示・見開き間隔）は1/1 passed。
 ジェスチャー仲裁の依存関係（pinch > pan > swipe > long press > double tap > single zone tap）を明示した後、同じiPhone focused UI 3件とDocument Browser管理導線1件がそれぞれ成功した。device向けarm64 Debug buildも成功した。
 
-3x3の既定割当を`TouchMapConfig`として`MobileConfigV1`へ追加し、Androidと同じ安全な`ViewerAction`集合（前後、先頭/末尾、zoom、fit、animation、grayscale、manga、Files、設定、filmstrip、quick menu、export、reload、disabled）を設定画面から変更できるようにした。double tap / long pressも同じdispatcherへ接続し、旧設定JSONは既定値へ移行する。追加Swift unit 3件を含むViewerModelTests 60件、iPhoneの3x3前後/filmstrip・エラー復帰・日本語UI 4件が0 failuresで通過した。scene backgroundでthumbnail/animationを停止し、active復帰で再開するlifecycle unitも追加した。
+3x3の既定割当を`TouchMapConfig`として`MobileConfigV1`へ追加し、Androidと同じ安全な`ViewerAction`集合（前後、先頭/末尾、zoom、fit、animation、grayscale、manga、Files、設定、filmstrip、quick menu、export、reload、disabled）を設定画面から変更できるようにした。double tap / long pressも同じdispatcherへ接続し、旧設定JSONは既定値へ移行する。追加Swift unit 4件を含むViewerModelTests 61件、iPhoneの3x3前後/filmstrip・エラー復帰・日本語UI 4件が0 failuresで通過した。scene backgroundでthumbnail/animationを停止し、active復帰で再開するlifecycle unitも追加した。
 
 ## 2026-08-14 実機Provider受入追記
 
@@ -65,6 +65,22 @@ local/iCloud/third-partyでは復帰可能エラー後の再表示も確認し�
 | Files側rename/move/delete後のcurrent item再同期 | pending | 外部変更を実機で行い、opaque ID/fallbackの結果を記録 |
 | local/cloud/SMBをexport先にしたsystem picker転送 | pending | 各OS Providerへのexport完了・cancelを実機で記録 |
 | iPhone実機の同一Provider matrix | pending | 現在の実機証拠はiPad A16のみ |
+
+2026-08-14の再受入では、同じiPad A16でlocal Providerを再実行し、
+`status=passed`（列挙25、対応8、前後移動、filmstrip、thumbnail）を回収した。
+これは過去の診断表を置き換える最新local証跡である。
+続けてiCloud Driveも再実行し、`status=passed`（列挙25、対応8、前後移動、filmstrip、thumbnail、
+復帰可能エラーからの再表示）を回収した。
+第三者Providerの1回目は`status=in-progress`（対応1件）で、複数ページ受入条件を満たさなかったため、
+同Providerの再セッションを開始した。合格証跡としては扱わない。
+再セッションではOneDrive上の3件フォルダについて列挙・前後移動・エラー復帰は成功したが、
+`filmstripOpened=false`、`thumbnailDecoded=false`のため、Provider不良ではなくfilmstrip操作未完了として
+`in-progress`に分類した。filmstripを開く下中央タップ（またはQuick menuのPages）を追加確認する。
+
+OneDriveでFiles／Document Managerがクラッシュした場合に備え、picker coordinatorのdismantle callbackを追加した。
+delegate callbackが無いままpicker view controllerが破棄された場合は、選択キャンセル相当としてflowをidleへ戻し、
+現在source・ページ・3x3入力を維持し、再選択可能な通知を表示する。`testPickerCrashDismissalReturnsToViewerAndPreservesSource`
+がSimulatorで成功している。これはOneDrive extension自体を修復するものではなく、OS側クラッシュ後にアプリが固まらないための復旧経路である。
 
 上記`pending`は製品コードの未実装を意味せず、`ios.md`が要求する実Provider操作の証跡不足を意味する。
 

@@ -43,6 +43,8 @@
 "Folder selection was cancelled. The selected file remains open by itself." = "Folder selection was cancelled. The selected file remains open by itself.";
 "Opening was cancelled." = "Opening was cancelled.";
 "Opening was cancelled. The current document remains open." = "Opening was cancelled. The current document remains open.";
+"Files closed before a selection was made." = "Files closed before a selection was made.";
+"Files closed unexpectedly. The current document remains open." = "Files closed unexpectedly. The current document remains open.";
 "The document is no longer available" = "The document is no longer available";
 "Select the containing folder for this listed file" = "Select the containing folder for this listed file";
 "The selected folder does not contain the opened file" = "The selected folder does not contain the opened file";

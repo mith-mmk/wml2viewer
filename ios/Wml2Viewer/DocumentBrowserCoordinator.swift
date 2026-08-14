@@ -9,6 +9,9 @@ struct DocumentBrowserView: UIViewControllerRepresentable {
     var onPick: (Result<URL, Error>?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
+    static func dismantleUIViewController(_ controller: UIDocumentBrowserViewController, coordinator: Coordinator) {
+        coordinator.notifyUnexpectedDismissalIfNeeded()
+    }
     func makeUIViewController(context: Context) -> UIDocumentBrowserViewController {
         // Management may still open a selected document, but it never implies
         // access to that document's containing directory.
@@ -23,6 +26,7 @@ struct DocumentBrowserView: UIViewControllerRepresentable {
     final class Coordinator: NSObject, UIDocumentBrowserViewControllerDelegate {
         let onPick: (Result<URL, Error>?) -> Void
         private let completionGate = PickerCompletionGate()
+        private var didDismissUnexpectedly = false
         init(onPick: @escaping (Result<URL, Error>?) -> Void) { self.onPick = onPick }
         func documentBrowser(_ controller: UIDocumentBrowserViewController, didPickDocumentsAt documentURLs: [URL]) {
             completionGate.perform { onPick(documentURLs.first.map { .success($0) }) }
@@ -33,6 +37,12 @@ struct DocumentBrowserView: UIViewControllerRepresentable {
         func documentBrowser(_ controller: UIDocumentBrowserViewController, didImportDocumentAt documentURL: URL, toDestinationURL destinationURL: URL) {}
         func documentBrowser(_ controller: UIDocumentBrowserViewController, failedToImportDocumentAt documentURL: URL, error: Error?) {
             completionGate.perform { onPick(.failure(error ?? CocoaError(.fileReadUnknown))) }
+        }
+
+        func notifyUnexpectedDismissalIfNeeded() {
+            guard !completionGate.isCompleted, !didDismissUnexpectedly else { return }
+            didDismissUnexpectedly = true
+            completionGate.perform { onPick(nil) }
         }
     }
 }
