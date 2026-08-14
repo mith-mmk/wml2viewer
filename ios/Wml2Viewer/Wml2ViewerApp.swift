@@ -216,6 +216,13 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                         .accessibilityIdentifier("viewer.error.restoreLastLocation")
                     }
+                    if store.filesPickerRecoveryRequired {
+                        Button(String(localized: "Reset Files recovery")) {
+                            store.resetFilesRecovery()
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("viewer.error.resetFilesRecovery")
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -238,6 +245,13 @@ struct ContentView: View {
                         }
                         .buttonStyle(.bordered)
                         .accessibilityIdentifier("viewer.sourceNotice.restoreLastLocation")
+                    }
+                    if store.filesPickerRecoveryRequired {
+                        Button(String(localized: "Reset Files recovery")) {
+                            store.resetFilesRecovery()
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("viewer.sourceNotice.resetFilesRecovery")
                     }
                 }
                 .padding(.horizontal, 16)

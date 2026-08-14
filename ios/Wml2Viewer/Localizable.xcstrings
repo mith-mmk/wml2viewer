@@ -104,6 +104,11 @@
     "Touch zone 3,1" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "左下" } } } },
     "Touch zone 3,2" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "下中央" } } } },
     "Touch zone 3,3" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "右下" } } } },
-    "Reload" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "再読み込み" } } } }
+    "Reload" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "再読み込み" } } } },
+    "Clear saved Files locations" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "保存したFilesの場所を消去" } } } },
+    "This clears app bookmarks, not Apple Files Recents." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "アプリのbookmarkだけを消去し、Apple Filesの「最近使った項目」は消去しません。" } } } },
+    "Reset Files recovery" : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "Files復旧状態をリセット" } } } },
+    "Saved Files locations were cleared." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "保存したFilesの場所を消去しました。" } } } },
+    "Files closed repeatedly. Restore the last location or reset Files recovery." : { "localizations" : { "ja" : { "stringUnit" : { "state" : "translated", "value" : "Filesが繰り返し終了しました。最後に開いた場所を復元するか、Files復旧状態をリセットしてください。" } } } }
   }
 }

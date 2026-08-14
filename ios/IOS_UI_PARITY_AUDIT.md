@@ -34,7 +34,9 @@
 設定カテゴリ統合後のiPhone Japanese UI test（設定表示・見開き間隔）は1/1 passed。
 ジェスチャー仲裁の依存関係（pinch > pan > swipe > long press > double tap > single zone tap）を明示した後、同じiPhone focused UI 3件とDocument Browser管理導線1件がそれぞれ成功した。device向けarm64 Debug buildも成功した。
 
-3x3の既定割当を`TouchMapConfig`として`MobileConfigV1`へ追加し、Androidと同じ安全な`ViewerAction`集合（前後、先頭/末尾、zoom、fit、animation、grayscale、manga、Files、設定、filmstrip、quick menu、export、reload、disabled）を設定画面から変更できるようにした。double tap / long pressも同じdispatcherへ接続し、旧設定JSONは既定値へ移行する。追加Swift unit 8件を含むViewerModelTests 65件、iPhoneの3x3前後/filmstrip・エラー復帰・日本語UI 4件が0 failuresで通過した。scene backgroundでthumbnail/animationを停止し、active復帰で再開するlifecycle unitも追加した。Files/Document ManagerがProviderクラッシュでdelegateを返さない場合は、同じpicker presentationが残ったままactiveへ戻ったことを検出し、350msの猶予後にpickerをキャンセル相当で閉じてviewerへ復帰するwatchdogも追加した。既に許可済みのbookmarkがある場合は、履歴画面を再表示せず「最後に開いた場所を復元」から直接sourceを再開できる。bookmarkを一時fixtureへ保存してFiles Pickerを一度も提示せずフォルダsourceを再構築するpositive testも通過した。
+3x3の既定割当を`TouchMapConfig`として`MobileConfigV1`へ追加し、Androidと同じ安全な`ViewerAction`集合（前後、先頭/末尾、zoom、fit、animation、grayscale、manga、Files、設定、filmstrip、quick menu、export、reload、disabled）を設定画面から変更できるようにした。double tap / long pressも同じdispatcherへ接続し、旧設定JSONは既定値へ移行する。追加Swift unitを含むViewerModelTests 67件が0 failuresで通過した。scene backgroundでthumbnail/animationを停止し、active復帰で再開するlifecycle unitも追加した。Files/Document ManagerがProviderクラッシュでdelegateを返さない場合は、同じpicker presentationが残ったままactiveへ戻ったことを検出し、350msの猶予後にpickerをキャンセル相当で閉じてviewerへ復帰するwatchdogも追加した。既に許可済みのbookmarkがある場合は、履歴画面を再表示せず「最後に開いた場所を復元」から直接sourceを再開できる。bookmarkを一時fixtureへ保存してFiles Pickerを一度も提示せずフォルダsourceを再構築するpositive testも通過した。
+
+Filesの「最近使った項目」はAppleのDocument Managerが管理しており、アプリから消去する公開APIはない。そのため設定の「保存したFilesの場所を消去」はアプリが保持するbookmarkと復旧状態だけをatomicに消去し、Apple FilesのRecentsは消去しないことを明示する。Document Managerが3回連続で予期せず閉じた場合はpickerの再表示を停止する回路遮断を有効にし、既存bookmarkの直接復元または「Files復旧状態をリセット」から再試行できるようにした。回路遮断、bookmark消去、直接復元のSimulator unitを含む67件が通過している。
 
 ## 2026-08-14 実機Provider受入追記
 

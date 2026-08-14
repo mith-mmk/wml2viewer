@@ -944,6 +944,42 @@ final class ViewerModelTests: XCTestCase {
     }
 
     @MainActor
+    func testRepeatedUnexpectedPickerDismissalsEnterRecoveryGuard() {
+        let store = ViewerStore()
+
+        for _ in 0..<3 {
+            let presentation = try! XCTUnwrap(store.installPendingPickerForTest())
+            store.pickerDidDismiss(presentation.id)
+        }
+
+        XCTAssertTrue(store.filesPickerRecoveryRequired)
+        store.requestFilePicker()
+        XCTAssertNil(store.pendingPicker)
+        XCTAssertEqual(store.filesOpenPhase, .idle)
+
+        store.resetFilesRecovery()
+        XCTAssertFalse(store.filesPickerRecoveryRequired)
+        XCTAssertNil(store.sourceNoticeMessage)
+    }
+
+    func testBookmarkStoreClearRemovesOnlyAppOwnedRecords() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".test-bookmark-clear-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = BookmarkStore(fileURL: directory.appendingPathComponent("bookmarks.json"))
+        try await store.upsert(
+            BookmarkRecord(
+                sourceID: UUID(), bookmark: Data([1, 2, 3]), displayName: "sample",
+                isFolder: false, opaqueEntryID: "opaque", logicalPageIndex: 0
+            )
+        )
+
+        try await store.clear()
+        let records = try await store.load()
+        XCTAssertTrue(records.isEmpty)
+    }
+
+    @MainActor
     func testSceneReturnRecoversPickerWithNoDelegateCallback() async {
         let store = ViewerStore()
         let presentation = try! XCTUnwrap(store.installPendingPickerForTest())

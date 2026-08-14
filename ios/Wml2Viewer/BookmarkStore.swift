@@ -43,6 +43,10 @@ actor BookmarkStore {
     func remove(sourceID: UUID) throws {
         try replace(records.filter { $0.sourceID != sourceID })
     }
+
+    func clear() throws {
+        try replace([])
+    }
 }
 
 actor ConfigStore {

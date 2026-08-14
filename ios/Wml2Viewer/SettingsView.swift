@@ -70,6 +70,17 @@ struct SettingsView: View {
                         store.showSettings = false
                         store.requestFolderPicker()
                     }
+                    Button(String(localized: "Clear saved Files locations", locale: store.config.locale), role: .destructive) {
+                        store.clearSavedFileLocations()
+                    }
+                    Text(String(localized: "This clears app bookmarks, not Apple Files Recents.", locale: store.config.locale))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if store.filesPickerRecoveryRequired {
+                        Button(String(localized: "Reset Files recovery", locale: store.config.locale)) {
+                            store.resetFilesRecovery()
+                        }
+                    }
                 }
                 Section(String(localized: "Codec", locale: store.config.locale)) {
                     Picker(String(localized: "Routing", locale: store.config.locale), selection: Binding(get: { store.config.codecRouting }, set: { var c = store.config; c.codecRouting = $0; store.update(c) })) {

@@ -39,6 +39,7 @@ final class ViewerStore: ObservableObject {
     @Published private(set) var sourceConnectionState: SourceConnectionState = .empty
     @Published private(set) var sourceOpeningProgress: SourceOpeningProgress?
     @Published private(set) var hasRestorableLocation = false
+    @Published private(set) var filesPickerRecoveryRequired = false
     @Published private(set) var thumbnails: [String: CGImage] = [:]
     @Published var zoom: CGFloat = 1
     @Published var pan: CGSize = .zero
@@ -84,6 +85,7 @@ final class ViewerStore: ObservableObject {
     private var flowToFinishAfterDismissal: UUID?
     private var backgroundedPickerID: UUID?
     private var pickerRecoveryTask: Task<Void, Never>?
+    private var unexpectedPickerDismissalCount = 0
     private var configSaveSequence: UInt64 = 0
     private var memoryWarningObserver: NSObjectProtocol?
     private let filesLog = Logger(
@@ -149,6 +151,44 @@ final class ViewerStore: ObservableObject {
         errorMessage = nil
         sourceNoticeMessage = nil
         await restoreLastSource(allowDuringProviderAcceptance: true)
+    }
+
+    /// Removes only the app-owned bookmark/recovery state. Apple Files' own
+    /// Recents database is not public API and cannot be cleared by an app.
+    /// The currently displayed source remains usable until the user closes it
+    /// or chooses another source.
+    func clearSavedFileLocations() {
+        Task { [weak self] in
+            guard let self else { return }
+            try? await bookmarks.clear()
+            hasRestorableLocation = false
+            activeBookmark = nil
+            filesPickerRecoveryRequired = false
+            unexpectedPickerDismissalCount = 0
+            sourceNoticeMessage = String(localized: "Saved Files locations were cleared.")
+        }
+    }
+
+    /// Allows the user to try the system picker again after the crash guard
+    /// has stopped a repeated provider/Document Manager failure loop.
+    func resetFilesRecovery() {
+        unexpectedPickerDismissalCount = 0
+        filesPickerRecoveryRequired = false
+        sourceNoticeMessage = nil
+        errorMessage = nil
+    }
+
+    private func recordUnexpectedPickerDismissal() {
+        unexpectedPickerDismissalCount += 1
+        if unexpectedPickerDismissalCount >= 3 {
+            filesPickerRecoveryRequired = true
+            sourceNoticeMessage = String(localized: "Files closed repeatedly. Restore the last location or reset Files recovery.")
+        }
+    }
+
+    private func markPickerCallbackReceived() {
+        unexpectedPickerDismissalCount = 0
+        filesPickerRecoveryRequired = false
     }
 
     private func restoreLastSource(allowDuringProviderAcceptance: Bool) async {
@@ -410,6 +450,10 @@ final class ViewerStore: ObservableObject {
     }
 
     private func beginPicker(_ request: PickerRequest, initialDirectoryURL: URL? = nil) {
+        guard !filesPickerRecoveryRequired else {
+            sourceNoticeMessage = String(localized: "Files closed repeatedly. Restore the last location or reset Files recovery.")
+            return
+        }
         errorMessage = nil
         sourceNoticeMessage = nil
         flowToFinishAfterDismissal = nil
@@ -434,6 +478,7 @@ final class ViewerStore: ObservableObject {
             pickerRecoveryTask = nil
         }
         guard pickerFlow.beginResultProcessing(presentation) else { return }
+        markPickerCallbackReceived()
         pendingPicker = nil
         syncPickerPhase()
         guard let result else {
@@ -707,6 +752,7 @@ final class ViewerStore: ObservableObject {
         }
         let disappearedWithoutCallback = pendingPicker?.id == presentationID
         if disappearedWithoutCallback {
+            recordUnexpectedPickerDismissal()
             // File Provider extensions can terminate while the system picker
             // is visible. SwiftUI may dismantle the controller without a
             // delegate callback, leaving the binding and flow in a stuck
