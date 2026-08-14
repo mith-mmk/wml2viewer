@@ -28,6 +28,7 @@
 - iPhone 17 Pro: Swift unit 72 passed、UI 23 passed、iPad専用1 skipped、0 failures（Files履歴消去設定UIを含む）
 - iPad Pro 13-inch: Swift unit 72 passed、UI 23 passed、0 failures
 - 見開き中央pixel、0pt/設定値のlayout算術、日本語「見開き間隔」、Files picker、ZIP/LZH/MAGを同じsuiteで回帰
+- Simulator用Rust static libraryは`ios/build-rust.sh iphonesimulator 'arm64 x86_64'`でfat archiveを生成し、`lipo -info`で両architectureを確認した。
 
 最新のiPhone Simulator focused UIでは、folderの左右移動・filmstrip、空ZIP後の復帰、設定画面の3件を連続実行し、3/3 passed。英日String Catalogと`.strings`のkey集合は77件で一致する。
 
