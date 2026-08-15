@@ -1,6 +1,6 @@
 [package]
 name = "wml2viewer-core"
-version = "0.0.20-pre"
+version = "0.0.20"
 edition = "2024"
 license = "MIT"
 description = "Platform-independent image and reading-session core for wml2viewer"
