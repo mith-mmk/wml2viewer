@@ -1,0 +1,696 @@
+import Foundation
+import SwiftUI
+
+struct EntryRef: Hashable, Codable, Sendable {
+    let sourceID: UUID
+    let opaqueEntryID: String
+}
+
+enum PickerRequest: Hashable {
+    case openTarget
+    case containingFolder
+    case manageFiles
+
+    var acceptsFolders: Bool {
+        switch self {
+        case .containingFolder: true
+        case .openTarget, .manageFiles: false
+        }
+    }
+
+    func selectionIsFolder(resourceIsDirectory: Bool) -> Bool {
+        self == .containingFolder || resourceIsDirectory
+    }
+}
+
+struct PickerPresentation: Identifiable, Hashable {
+    let id: UUID
+    let flowID: UUID
+    let request: PickerRequest
+    let initialDirectoryURL: URL?
+}
+
+enum FilesOpenFlowPhase: Equatable {
+    case idle
+    case presenting(PickerRequest)
+    case processing(PickerRequest)
+
+    var blocksViewerInput: Bool { self != .idle }
+}
+
+enum SourceConnectionState: Equatable {
+    case empty
+    case singleFile
+    case folder(enumerated: Int, supported: Int)
+    case archive(entries: Int)
+    case retryableError
+}
+
+struct SourceOpeningProgress: Equatable {
+    let isFolder: Bool
+    var processedItemCount: Int
+    var totalItemCount: Int?
+
+    var title: String {
+        isFolder ? String(localized: "Scanning folder…") : String(localized: "Opening file…")
+    }
+
+    var detail: String {
+        guard let totalItemCount, totalItemCount > 0 else {
+            return isFolder
+                ? String(localized: "Reading the folder contents. This may take a while for cloud or network folders.")
+                : String(localized: "Reading the selected file.")
+        }
+        return String(
+            format: String(localized: "Checking files: %lld of %lld"),
+            Int64(processedItemCount), Int64(totalItemCount)
+        )
+    }
+}
+
+enum SelectedDocumentPolicy {
+    static func declaredMime(for url: URL) -> String? {
+        try? url.resourceValues(forKeys: [.contentTypeKey])
+            .contentType?.preferredMIMEType
+    }
+
+    static func isSupported(url: URL) -> Bool {
+        MobileFileTypePolicy.shared.isSupported(
+            url.lastPathComponent,
+            declaredMime: declaredMime(for: url)
+        )
+    }
+
+    static func validate(
+        name: String,
+        isFolder: Bool,
+        declaredMime: String? = nil
+    ) throws {
+        guard !isFolder else { return }
+        guard MobileFileTypePolicy.shared.isSupported(name, declaredMime: declaredMime) else {
+            throw DocumentSourceError.unsupportedFileType(
+                URL(fileURLWithPath: name).pathExtension
+            )
+        }
+    }
+
+    /// File Providers may return an extensionless item whose UTType is known
+    /// only through resource values. Use that declaration while the picker
+    /// security scope is still alive instead of rejecting a valid image by
+    /// filename alone.
+    static func validate(url: URL, isFolder: Bool) throws {
+        try validate(
+            name: url.lastPathComponent,
+            isFolder: isFolder,
+            declaredMime: declaredMime(for: url)
+        )
+    }
+}
+
+/// Serializes UIKit picker completion, SwiftUI dismissal, and a possible
+/// containing-folder follow-up. Every presentation has a unique token, so a
+/// delayed File Provider callback cannot complete a newer flow.
+struct FilesOpenFlowMachine {
+    private(set) var flowID: UUID?
+    private(set) var phase: FilesOpenFlowPhase = .idle
+    private(set) var activePresentationID: UUID?
+    private(set) var activePresentationWasDismissed = false
+    private var queuedRequest: (PickerRequest, URL?)?
+
+    mutating func begin(
+        _ request: PickerRequest,
+        initialDirectoryURL: URL? = nil,
+        flowID requestedFlowID: UUID? = nil
+    ) -> PickerPresentation? {
+        guard phase == .idle else { return nil }
+        let flowID = requestedFlowID ?? UUID()
+        self.flowID = flowID
+        return present(request, initialDirectoryURL: initialDirectoryURL, flowID: flowID)
+    }
+
+    mutating func beginResultProcessing(_ presentation: PickerPresentation) -> Bool {
+        guard presentation.flowID == flowID,
+              presentation.id == activePresentationID,
+              case .presenting(let request) = phase,
+              request == presentation.request else { return false }
+        phase = .processing(request)
+        return true
+    }
+
+    mutating func queueFollowUp(
+        _ request: PickerRequest,
+        initialDirectoryURL: URL?
+    ) -> PickerPresentation? {
+        // Only the primary result may schedule one follow-up. Rejecting a
+        // duplicate here prevents a delayed decode/provider callback from
+        // presenting a third picker after the folder picker is dismissed.
+        guard let flowID,
+              case .processing(let activeRequest) = phase,
+              activeRequest != .containingFolder,
+              queuedRequest == nil else { return nil }
+        if activePresentationWasDismissed {
+            return present(request, initialDirectoryURL: initialDirectoryURL, flowID: flowID)
+        }
+        queuedRequest = (request, initialDirectoryURL)
+        return nil
+    }
+
+    mutating func didDismiss(_ presentationID: UUID) -> PickerPresentation? {
+        guard presentationID == activePresentationID else { return nil }
+        activePresentationWasDismissed = true
+        guard let flowID, let queuedRequest else { return nil }
+        self.queuedRequest = nil
+        return present(
+            queuedRequest.0,
+            initialDirectoryURL: queuedRequest.1,
+            flowID: flowID
+        )
+    }
+
+    mutating func finish(flowID: UUID) {
+        guard self.flowID == flowID else { return }
+        self = FilesOpenFlowMachine()
+    }
+
+    private mutating func present(
+        _ request: PickerRequest,
+        initialDirectoryURL: URL?,
+        flowID: UUID
+    ) -> PickerPresentation {
+        let presentation = PickerPresentation(
+            id: UUID(), flowID: flowID, request: request,
+            initialDirectoryURL: initialDirectoryURL
+        )
+        phase = .presenting(request)
+        activePresentationID = presentation.id
+        activePresentationWasDismissed = false
+        return presentation
+    }
+}
+
+enum ContainingFolderAuthorizationPolicy {
+    static func shouldRequest(
+        isFolder: Bool,
+        isSupported: Bool,
+        isSelfContainedArchive: Bool
+    ) -> Bool {
+        !isFolder && isSupported && !isSelfContainedArchive
+    }
+}
+
+/// A folder is usable once its coordinated snapshot has been committed. An
+/// archive is only usable after one of its entries has decoded successfully;
+/// registering it earlier would leave empty or corrupt containers in the
+/// user's long-lived locations list. Ordinary image files remain transient
+/// until their containing folder is explicitly authorized.
+enum RegisteredSourceRegistrationPolicy {
+    static func requiresSuccessfulInitialDisplay(_ kind: RegisteredSourceKind) -> Bool {
+        kind == .archive
+    }
+
+    static func isAutomaticallyRegistered(
+        _ kind: RegisteredSourceKind,
+        initialDisplaySucceeded: Bool
+    ) -> Bool {
+        switch kind {
+        case .folder:
+            true
+        case .archive:
+            initialDisplaySucceeded
+        case .transientFile:
+            false
+        }
+    }
+}
+
+enum PickerFolderGuidance {
+    static func message(
+        for presentation: PickerPresentation,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String? {
+        if presentation.request == .openTarget, presentation.initialDirectoryURL != nil {
+            return String(
+                localized: "The acceptance folder is ready. Tap Open to continue.",
+                locale: locale
+            )
+        }
+        guard presentation.request == .containingFolder else { return nil }
+        return presentation.initialDirectoryURL == nil
+            ? String(localized: "Navigate to the folder you want to browse, then tap Open.", locale: locale)
+            : String(localized: "To continue from the selected file, keep its containing folder open and tap Open.", locale: locale)
+    }
+}
+
+enum DisplayFit: String, Codable, CaseIterable {
+    case contain, width, height, original
+}
+
+/// Runtime double-tap override. It never mutates the persisted initial fit.
+enum FitOverridePolicy {
+    static func next(current: DisplayFit) -> DisplayFit {
+        current == .original ? .contain : .original
+    }
+}
+
+enum ExternalPageReconciler {
+    static func index(oldIndex: Int, oldID: String?, refreshedIDs: [String]) -> Int? {
+        guard !refreshedIDs.isEmpty else { return nil }
+        if let oldID, let retained = refreshedIDs.firstIndex(of: oldID) { return retained }
+        return min(max(oldIndex, 0), refreshedIDs.count - 1)
+    }
+}
+
+enum FolderTraversalDirection {
+    case forward
+    case backward
+}
+
+/// Resolves a failed/previously failed folder entry without changing the
+/// source order. Search continues in the direction requested by the user; at
+/// an edge it falls back toward the page they came from instead of wrapping
+/// to the opposite end of the folder.
+enum FolderPageFailureNavigator {
+    static func replacementIndex(
+        failedIndex: Int,
+        pageCount: Int,
+        failedIndices: Set<Int>,
+        direction: FolderTraversalDirection
+    ) -> Int? {
+        guard pageCount > 0, (0..<pageCount).contains(failedIndex) else { return nil }
+        let primary: [Int]
+        let fallback: [Int]
+        switch direction {
+        case .forward:
+            primary = Array((failedIndex + 1)..<pageCount)
+            fallback = failedIndex > 0 ? Array(stride(from: failedIndex - 1, through: 0, by: -1)) : []
+        case .backward:
+            primary = failedIndex > 0 ? Array(stride(from: failedIndex - 1, through: 0, by: -1)) : []
+            fallback = Array((failedIndex + 1)..<pageCount)
+        }
+        return (primary + fallback).first { !failedIndices.contains($0) }
+    }
+}
+
+/// Keeps UIKit picker delegate callbacks idempotent. Some providers dismiss while
+/// also completing an outstanding callback; the SwiftUI presentation must only be
+/// torn down once.
+final class PickerCompletionGate {
+    private(set) var isCompleted = false
+
+    @discardableResult
+    func perform(_ completion: () -> Void) -> Bool {
+        guard !isCompleted else { return false }
+        isCompleted = true
+        completion()
+        return true
+    }
+}
+
+enum ViewerResponsiveLayout {
+    static let pinnedFilmstripMinimumWidth: CGFloat = 900
+
+    static func pinsFilmstrip(isPad: Bool, width: CGFloat, enabled: Bool) -> Bool {
+        isPad && enabled && width >= pinnedFilmstripMinimumWidth
+    }
+}
+
+enum CodecBackend: Equatable {
+    case internalCodec
+    case imageIO
+}
+
+enum CodecRouting: String, CaseIterable {
+    case `default` = "DEFAULT"
+    case internalFirst = "INTERNAL_FIRST"
+    case osFirst = "OS_FIRST"
+    case internalOnly = "INTERNAL_ONLY"
+    case osOnly = "OS_ONLY"
+
+    init(configValue: String) {
+        self = CodecRouting(rawValue: configValue) ?? .default
+    }
+
+    var decodeOrder: [CodecBackend] {
+        switch self {
+        case .default, .internalFirst: [.internalCodec, .imageIO]
+        case .osFirst: [.imageIO, .internalCodec]
+        case .internalOnly: [.internalCodec]
+        case .osOnly: [.imageIO]
+        }
+    }
+}
+
+enum ThemeMode: String, Codable, CaseIterable {
+    case cinematicDark, light, system
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .cinematicDark: .dark
+        case .light: .light
+        case .system: nil
+        }
+    }
+}
+
+struct MobileConfigV1: Codable, Equatable {
+    var schemaVersion = 1
+    var fit: DisplayFit = .contain
+    var showTopChrome = true
+    var showFilmstrip = true
+    var keepScreenOn = false
+    var mangaEnabled = false
+    var mangaRTL = true
+    var coverAlone = true
+    var prefetchSpreads = 1
+    var mangaPageSpacing = MangaPageSpacing.defaultPoints
+    var theme: ThemeMode = .cinematicDark
+    var language = "system"
+    var rememberLastLocation = true
+    var cacheLimitBytes: UInt64? = nil
+    var codecRouting = "DEFAULT"
+    var touchZonesEnabled = true
+    var swipeEnabled = false
+    var pinchZoomEnabled = true
+    var panEnabled = true
+    var longPressQuickMenuEnabled = true
+    var touchMap = TouchMapConfig()
+    var doubleTapAction: ViewerAction = .toggleFitMode
+    var longPressAction: ViewerAction = .openContextMenu
+    /// App-owned circuit-breaker state for a repeatedly crashing Files
+    /// Document Manager. This is intentionally not shown as user content and
+    /// is reset by normal picker callbacks or the Files recovery setting.
+    var filesPickerUnexpectedDismissals = 0
+
+    var locale: Locale {
+        language == "system" ? .autoupdatingCurrent : Locale(identifier: language)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, fit, showTopChrome, showFilmstrip, keepScreenOn, mangaEnabled, mangaRTL,
+             coverAlone, prefetchSpreads, mangaPageSpacing, theme, language, rememberLastLocation, cacheLimitBytes,
+             codecRouting, touchZonesEnabled, swipeEnabled, pinchZoomEnabled, panEnabled,
+             longPressQuickMenuEnabled, touchMap, doubleTapAction, longPressAction,
+             filesPickerUnexpectedDismissals
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        fit = try c.decodeIfPresent(DisplayFit.self, forKey: .fit) ?? .contain
+        showTopChrome = try c.decodeIfPresent(Bool.self, forKey: .showTopChrome) ?? true
+        showFilmstrip = try c.decodeIfPresent(Bool.self, forKey: .showFilmstrip) ?? true
+        keepScreenOn = try c.decodeIfPresent(Bool.self, forKey: .keepScreenOn) ?? false
+        mangaEnabled = try c.decodeIfPresent(Bool.self, forKey: .mangaEnabled) ?? false
+        mangaRTL = try c.decodeIfPresent(Bool.self, forKey: .mangaRTL) ?? true
+        coverAlone = try c.decodeIfPresent(Bool.self, forKey: .coverAlone) ?? true
+        prefetchSpreads = try c.decodeIfPresent(Int.self, forKey: .prefetchSpreads) ?? 1
+        mangaPageSpacing = MangaPageSpacing.clamp(
+            try c.decodeIfPresent(Double.self, forKey: .mangaPageSpacing)
+                ?? MangaPageSpacing.defaultPoints
+        )
+        theme = try c.decodeIfPresent(ThemeMode.self, forKey: .theme) ?? .cinematicDark
+        language = try c.decodeIfPresent(String.self, forKey: .language) ?? "system"
+        rememberLastLocation = try c.decodeIfPresent(Bool.self, forKey: .rememberLastLocation) ?? true
+        cacheLimitBytes = try c.decodeIfPresent(UInt64.self, forKey: .cacheLimitBytes)
+        codecRouting = try c.decodeIfPresent(String.self, forKey: .codecRouting) ?? "DEFAULT"
+        touchZonesEnabled = try c.decodeIfPresent(Bool.self, forKey: .touchZonesEnabled) ?? true
+        swipeEnabled = try c.decodeIfPresent(Bool.self, forKey: .swipeEnabled) ?? false
+        pinchZoomEnabled = try c.decodeIfPresent(Bool.self, forKey: .pinchZoomEnabled) ?? true
+        panEnabled = try c.decodeIfPresent(Bool.self, forKey: .panEnabled) ?? true
+        longPressQuickMenuEnabled = try c.decodeIfPresent(Bool.self, forKey: .longPressQuickMenuEnabled) ?? true
+        touchMap = try c.decodeIfPresent(TouchMapConfig.self, forKey: .touchMap) ?? TouchMapConfig()
+        doubleTapAction = try c.decodeIfPresent(ViewerAction.self, forKey: .doubleTapAction) ?? .toggleFitMode
+        longPressAction = try c.decodeIfPresent(ViewerAction.self, forKey: .longPressAction) ?? .openContextMenu
+        filesPickerUnexpectedDismissals = min(
+            max(try c.decodeIfPresent(Int.self, forKey: .filesPickerUnexpectedDismissals) ?? 0, 0),
+            2
+        )
+    }
+}
+
+enum ViewerAction: String, Codable, CaseIterable, Equatable {
+    case none
+    case previous
+    case next
+    case first
+    case last
+    case zoomIn
+    case zoomOut
+    case zoomReset
+    case toggleFitMode
+    case toggleAnimation
+    case toggleGrayscale
+    case toggleMangaMode
+    case openFiler
+    case settings
+    case filmstrip
+    case openContextMenu
+    case export
+    case reload
+
+    func localizedLabel(locale: Locale = .autoupdatingCurrent) -> String {
+        switch self {
+        case .none: String(localized: "None", locale: locale)
+        case .previous: String(localized: "Previous page", locale: locale)
+        case .next: String(localized: "Next page", locale: locale)
+        case .first: String(localized: "First page", locale: locale)
+        case .last: String(localized: "Last page", locale: locale)
+        case .zoomIn: String(localized: "Zoom in", locale: locale)
+        case .zoomOut: String(localized: "Zoom out", locale: locale)
+        case .zoomReset: String(localized: "Reset zoom", locale: locale)
+        case .toggleFitMode: String(localized: "Toggle fit mode", locale: locale)
+        case .toggleAnimation: String(localized: "Toggle animation", locale: locale)
+        case .toggleGrayscale: String(localized: "Toggle grayscale", locale: locale)
+        case .toggleMangaMode: String(localized: "Toggle manga mode", locale: locale)
+        case .openFiler: String(localized: "Open Files", locale: locale)
+        case .settings: String(localized: "Settings", locale: locale)
+        case .filmstrip: String(localized: "Pages", locale: locale)
+        case .openContextMenu: String(localized: "Quick menu", locale: locale)
+        case .export: String(localized: "Export", locale: locale)
+        case .reload: String(localized: "Reload", locale: locale)
+        }
+    }
+}
+
+struct TouchZone: Equatable, Hashable, Codable {
+    let row: Int
+    let column: Int
+
+    static var all: [TouchZone] {
+        (0..<3).flatMap { row in (0..<3).map { TouchZone(row: row, column: $0) } }
+    }
+
+    var storageKey: String { "\(row),\(column)" }
+
+    func localizedLabel(locale: Locale = .autoupdatingCurrent) -> String {
+        switch storageKey {
+        case "0,0": String(localized: "Touch zone 1,1", locale: locale)
+        case "0,1": String(localized: "Touch zone 1,2", locale: locale)
+        case "0,2": String(localized: "Touch zone 1,3", locale: locale)
+        case "1,0": String(localized: "Touch zone 2,1", locale: locale)
+        case "1,1": String(localized: "Touch zone 2,2", locale: locale)
+        case "1,2": String(localized: "Touch zone 2,3", locale: locale)
+        case "2,0": String(localized: "Touch zone 3,1", locale: locale)
+        case "2,1": String(localized: "Touch zone 3,2", locale: locale)
+        case "2,2": String(localized: "Touch zone 3,3", locale: locale)
+        default: String(localized: "Touch", locale: locale)
+        }
+    }
+}
+
+struct TouchMapConfig: Codable, Equatable {
+    private(set) var bindings: [String: ViewerAction]
+
+    init(bindings: [String: ViewerAction] = Self.defaultBindings) {
+        self.bindings = bindings
+    }
+
+    func action(for zone: TouchZone) -> ViewerAction {
+        bindings[zone.storageKey] ?? .none
+    }
+
+    func setting(zone: TouchZone, action: ViewerAction) -> TouchMapConfig {
+        var copy = self
+        copy.bindings[zone.storageKey] = action
+        return copy
+    }
+
+    static var defaultBindings: [String: ViewerAction] {
+        [
+            TouchZone(row: 0, column: 0): .previous,
+            TouchZone(row: 0, column: 1): .openFiler,
+            TouchZone(row: 0, column: 2): .next,
+            TouchZone(row: 1, column: 0): .previous,
+            TouchZone(row: 1, column: 1): .settings,
+            TouchZone(row: 1, column: 2): .next,
+            TouchZone(row: 2, column: 0): .previous,
+            TouchZone(row: 2, column: 1): .filmstrip,
+            TouchZone(row: 2, column: 2): .next,
+        ].reduce(into: [String: ViewerAction]()) { result, item in
+            result[item.key.storageKey] = item.value
+        }
+    }
+}
+
+enum TouchZoneResolver {
+    static func zone(at point: CGPoint, in size: CGSize) -> TouchZone? {
+        guard size.width > 0, size.height > 0,
+              point.x >= 0, point.y >= 0,
+              point.x < size.width, point.y < size.height else { return nil }
+        return TouchZone(
+            row: min(2, Int(point.y / (size.height / 3))),
+            column: min(2, Int(point.x / (size.width / 3)))
+        )
+    }
+
+    /// Physical left/right placement deliberately does not mirror in RTL locales.
+    static func defaultAction(row: Int, column: Int) -> ViewerAction? {
+        guard (0..<3).contains(row), (0..<3).contains(column) else { return nil }
+        return TouchMapConfig().action(for: TouchZone(row: row, column: column))
+    }
+}
+
+enum RegisteredSourceKind: String, Codable, Equatable, Sendable {
+    case folder
+    case archive
+    case transientFile
+}
+
+enum RegisteredSourceStatus: String, Codable, Equatable, Sendable {
+    case unknown
+    case available
+    case offline
+    case authenticationRequired
+    case permissionRevoked
+    case providerUnavailable
+}
+
+/// Bookmark metadata safe to publish to SwiftUI. It deliberately excludes the
+/// security-scoped bookmark and all URL/provider identifiers.
+struct RegisteredSourceSummary: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let displayName: String
+    let kind: RegisteredSourceKind
+    let registeredAt: Date?
+    let lastOpenedAt: Date?
+    let status: RegisteredSourceStatus
+
+    init(record: BookmarkRecord) {
+        id = record.sourceID
+        displayName = record.displayName
+        kind = record.sourceKind
+        registeredAt = record.registeredAt
+        lastOpenedAt = record.lastOpenedAt
+        status = record.lastKnownStatus
+    }
+}
+
+struct BookmarkRecord: Codable, Equatable, Sendable {
+    var sourceID: UUID
+    var bookmark: Data
+    var displayName: String
+    var isFolder: Bool
+    var opaqueEntryID: String?
+    var logicalPageIndex: Int
+    /// Optional manifest identity for provider-backed `.wmltxt` sources.
+    /// Missing fields decode as nil for pre-manifest bookmarks.
+    var listedManifestOpaqueEntryID: String? = nil
+    var listedManifestFileName: String? = nil
+    var sourceKind: RegisteredSourceKind
+    var isRegistered: Bool
+    var registeredAt: Date?
+    var lastOpenedAt: Date?
+    var providerDomainOpaqueID: String?
+    var providerItemOpaqueID: String?
+    var lastKnownStatus: RegisteredSourceStatus
+
+    init(
+        sourceID: UUID,
+        bookmark: Data,
+        displayName: String,
+        isFolder: Bool,
+        opaqueEntryID: String?,
+        logicalPageIndex: Int,
+        listedManifestOpaqueEntryID: String? = nil,
+        listedManifestFileName: String? = nil,
+        sourceKind: RegisteredSourceKind? = nil,
+        isRegistered: Bool? = nil,
+        registeredAt: Date? = nil,
+        lastOpenedAt: Date? = nil,
+        providerDomainOpaqueID: String? = nil,
+        providerItemOpaqueID: String? = nil,
+        lastKnownStatus: RegisteredSourceStatus = .unknown
+    ) {
+        let inferredKind: RegisteredSourceKind
+        if let sourceKind {
+            inferredKind = sourceKind
+        } else if isFolder {
+            inferredKind = .folder
+        } else if MobileFileTypePolicy.shared.isSelfContainedArchive(displayName) {
+            inferredKind = .archive
+        } else {
+            inferredKind = .transientFile
+        }
+        self.sourceID = sourceID
+        self.bookmark = bookmark
+        self.displayName = displayName
+        self.isFolder = isFolder
+        self.opaqueEntryID = opaqueEntryID
+        self.logicalPageIndex = max(0, logicalPageIndex)
+        self.listedManifestOpaqueEntryID = listedManifestOpaqueEntryID
+        self.listedManifestFileName = listedManifestFileName
+        self.sourceKind = inferredKind
+        self.isRegistered = isRegistered ?? (inferredKind != .transientFile)
+        self.registeredAt = registeredAt
+        self.lastOpenedAt = lastOpenedAt
+        self.providerDomainOpaqueID = providerDomainOpaqueID
+        self.providerItemOpaqueID = providerItemOpaqueID
+        self.lastKnownStatus = lastKnownStatus
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sourceID, bookmark, displayName, isFolder, opaqueEntryID, logicalPageIndex
+        case listedManifestOpaqueEntryID, listedManifestFileName
+        case sourceKind, isRegistered, registeredAt, lastOpenedAt
+        case providerDomainOpaqueID, providerItemOpaqueID, lastKnownStatus
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let sourceID = try values.decode(UUID.self, forKey: .sourceID)
+        let bookmark = try values.decode(Data.self, forKey: .bookmark)
+        let displayName = try values.decode(String.self, forKey: .displayName)
+        let isFolder = try values.decode(Bool.self, forKey: .isFolder)
+        let decodedKind = try values.decodeIfPresent(RegisteredSourceKind.self, forKey: .sourceKind)
+        self.init(
+            sourceID: sourceID,
+            bookmark: bookmark,
+            displayName: displayName,
+            isFolder: isFolder,
+            opaqueEntryID: try values.decodeIfPresent(String.self, forKey: .opaqueEntryID),
+            logicalPageIndex: try values.decodeIfPresent(Int.self, forKey: .logicalPageIndex) ?? 0,
+            listedManifestOpaqueEntryID: try values.decodeIfPresent(String.self, forKey: .listedManifestOpaqueEntryID),
+            listedManifestFileName: try values.decodeIfPresent(String.self, forKey: .listedManifestFileName),
+            sourceKind: decodedKind,
+            isRegistered: try values.decodeIfPresent(Bool.self, forKey: .isRegistered),
+            registeredAt: try values.decodeIfPresent(Date.self, forKey: .registeredAt),
+            lastOpenedAt: try values.decodeIfPresent(Date.self, forKey: .lastOpenedAt),
+            providerDomainOpaqueID: try values.decodeIfPresent(String.self, forKey: .providerDomainOpaqueID),
+            providerItemOpaqueID: try values.decodeIfPresent(String.self, forKey: .providerItemOpaqueID),
+            lastKnownStatus: try values.decodeIfPresent(RegisteredSourceStatus.self, forKey: .lastKnownStatus) ?? .unknown
+        )
+    }
+}
+
+struct PageItem: Identifiable, Hashable, Sendable {
+    let id: String
+    let url: URL
+    let displayName: String
+    let isArchive: Bool
+
+    var isSupported: Bool {
+        MobileFileTypePolicy.shared.isSupported(displayName)
+    }
+}

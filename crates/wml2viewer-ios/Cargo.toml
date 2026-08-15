@@ -1,0 +1,14 @@
+[package]
+name = "wml2viewer-ios"
+version = "0.0.19"
+edition = "2024"
+license = "MIT"
+description = "C ABI adapter for the WML2Viewer iOS application"
+publish = false
+
+[lib]
+name = "wml2viewer_ios"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+wml2viewer-mobile-bridge = { path = "../wml2viewer-mobile-bridge" }
