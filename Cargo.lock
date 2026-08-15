@@ -5100,14 +5100,14 @@ dependencies = [
 
 [[package]]
 name = "wml2viewer-ios"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "wml2viewer-mobile-bridge",
 ]
 
 [[package]]
 name = "wml2viewer-mobile-bridge"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "wml2viewer-core",
 ]
