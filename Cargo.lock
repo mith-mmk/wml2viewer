@@ -5057,7 +5057,7 @@ dependencies = [
 
 [[package]]
 name = "wml2viewer"
-version = "0.0.19"
+version = "0.0.20-pre"
 dependencies = [
  "chrono",
  "delharc",
@@ -5082,7 +5082,7 @@ dependencies = [
 
 [[package]]
 name = "wml2viewer-android"
-version = "0.0.19"
+version = "0.0.20-pre"
 dependencies = [
  "jni",
  "wml2viewer-mobile-bridge",
@@ -5090,7 +5090,7 @@ dependencies = [
 
 [[package]]
 name = "wml2viewer-core"
-version = "0.0.19"
+version = "0.0.20-pre"
 dependencies = [
  "oxiarc-archive",
  "oxiarc-lzhuf",
