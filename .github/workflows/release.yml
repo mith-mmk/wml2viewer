@@ -127,3 +127,5 @@ jobs:
         with:
           tag_name: ${{ inputs.release_tag }}
           files: dist/*.zip
+          # Include merged pull requests and commit summaries since the previous tag.
+          generate_release_notes: true
