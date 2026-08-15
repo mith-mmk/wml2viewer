@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key><string>WML2Viewer</string>
+	<key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key><string>io.github.mith-mmk.wml2viewer</string>
+	<key>CFBundleName</key><string>WML2Viewer</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>0.0.19</string>
+	<key>CFBundleVersion</key><string>19</string>
+	<key>LSRequiresIPhoneOS</key><true/>
+	<key>MinimumOSVersion</key><string>17.0</string>
+	<key>UIApplicationSupportsIndirectInputEvents</key><true/>
+	<key>UILaunchScreen</key><dict/>
+	<key>LSSupportsOpeningDocumentsInPlace</key><true/>
+	<key>UIFileSharingEnabled</key><true/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key><string>WML2Viewer supported documents</string>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+			<key>LSHandlerRank</key><string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.image</string>
+				<string>io.github.mith-mmk.wml2viewer.mag</string>
+				<string>io.github.mith-mmk.wml2viewer.mki</string>
+				<string>io.github.mith-mmk.wml2viewer.pcd</string>
+				<string>io.github.mith-mmk.wml2viewer.pi</string>
+				<string>io.github.mith-mmk.wml2viewer.pic</string>
+				<string>io.github.mith-mmk.wml2viewer.vsp</string>
+				<string>io.github.mith-mmk.wml2viewer.dib</string>
+				<string>com.pkware.zip-archive</string>
+				<string>io.github.mith-mmk.wml2viewer.lha</string>
+				<string>io.github.mith-mmk.wml2viewer.wmltxt</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.lha</string>
+			<key>UTTypeDescription</key><string>LHA archive</string>
+			<key>UTTypeConformsTo</key><array><string>public.archive</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>lha</string><string>lzh</string></array></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.mag</string>
+			<key>UTTypeDescription</key><string>MAG image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>mag</string></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.mki</string>
+			<key>UTTypeDescription</key><string>MAKI image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>mki</string></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.pcd</string>
+			<key>UTTypeDescription</key><string>Photo CD image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>pcd</string></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.pi</string>
+			<key>UTTypeDescription</key><string>PI image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>pi</string></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.pic</string>
+			<key>UTTypeDescription</key><string>PIC image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>pic</string></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.vsp</string>
+			<key>UTTypeDescription</key><string>VSP image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>vsp</string></dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.dib</string>
+			<key>UTTypeDescription</key><string>DIB image</string>
+			<key>UTTypeConformsTo</key><array><string>public.image</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>dib</string></dict>
+		</dict>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.mith-mmk.wml2viewer.wmltxt</string>
+			<key>UTTypeDescription</key><string>WML listed file</string>
+			<key>UTTypeConformsTo</key><array><string>public.text</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><string>wmltxt</string><key>public.mime-type</key><string>text/plain</string></dict>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -1,3 +1,5 @@
+//! Process-global, never-reused typed handle registries.
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -10,7 +12,7 @@ static NEXT_HANDLE: AtomicU64 = AtomicU64::new(FIRST_HANDLE);
 ///
 /// Handles never wrap or reuse an identifier across registry types, so a
 /// released or wrong-kind handle cannot refer to another allocation.
-pub(crate) struct HandleRegistry<T> {
+pub struct HandleRegistry<T> {
     entries: RwLock<HashMap<u64, Arc<T>>>,
 }
 
@@ -23,7 +25,7 @@ impl<T> Default for HandleRegistry<T> {
 }
 
 impl<T> HandleRegistry<T> {
-    pub(crate) fn insert(&self, value: T) -> Option<u64> {
+    pub fn insert(&self, value: T) -> Option<u64> {
         let handle = NEXT_HANDLE
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 (current < MAX_HANDLE).then_some(current + 1)
@@ -33,14 +35,14 @@ impl<T> HandleRegistry<T> {
         Some(handle)
     }
 
-    pub(crate) fn get(&self, handle: u64) -> Option<Arc<T>> {
+    pub fn get(&self, handle: u64) -> Option<Arc<T>> {
         if handle == 0 {
             return None;
         }
         self.read_entries().get(&handle).cloned()
     }
 
-    pub(crate) fn remove(&self, handle: u64) -> Option<Arc<T>> {
+    pub fn remove(&self, handle: u64) -> Option<Arc<T>> {
         if handle == 0 {
             return None;
         }
@@ -48,7 +50,7 @@ impl<T> HandleRegistry<T> {
     }
 
     #[cfg(test)]
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.read_entries().len()
     }
 

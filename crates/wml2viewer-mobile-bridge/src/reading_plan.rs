@@ -5,15 +5,15 @@ use wml2viewer_core::reading::{
     Viewport, build_spread, next_spread_start, plan_preload, previous_spread_start, spread_start,
 };
 
-pub(crate) const MAX_READING_PAGES: usize = 4_096;
-pub(crate) const MAX_PREFETCH_SPREADS: usize = 64;
+pub const MAX_READING_PAGES: usize = 4_096;
+pub const MAX_PREFETCH_SPREADS: usize = 64;
 
-pub(crate) const READING_WIRE_VERSION: i32 = 1;
-pub(crate) const READING_WIRE_HEADER_INTS: usize = 8;
+pub const READING_WIRE_VERSION: i32 = 1;
+pub const READING_WIRE_HEADER_INTS: usize = 8;
 const WIRE_NONE: i32 = -1;
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ReadingPlanRequest<'a> {
+pub struct ReadingPlanRequest<'a> {
     pub source_ids: &'a [i64],
     pub portrait: &'a [bool],
     pub covers: &'a [bool],
@@ -26,7 +26,7 @@ pub(crate) struct ReadingPlanRequest<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ReadingPlan {
+pub struct ReadingPlan {
     pub anchor_index: i32,
     pub logical_indices: Vec<i32>,
     pub visual_indices: Vec<i32>,
@@ -36,7 +36,7 @@ pub(crate) struct ReadingPlan {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ReadingPlanError {
+pub enum ReadingPlanError {
     EmptyPages,
     TooManyPages,
     LengthMismatch,
@@ -47,9 +47,7 @@ pub(crate) enum ReadingPlanError {
     WireLimit,
 }
 
-pub(crate) fn plan_reading(
-    request: ReadingPlanRequest<'_>,
-) -> Result<ReadingPlan, ReadingPlanError> {
+pub fn plan_reading(request: ReadingPlanRequest<'_>) -> Result<ReadingPlan, ReadingPlanError> {
     let page_count = request.source_ids.len();
     if page_count == 0 {
         return Err(ReadingPlanError::EmptyPages);
@@ -139,7 +137,7 @@ pub(crate) fn plan_reading(
 /// Wire v1 fields are: version, total length, anchor, previous anchor,
 /// next anchor, logical count, visual count, preload count, followed by the
 /// three index lists in that order. Missing anchors are encoded as `-1`.
-pub(crate) fn encode_reading_wire(plan: &ReadingPlan) -> Result<Vec<i32>, ReadingPlanError> {
+pub fn encode_reading_wire(plan: &ReadingPlan) -> Result<Vec<i32>, ReadingPlanError> {
     let logical_count = count_to_wire(plan.logical_indices.len())?;
     let visual_count = count_to_wire(plan.visual_indices.len())?;
     let preload_count = count_to_wire(plan.preload_indices.len())?;

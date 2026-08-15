@@ -5,11 +5,11 @@ use crate::reading_plan::{
 };
 use crate::registry::HandleRegistry;
 use crate::session::{
-    BridgeState, MAX_ANDROID_ARCHIVE_ENTRY_BYTES, MAX_ANDROID_ARCHIVE_INPUT_BYTES,
-    MAX_ANDROID_ARCHIVE_RETAINED_BYTES, MAX_ANDROID_ENCODED_INPUT_BYTES,
-    MAX_NATIVE_ANIMATION_FRAMES, MAX_NATIVE_IMAGE_RGBA_BYTES, MAX_NATIVE_POSTER_PIXELS,
-    NativeErrorCode, NativeSessionHandle, RgbaEncodeRequest, core_error, limit_error,
-    validate_archive_retained_layout_for_test, validate_native_image_layout_for_test,
+    BridgeState, MAX_MOBILE_ARCHIVE_ENTRY_BYTES, MAX_MOBILE_ARCHIVE_INPUT_BYTES,
+    MAX_MOBILE_ARCHIVE_RETAINED_BYTES, MAX_MOBILE_ENCODED_INPUT_BYTES, MAX_NATIVE_ANIMATION_FRAMES,
+    MAX_NATIVE_IMAGE_RGBA_BYTES, MAX_NATIVE_POSTER_PIXELS, NativeErrorCode, NativeSessionHandle,
+    RgbaEncodeRequest, core_error, limit_error, validate_archive_retained_layout_for_test,
+    validate_native_image_layout_for_test,
 };
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -327,7 +327,7 @@ fn image_handle_owns_pixels_until_explicit_release() {
 #[test]
 fn request_errors_distinguish_invalid_stale_cancel_io_decode_encode_and_limit() {
     let bridge = BridgeState::default();
-    let missing_session = NativeSessionHandle::from_jlong(12345).unwrap();
+    let missing_session = NativeSessionHandle::from_signed_raw(12345).unwrap();
     assert_eq!(
         bridge.request_error(missing_session, 1).code(),
         NativeErrorCode::InvalidHandle
@@ -648,8 +648,8 @@ fn oversized_sparse_inputs_stop_before_decode_and_archive_parse() {
     let directory = TestDirectory::new("oversized-input");
     let oversized_decode_path = directory.path().join("oversized-decode.bin");
     let oversized_archive_path = directory.path().join("oversized-archive.bin");
-    create_sparse_file(&oversized_decode_path, MAX_ANDROID_ENCODED_INPUT_BYTES + 1);
-    create_sparse_file(&oversized_archive_path, MAX_ANDROID_ARCHIVE_INPUT_BYTES + 1);
+    create_sparse_file(&oversized_decode_path, MAX_MOBILE_ENCODED_INPUT_BYTES + 1);
+    create_sparse_file(&oversized_archive_path, MAX_MOBILE_ARCHIVE_INPUT_BYTES + 1);
 
     let bridge = BridgeState::default();
     let session = bridge.create_session().unwrap();
@@ -688,21 +688,21 @@ fn oversized_sparse_inputs_stop_before_decode_and_archive_parse() {
 }
 
 #[test]
-fn android_archive_input_entry_and_combined_retention_are_bounded() {
-    assert_eq!(MAX_ANDROID_ARCHIVE_INPUT_BYTES, 64 * 1024 * 1024);
-    assert_eq!(MAX_ANDROID_ARCHIVE_ENTRY_BYTES, 64 * 1024 * 1024);
-    assert_eq!(MAX_ANDROID_ARCHIVE_RETAINED_BYTES, 128 * 1024 * 1024);
+fn mobile_archive_input_entry_and_combined_retention_are_bounded() {
+    assert_eq!(MAX_MOBILE_ARCHIVE_INPUT_BYTES, 64 * 1024 * 1024);
+    assert_eq!(MAX_MOBILE_ARCHIVE_ENTRY_BYTES, 64 * 1024 * 1024);
+    assert_eq!(MAX_MOBILE_ARCHIVE_RETAINED_BYTES, 128 * 1024 * 1024);
     assert!(
         validate_archive_retained_layout_for_test(
-            MAX_ANDROID_ARCHIVE_INPUT_BYTES,
-            MAX_ANDROID_ARCHIVE_ENTRY_BYTES,
+            MAX_MOBILE_ARCHIVE_INPUT_BYTES,
+            MAX_MOBILE_ARCHIVE_ENTRY_BYTES,
         )
         .is_ok()
     );
 
     let error = validate_archive_retained_layout_for_test(
-        MAX_ANDROID_ARCHIVE_INPUT_BYTES,
-        MAX_ANDROID_ARCHIVE_ENTRY_BYTES + 1,
+        MAX_MOBILE_ARCHIVE_INPUT_BYTES,
+        MAX_MOBILE_ARCHIVE_ENTRY_BYTES + 1,
     )
     .unwrap_err();
     assert_eq!(error.kind(), CoreErrorKind::Limit);
@@ -714,7 +714,7 @@ fn oversized_sparse_listed_target_is_not_materialized_or_decoded() {
     let directory = TestDirectory::new("oversized-listed-entry");
     let target_path = directory.path().join("oversized.bin");
     let listed_path = directory.path().join("pages.wmltxt");
-    create_sparse_file(&target_path, MAX_ANDROID_ARCHIVE_ENTRY_BYTES + 1);
+    create_sparse_file(&target_path, MAX_MOBILE_ARCHIVE_ENTRY_BYTES + 1);
     std::fs::write(&listed_path, "#!WMLViewer2 ListedFile\noversized.bin\n").unwrap();
 
     let bridge = BridgeState::default();

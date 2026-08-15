@@ -7,6 +7,9 @@ description = "Platform-independent image and reading-session core for wml2viewe
 publish = false
 
 [dependencies]
-oxiarc-archive = "0.2"
+oxiarc-archive = "=0.3.6"
 wml2 = { path = "../wml2", features = ["multithread"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+oxiarc-lzhuf = "=0.3.6"

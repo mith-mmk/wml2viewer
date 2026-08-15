@@ -185,6 +185,64 @@ jobs:
           path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
 
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: install rust Apple targets
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.97.1
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - name: test Rust workspace
+        run: cargo test --workspace --locked
+      - name: build iOS app (unsigned Release device)
+        run: xcodebuild -project ios/Wml2Viewer.xcodeproj -scheme Wml2Viewer -sdk iphoneos -configuration Release -derivedDataPath "$RUNNER_TEMP/.test-xcode-release" CODE_SIGNING_ALLOWED=NO build
+      - name: verify Release excludes UI test fixtures
+        run: |
+          app="$RUNNER_TEMP/.test-xcode-release/Build/Products/Release-iphoneos/Wml2Viewer.app"
+          test -d "$app"
+          test "$(plutil -extract UIFileSharingEnabled raw -o - "$app/Info.plist")" = true
+          ! strings "$app/Wml2Viewer" | grep -E 'WML2VIEWER_UI_TEST_PICKER_FOLDER_NAME|WML2VIEWER_UI_TEST_FORCE_SPREAD|uiTest\.pickerFixtureReady|Picker Continuous Pages|provider-acceptance|wml2viewer-provider-acceptance'
+          sh -n ios/device-signing.sh
+          sh -n ios/device-smoke.sh
+          sh -n ios/device-provider-acceptance.sh
+          env PATH=/usr/bin:/bin:/usr/sbin:/sbin BUILT_PRODUCTS_DIR="$RUNNER_TEMP/.test-xcode-path" \
+            ios/build-rust.sh iphoneos arm64
+      - name: build iOS Simulator tests
+        run: xcodebuild -project ios/Wml2Viewer.xcodeproj -scheme Wml2Viewer -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -configuration Debug -derivedDataPath "$RUNNER_TEMP/.test-xcode-simulator" CODE_SIGNING_ALLOWED=NO build-for-testing
+      - name: run iPhone and iPad Simulator tests
+        shell: bash
+        run: |
+          set -eu
+          iphone_id="$(xcrun simctl list devices available | grep iPhone | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -n 1)"
+          ipad_id="$(xcrun simctl list devices available | grep iPad | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -n 1)"
+          test -n "$iphone_id"
+          test -n "$ipad_id"
+          xcodebuild -project ios/Wml2Viewer.xcodeproj \
+            -scheme Wml2Viewer \
+            -destination "platform=iOS Simulator,id=$iphone_id" \
+            -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/.test-xcode-simulator" \
+            CODE_SIGNING_ALLOWED=NO test-without-building
+          xcodebuild -project ios/Wml2Viewer.xcodeproj \
+            -scheme Wml2Viewer \
+            -destination "platform=iOS Simulator,id=$ipad_id" \
+            -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/.test-xcode-simulator" \
+            CODE_SIGNING_ALLOWED=NO test-without-building
+      - name: upload iOS Simulator app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wml2viewer-ios-simulator
+          path: ${{ runner.temp }}/.test-xcode-simulator/Build/Products/Debug-iphonesimulator/Wml2Viewer.app
+          if-no-files-found: error
+      - name: verify iOS C ABI header
+        run: clang -fsyntax-only -x c -std=c17 -Wall -Wextra -Werror crates/wml2viewer-ios/include/wml2viewer_ios.h
+      - name: verify iOS localization key sets
+        run: ios/verify-localization.sh
+
   android-samba-integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

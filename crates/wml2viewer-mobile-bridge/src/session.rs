@@ -1,3 +1,5 @@
+//! Platform-neutral mobile bridge state and resource ownership.
+
 use crate::bounded_io::{BoundedReadError, read_file_bounded};
 use crate::registry::HandleRegistry;
 use std::collections::BTreeMap;
@@ -16,24 +18,24 @@ const MAX_REQUEST_ID: u64 = i64::MAX as u64;
 const MAX_RETAINED_REQUEST_ERRORS: usize = 32;
 const MAX_ENCODE_PIXELS: u64 = 100_000_000;
 const MAX_ENCODE_STRIDE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_ANDROID_FILE_INPUT_BYTES: u64 = 64 * 1024 * 1024;
-pub(crate) const MAX_ANDROID_ENCODED_INPUT_BYTES: u64 = MAX_ANDROID_FILE_INPUT_BYTES;
-pub(crate) const MAX_ANDROID_ARCHIVE_INPUT_BYTES: u64 = 64 * 1024 * 1024;
-pub(crate) const MAX_ANDROID_ARCHIVE_RETAINED_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_MOBILE_FILE_INPUT_BYTES: u64 = 64 * 1024 * 1024;
+pub const MAX_MOBILE_ENCODED_INPUT_BYTES: u64 = MAX_MOBILE_FILE_INPUT_BYTES;
+pub const MAX_MOBILE_ARCHIVE_INPUT_BYTES: u64 = 64 * 1024 * 1024;
+pub const MAX_MOBILE_ARCHIVE_RETAINED_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_OWNED_BYTES: usize = 512 * 1024 * 1024;
-pub(crate) const MAX_NATIVE_POSTER_PIXELS: u64 = 4_096 * 4_096;
-pub(crate) const MAX_NATIVE_IMAGE_RGBA_BYTES: usize = 128 * 1024 * 1024;
-pub(crate) const MAX_NATIVE_ANIMATION_FRAMES: usize = 4_096;
-const ANDROID_DECODE_LIMITS: DecodeLimits = DecodeLimits {
+pub const MAX_NATIVE_POSTER_PIXELS: u64 = 4_096 * 4_096;
+pub const MAX_NATIVE_IMAGE_RGBA_BYTES: usize = 128 * 1024 * 1024;
+pub const MAX_NATIVE_ANIMATION_FRAMES: usize = 4_096;
+const MOBILE_DECODE_LIMITS: DecodeLimits = DecodeLimits {
     maximum_frame_pixels: MAX_NATIVE_POSTER_PIXELS,
     maximum_frames: MAX_NATIVE_ANIMATION_FRAMES,
     maximum_rgba_bytes: MAX_NATIVE_IMAGE_RGBA_BYTES,
 };
-const ANDROID_ARCHIVE_LIMITS: ArchiveLimits = ArchiveLimits {
+const MOBILE_ARCHIVE_LIMITS: ArchiveLimits = ArchiveLimits {
     maximum_entry_bytes: 64 * 1024 * 1024,
     ..ArchiveLimits::DEFAULT
 };
-pub(crate) const MAX_ANDROID_ARCHIVE_ENTRY_BYTES: u64 = ANDROID_ARCHIVE_LIMITS.maximum_entry_bytes;
+pub const MAX_MOBILE_ARCHIVE_ENTRY_BYTES: u64 = MOBILE_ARCHIVE_LIMITS.maximum_entry_bytes;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(transparent)]
@@ -44,9 +46,13 @@ impl NativeSessionHandle {
         self.0
     }
 
-    pub(crate) fn from_jlong(raw: i64) -> Option<Self> {
+    pub fn from_signed_raw(raw: i64) -> Option<Self> {
         let value = u64::try_from(raw).ok()?;
         (value != 0).then_some(Self(value))
+    }
+
+    pub const fn from_raw(raw: u64) -> Option<Self> {
+        if raw == 0 { None } else { Some(Self(raw)) }
     }
 }
 
@@ -59,9 +65,13 @@ impl NativeImageHandle {
         self.0
     }
 
-    pub(crate) fn from_jlong(raw: i64) -> Option<Self> {
+    pub fn from_signed_raw(raw: i64) -> Option<Self> {
         let value = u64::try_from(raw).ok()?;
         (value != 0).then_some(Self(value))
+    }
+
+    pub const fn from_raw(raw: u64) -> Option<Self> {
+        if raw == 0 { None } else { Some(Self(raw)) }
     }
 }
 
@@ -74,9 +84,13 @@ impl NativeArchiveHandle {
         self.0
     }
 
-    pub(crate) fn from_jlong(raw: i64) -> Option<Self> {
+    pub fn from_signed_raw(raw: i64) -> Option<Self> {
         let value = u64::try_from(raw).ok()?;
         (value != 0).then_some(Self(value))
+    }
+
+    pub const fn from_raw(raw: u64) -> Option<Self> {
+        if raw == 0 { None } else { Some(Self(raw)) }
     }
 }
 
@@ -89,9 +103,13 @@ impl NativeBytesHandle {
         self.0
     }
 
-    pub(crate) fn from_jlong(raw: i64) -> Option<Self> {
+    pub fn from_signed_raw(raw: i64) -> Option<Self> {
         let value = u64::try_from(raw).ok()?;
         (value != 0).then_some(Self(value))
+    }
+
+    pub const fn from_raw(raw: u64) -> Option<Self> {
+        if raw == 0 { None } else { Some(Self(raw)) }
     }
 }
 
@@ -139,7 +157,7 @@ impl NativeRequestError {
         }
     }
 
-    pub(crate) fn invalid_handle() -> Self {
+    pub fn invalid_handle() -> Self {
         Self::new(NativeErrorCode::InvalidHandle, "{}")
     }
 
@@ -247,7 +265,7 @@ impl NativeFrame {
     }
 }
 
-pub(crate) struct NativeImage {
+pub struct NativeImage {
     poster: Arc<NativeFrame>,
     animation: Vec<(Arc<NativeFrame>, u64)>,
     loop_count: Option<u32>,
@@ -259,7 +277,7 @@ struct NativeImageLimits {
     maximum_rgba_bytes: usize,
 }
 
-const ANDROID_NATIVE_IMAGE_LIMITS: NativeImageLimits = NativeImageLimits {
+const MOBILE_NATIVE_IMAGE_LIMITS: NativeImageLimits = NativeImageLimits {
     maximum_animation_frames: MAX_NATIVE_ANIMATION_FRAMES,
     maximum_rgba_bytes: MAX_NATIVE_IMAGE_RGBA_BYTES,
 };
@@ -289,7 +307,7 @@ fn validate_native_image_layout(
 }
 
 #[cfg(test)]
-pub(crate) fn validate_native_image_layout_for_test(
+pub fn validate_native_image_layout_for_test(
     poster_pixels: u64,
     animation_frame_count: usize,
     rgba_lengths: impl IntoIterator<Item = usize>,
@@ -298,7 +316,7 @@ pub(crate) fn validate_native_image_layout_for_test(
         poster_pixels,
         animation_frame_count,
         rgba_lengths,
-        ANDROID_NATIVE_IMAGE_LIMITS,
+        MOBILE_NATIVE_IMAGE_LIMITS,
     )
 }
 
@@ -313,7 +331,7 @@ impl NativeImage {
                     .iter()
                     .map(|frame| frame.image.pixels().len()),
             ),
-            ANDROID_NATIVE_IMAGE_LIMITS,
+            MOBILE_NATIVE_IMAGE_LIMITS,
         )?;
         let poster = Arc::new(NativeFrame::from_rgba(decoded.poster)?);
         let animation = decoded
@@ -338,40 +356,40 @@ impl NativeImage {
         }
     }
 
-    pub(crate) fn width(&self) -> i32 {
+    pub fn width(&self) -> i32 {
         self.poster.width
     }
 
-    pub(crate) fn height(&self) -> i32 {
+    pub fn height(&self) -> i32 {
         self.poster.height
     }
 
-    pub(crate) fn stride(&self) -> i32 {
+    pub fn stride(&self) -> i32 {
         self.poster.stride
     }
 
-    pub(crate) fn pixels_ptr(&self) -> *mut u8 {
+    pub fn pixels_ptr(&self) -> *mut u8 {
         self.poster.pixels.as_ptr().cast_mut()
     }
 
-    pub(crate) fn pixels_len(&self) -> usize {
+    pub fn pixels_len(&self) -> usize {
         self.poster.pixels.len()
     }
 
     #[cfg(test)]
-    pub(crate) fn pixels(&self) -> &[u8] {
+    pub fn pixels(&self) -> &[u8] {
         &self.poster.pixels
     }
 
-    pub(crate) fn frame_count(&self) -> usize {
+    pub fn frame_count(&self) -> usize {
         self.animation.len().max(1)
     }
 
-    pub(crate) fn loop_count(&self) -> Option<u32> {
+    pub fn loop_count(&self) -> Option<u32> {
         self.loop_count
     }
 
-    pub(crate) fn frame_duration_ms(&self, index: usize) -> Option<u64> {
+    pub fn frame_duration_ms(&self, index: usize) -> Option<u64> {
         if self.animation.is_empty() {
             (index == 0).then_some(0)
         } else {
@@ -388,25 +406,25 @@ impl NativeImage {
     }
 }
 
-pub(crate) struct NativeArchive {
+pub struct NativeArchive {
     container: VirtualContainer,
     listed_base_directory: Option<PathBuf>,
     encoded_bytes: u64,
 }
 
 impl NativeArchive {
-    pub(crate) fn entry_count(&self) -> usize {
+    pub fn entry_count(&self) -> usize {
         self.container.entries().len()
     }
 
-    pub(crate) fn entry_name(&self, index: usize) -> Option<&str> {
+    pub fn entry_name(&self, index: usize) -> Option<&str> {
         self.container
             .entries()
             .get(index)
             .map(|entry| entry.name.as_str())
     }
 
-    pub(crate) fn entry_size(&self, index: usize) -> Option<u64> {
+    pub fn entry_size(&self, index: usize) -> Option<u64> {
         self.container
             .entries()
             .get(index)
@@ -429,21 +447,21 @@ fn validate_archive_retained_layout(archive_bytes: u64, entry_bytes: u64) -> Res
     let retained = archive_bytes
         .checked_add(entry_bytes)
         .ok_or_else(|| CoreError::limit("archive retained byte size overflow"))?;
-    if retained > MAX_ANDROID_ARCHIVE_RETAINED_BYTES {
+    if retained > MAX_MOBILE_ARCHIVE_RETAINED_BYTES {
         return Err(CoreError::limit("archive retained byte limit exceeded"));
     }
     Ok(())
 }
 
 #[cfg(test)]
-pub(crate) fn validate_archive_retained_layout_for_test(
+pub fn validate_archive_retained_layout_for_test(
     archive_bytes: u64,
     entry_bytes: u64,
 ) -> Result<(), CoreError> {
     validate_archive_retained_layout(archive_bytes, entry_bytes)
 }
 
-pub(crate) struct NativeBytes {
+pub struct NativeBytes {
     bytes: Box<[u8]>,
 }
 
@@ -454,29 +472,33 @@ impl NativeBytes {
         }
     }
 
-    pub(crate) fn as_mut_ptr(&self) -> *mut u8 {
+    pub fn as_mut_ptr(&self) -> *mut u8 {
         self.bytes.as_ptr().cast_mut()
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.bytes.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+
     #[cfg(test)]
-    pub(crate) fn as_slice(&self) -> &[u8] {
+    pub fn as_slice(&self) -> &[u8] {
         &self.bytes
     }
 }
 
-pub(crate) struct RgbaEncodeRequest<'a> {
-    pub(crate) rgba: &'a [u8],
-    pub(crate) width: i32,
-    pub(crate) height: i32,
-    pub(crate) stride: i32,
-    pub(crate) format: &'a str,
+pub struct RgbaEncodeRequest<'a> {
+    pub rgba: &'a [u8],
+    pub width: i32,
+    pub height: i32,
+    pub stride: i32,
+    pub format: &'a str,
 }
 
-pub(crate) struct BridgeState {
+pub struct BridgeState {
     sessions: HandleRegistry<Mutex<RequestState>>,
     images: HandleRegistry<NativeImage>,
     archives: HandleRegistry<NativeArchive>,
@@ -497,17 +519,17 @@ impl Default for BridgeState {
 }
 
 impl BridgeState {
-    pub(crate) fn create_session(&self) -> Option<NativeSessionHandle> {
+    pub fn create_session(&self) -> Option<NativeSessionHandle> {
         self.sessions
             .insert(Mutex::new(RequestState::default()))
             .map(NativeSessionHandle)
     }
 
-    pub(crate) fn release_session(&self, handle: NativeSessionHandle) -> bool {
+    pub fn release_session(&self, handle: NativeSessionHandle) -> bool {
         self.sessions.remove(handle.0).is_some()
     }
 
-    pub(crate) fn next_request_id(&self, handle: NativeSessionHandle) -> Option<u64> {
+    pub fn next_request_id(&self, handle: NativeSessionHandle) -> Option<u64> {
         let session = self.sessions.get(handle.0)?;
         let mut state = lock(&session);
         let next = state.next_request_id();
@@ -517,32 +539,28 @@ impl BridgeState {
         next
     }
 
-    pub(crate) fn begin_request(&self, handle: NativeSessionHandle, request_id: u64) -> bool {
+    pub fn begin_request(&self, handle: NativeSessionHandle, request_id: u64) -> bool {
         let Some(session) = self.sessions.get(handle.0) else {
             return false;
         };
         lock(&session).begin(request_id)
     }
 
-    pub(crate) fn cancel_request(&self, handle: NativeSessionHandle, request_id: u64) -> bool {
+    pub fn cancel_request(&self, handle: NativeSessionHandle, request_id: u64) -> bool {
         let Some(session) = self.sessions.get(handle.0) else {
             return false;
         };
         lock(&session).cancel(request_id)
     }
 
-    pub(crate) fn is_request_current(&self, handle: NativeSessionHandle, request_id: u64) -> bool {
+    pub fn is_request_current(&self, handle: NativeSessionHandle, request_id: u64) -> bool {
         let Some(session) = self.sessions.get(handle.0) else {
             return false;
         };
         lock(&session).is_current(request_id)
     }
 
-    pub(crate) fn require_current_request(
-        &self,
-        handle: NativeSessionHandle,
-        request_id: u64,
-    ) -> bool {
+    pub fn require_current_request(&self, handle: NativeSessionHandle, request_id: u64) -> bool {
         if self.is_request_current(handle, request_id) {
             return true;
         }
@@ -550,7 +568,7 @@ impl BridgeState {
         false
     }
 
-    pub(crate) fn request_error(
+    pub fn request_error(
         &self,
         handle: NativeSessionHandle,
         request_id: u64,
@@ -563,7 +581,7 @@ impl BridgeState {
             .unwrap_or_else(|| NativeRequestError::new(NativeErrorCode::None, "{}"))
     }
 
-    pub(crate) fn record_invalid_argument(
+    pub fn record_invalid_argument(
         &self,
         handle: NativeSessionHandle,
         request_id: u64,
@@ -572,7 +590,7 @@ impl BridgeState {
         self.record_error(handle, request_id, invalid_argument_error(argument));
     }
 
-    pub(crate) fn decode_path(
+    pub fn decode_path(
         &self,
         handle: NativeSessionHandle,
         request_id: u64,
@@ -583,7 +601,7 @@ impl BridgeState {
             self.record_stale_unless_cancelled(handle, request_id);
             return None;
         }
-        let bytes = match read_file_bounded(path, MAX_ANDROID_ENCODED_INPUT_BYTES, "input_bytes") {
+        let bytes = match read_file_bounded(path, MAX_MOBILE_ENCODED_INPUT_BYTES, "input_bytes") {
             Ok(bytes) => bytes,
             Err(error) => {
                 self.record_error(handle, request_id, bounded_read_native_error(error));
@@ -593,7 +611,7 @@ impl BridgeState {
         self.decode_bytes(handle, request_id, &bytes, format_hint)
     }
 
-    pub(crate) fn decode_bytes(
+    pub fn decode_bytes(
         &self,
         handle: NativeSessionHandle,
         request_id: u64,
@@ -607,7 +625,7 @@ impl BridgeState {
         let cancel_probe = || !self.is_request_current(handle, request_id);
         let decoded = match decode_with_limits(
             DecodeRequest { bytes, format_hint },
-            ANDROID_DECODE_LIMITS,
+            MOBILE_DECODE_LIMITS,
             Some(&cancel_probe),
         ) {
             Ok(decoded) => decoded,
@@ -647,7 +665,7 @@ impl BridgeState {
         handle_value
     }
 
-    pub(crate) fn encode_rgba(
+    pub fn encode_rgba(
         &self,
         handle: NativeSessionHandle,
         request_id: u64,
@@ -760,15 +778,15 @@ impl BridgeState {
         self.publish_bytes(handle, request_id, encoded)
     }
 
-    pub(crate) fn image(&self, handle: NativeImageHandle) -> Option<Arc<NativeImage>> {
+    pub fn image(&self, handle: NativeImageHandle) -> Option<Arc<NativeImage>> {
         self.images.get(handle.0)
     }
 
-    pub(crate) fn release_image(&self, handle: NativeImageHandle) -> bool {
+    pub fn release_image(&self, handle: NativeImageHandle) -> bool {
         self.images.remove(handle.0).is_some()
     }
 
-    pub(crate) fn image_frame(
+    pub fn image_frame(
         &self,
         handle: NativeImageHandle,
         index: usize,
@@ -780,7 +798,7 @@ impl BridgeState {
             .map(NativeImageHandle)
     }
 
-    pub(crate) fn open_archive(
+    pub fn open_archive(
         &self,
         session_handle: NativeSessionHandle,
         request_id: u64,
@@ -805,8 +823,7 @@ impl BridgeState {
                 return None;
             }
         };
-        let bytes = match read_file_bounded(path, MAX_ANDROID_ARCHIVE_INPUT_BYTES, "archive_bytes")
-        {
+        let bytes = match read_file_bounded(path, MAX_MOBILE_ARCHIVE_INPUT_BYTES, "archive_bytes") {
             Ok(bytes) => bytes,
             Err(error) => {
                 self.record_error(session_handle, request_id, bounded_read_native_error(error));
@@ -826,7 +843,7 @@ impl BridgeState {
         };
         let encoded_bytes = bytes.len() as u64;
         let container =
-            match VirtualContainer::open(source_format, source_id, bytes, ANDROID_ARCHIVE_LIMITS) {
+            match VirtualContainer::open(source_format, source_id, bytes, MOBILE_ARCHIVE_LIMITS) {
                 Ok(container) => container,
                 Err(error) => {
                     self.record_error(session_handle, request_id, core_error(&error));
@@ -858,15 +875,15 @@ impl BridgeState {
         handle
     }
 
-    pub(crate) fn archive(&self, handle: NativeArchiveHandle) -> Option<Arc<NativeArchive>> {
+    pub fn archive(&self, handle: NativeArchiveHandle) -> Option<Arc<NativeArchive>> {
         self.archives.get(handle.0)
     }
 
-    pub(crate) fn release_archive(&self, handle: NativeArchiveHandle) -> bool {
+    pub fn release_archive(&self, handle: NativeArchiveHandle) -> bool {
         self.archives.remove(handle.0).is_some()
     }
 
-    pub(crate) fn materialize_archive_entry(
+    pub fn materialize_archive_entry(
         &self,
         session_handle: NativeSessionHandle,
         request_id: u64,
@@ -896,11 +913,11 @@ impl BridgeState {
         self.publish_bytes(session_handle, request_id, bytes)
     }
 
-    pub(crate) fn native_bytes(&self, handle: NativeBytesHandle) -> Option<Arc<NativeBytes>> {
+    pub fn native_bytes(&self, handle: NativeBytesHandle) -> Option<Arc<NativeBytes>> {
         self.byte_buffers.get(handle.0)
     }
 
-    pub(crate) fn release_bytes(&self, handle: NativeBytesHandle) -> bool {
+    pub fn release_bytes(&self, handle: NativeBytesHandle) -> bool {
         self.byte_buffers.remove(handle.0).is_some()
     }
 
@@ -935,7 +952,7 @@ impl BridgeState {
         handle
     }
 
-    pub(crate) fn decode_archive_entry(
+    pub fn decode_archive_entry(
         &self,
         session_handle: NativeSessionHandle,
         request_id: u64,
@@ -1009,22 +1026,22 @@ impl BridgeState {
     }
 
     #[cfg(test)]
-    pub(crate) fn image_count(&self) -> usize {
+    pub fn image_count(&self) -> usize {
         self.images.len()
     }
 
     #[cfg(test)]
-    pub(crate) fn archive_count(&self) -> usize {
+    pub fn archive_count(&self) -> usize {
         self.archives.len()
     }
 
     #[cfg(test)]
-    pub(crate) fn byte_buffer_count(&self) -> usize {
+    pub fn byte_buffer_count(&self) -> usize {
         self.byte_buffers.len()
     }
 
     #[cfg(test)]
-    pub(crate) fn insert_decoded_for_test(
+    pub fn insert_decoded_for_test(
         &self,
         decoded: DecodedImage,
     ) -> Result<NativeImageHandle, NativeRequestError> {
@@ -1036,7 +1053,7 @@ impl BridgeState {
     }
 }
 
-pub(crate) fn bridge() -> &'static BridgeState {
+pub fn bridge() -> &'static BridgeState {
     static BRIDGE: OnceLock<BridgeState> = OnceLock::new();
     BRIDGE.get_or_init(BridgeState::default)
 }
@@ -1076,7 +1093,7 @@ fn read_listed_relative(base: &Path, relative: &str) -> Result<Vec<u8>, CoreErro
     }
     read_file_bounded(
         &canonical_candidate,
-        MAX_ANDROID_ARCHIVE_ENTRY_BYTES,
+        MAX_MOBILE_ARCHIVE_ENTRY_BYTES,
         "entry_bytes",
     )
     .map_err(bounded_read_core_error)
@@ -1098,7 +1115,7 @@ fn bounded_read_core_error(error: BoundedReadError) -> CoreError {
     }
 }
 
-pub(crate) fn limit_error(dimension: &str) -> NativeRequestError {
+pub fn limit_error(dimension: &str) -> NativeRequestError {
     NativeRequestError::new(
         NativeErrorCode::Limit,
         format!(r#"{{"dimension":"{dimension}"}}"#),
@@ -1112,7 +1129,7 @@ fn invalid_argument_error(argument: &str) -> NativeRequestError {
     )
 }
 
-pub(crate) fn core_error(error: &CoreError) -> NativeRequestError {
+pub fn core_error(error: &CoreError) -> NativeRequestError {
     let code = match error.kind() {
         CoreErrorKind::Io => NativeErrorCode::Io,
         CoreErrorKind::Limit => NativeErrorCode::Limit,

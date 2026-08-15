@@ -4,20 +4,11 @@
 //! valid until the matching release function succeeds. Kotlin must not retain
 //! or access a returned direct buffer after releasing its handle.
 
-mod bounded_io;
-mod reading_plan;
-mod registry;
-mod session;
-
-pub use session::{
+pub use wml2viewer_mobile_bridge::{
     NativeArchiveHandle, NativeBytesHandle, NativeErrorCode, NativeImageHandle, NativeRequestError,
     NativeSessionHandle,
 };
 
-use crate::reading_plan::{
-    MAX_READING_PAGES, ReadingPlanRequest, encode_reading_wire, plan_reading,
-};
-use crate::session::{RgbaEncodeRequest, bridge};
 use jni::EnvUnowned;
 use jni::errors::LogErrorAndDefault;
 use jni::objects::{
@@ -25,6 +16,10 @@ use jni::objects::{
 };
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jlong};
 use std::path::Path;
+use wml2viewer_mobile_bridge::{
+    MAX_READING_PAGES, ReadingPlanRequest, RgbaEncodeRequest, bridge, encode_reading_wire,
+    plan_reading,
+};
 
 const INVALID_HANDLE: jlong = 0;
 
@@ -132,7 +127,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jboolean {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jboolean> {
-            let released = NativeSessionHandle::from_jlong(raw_handle)
+            let released = NativeSessionHandle::from_signed_raw(raw_handle)
                 .is_some_and(|handle| bridge().release_session(handle));
             Ok(boolean(released))
         })
@@ -149,7 +144,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jlong {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jlong> {
-            let next = NativeSessionHandle::from_jlong(raw_handle)
+            let next = NativeSessionHandle::from_signed_raw(raw_handle)
                 .and_then(|handle| bridge().next_request_id(handle))
                 .and_then(|value| i64::try_from(value).ok())
                 .unwrap_or(0);
@@ -169,7 +164,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jboolean {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jboolean> {
-            let begun = NativeSessionHandle::from_jlong(raw_handle)
+            let begun = NativeSessionHandle::from_signed_raw(raw_handle)
                 .zip(request_id(raw_request_id))
                 .is_some_and(|(handle, id)| bridge().begin_request(handle, id));
             Ok(boolean(begun))
@@ -188,7 +183,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jboolean {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jboolean> {
-            let cancelled = NativeSessionHandle::from_jlong(raw_handle)
+            let cancelled = NativeSessionHandle::from_signed_raw(raw_handle)
                 .zip(request_id(raw_request_id))
                 .is_some_and(|(handle, id)| bridge().cancel_request(handle, id));
             Ok(boolean(cancelled))
@@ -209,7 +204,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jlong {
     unowned_env
         .with_env(|env| -> jni::errors::Result<jlong> {
-            let Some(handle) = NativeSessionHandle::from_jlong(raw_handle) else {
+            let Some(handle) = NativeSessionHandle::from_signed_raw(raw_handle) else {
                 return Ok(INVALID_HANDLE);
             };
             let Some(id) = request_id(raw_request_id) else {
@@ -245,7 +240,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jlong {
     unowned_env
         .with_env(|env| -> jni::errors::Result<jlong> {
-            let Some(session) = NativeSessionHandle::from_jlong(raw_session) else {
+            let Some(session) = NativeSessionHandle::from_signed_raw(raw_session) else {
                 return Ok(INVALID_HANDLE);
             };
             let Some(id) = request_id(raw_request_id) else {
@@ -319,7 +314,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jint {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jint> {
-            let width = NativeImageHandle::from_jlong(raw_handle)
+            let width = NativeImageHandle::from_signed_raw(raw_handle)
                 .and_then(|handle| bridge().image(handle))
                 .map(|image| image.width())
                 .unwrap_or(0);
@@ -338,7 +333,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jint {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jint> {
-            let height = NativeImageHandle::from_jlong(raw_handle)
+            let height = NativeImageHandle::from_signed_raw(raw_handle)
                 .and_then(|handle| bridge().image(handle))
                 .map(|image| image.height())
                 .unwrap_or(0);
@@ -357,7 +352,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jint {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jint> {
-            let stride = NativeImageHandle::from_jlong(raw_handle)
+            let stride = NativeImageHandle::from_signed_raw(raw_handle)
                 .and_then(|handle| bridge().image(handle))
                 .map(|image| image.stride())
                 .unwrap_or(0);
@@ -376,8 +371,8 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> JObject<'caller> {
     unowned_env
         .with_env(|env| -> jni::errors::Result<JObject<'caller>> {
-            let Some(image) =
-                NativeImageHandle::from_jlong(raw_handle).and_then(|handle| bridge().image(handle))
+            let Some(image) = NativeImageHandle::from_signed_raw(raw_handle)
+                .and_then(|handle| bridge().image(handle))
             else {
                 return Ok(JObject::null());
             };
@@ -402,7 +397,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jboolean {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jboolean> {
-            let released = NativeImageHandle::from_jlong(raw_handle)
+            let released = NativeImageHandle::from_signed_raw(raw_handle)
                 .is_some_and(|handle| bridge().release_image(handle));
             Ok(boolean(released))
         })
@@ -420,7 +415,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jboolean {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jboolean> {
-            let current = NativeSessionHandle::from_jlong(raw_handle)
+            let current = NativeSessionHandle::from_signed_raw(raw_handle)
                 .zip(request_id(raw_request_id))
                 .is_some_and(|(handle, id)| bridge().is_request_current(handle, id));
             Ok(boolean(current))
@@ -439,7 +434,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jint {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jint> {
-            let error = NativeSessionHandle::from_jlong(raw_handle)
+            let error = NativeSessionHandle::from_signed_raw(raw_handle)
                 .map(|handle| {
                     bridge().request_error(handle, request_id(raw_request_id).unwrap_or(0))
                 })
@@ -460,7 +455,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> JObject<'caller> {
     unowned_env
         .with_env(|env| -> jni::errors::Result<JObject<'caller>> {
-            let error = NativeSessionHandle::from_jlong(raw_handle)
+            let error = NativeSessionHandle::from_signed_raw(raw_handle)
                 .map(|handle| {
                     bridge().request_error(handle, request_id(raw_request_id).unwrap_or(0))
                 })
@@ -481,7 +476,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> JObject<'caller> {
     unowned_env
         .with_env(|env| -> jni::errors::Result<JObject<'caller>> {
-            let error = NativeSessionHandle::from_jlong(raw_handle)
+            let error = NativeSessionHandle::from_signed_raw(raw_handle)
                 .map(|handle| {
                     bridge().request_error(handle, request_id(raw_request_id).unwrap_or(0))
                 })
@@ -501,7 +496,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jint {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jint> {
-            let count = NativeImageHandle::from_jlong(raw_handle)
+            let count = NativeImageHandle::from_signed_raw(raw_handle)
                 .and_then(|handle| bridge().image(handle))
                 .and_then(|image| i32::try_from(image.frame_count()).ok())
                 .unwrap_or(0);
@@ -520,7 +515,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jlong {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jlong> {
-            let count = NativeImageHandle::from_jlong(raw_handle)
+            let count = NativeImageHandle::from_signed_raw(raw_handle)
                 .and_then(|handle| bridge().image(handle))
                 .and_then(|image| image.loop_count())
                 .map(i64::from)
@@ -541,7 +536,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jlong {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jlong> {
-            let duration = NativeImageHandle::from_jlong(raw_handle)
+            let duration = NativeImageHandle::from_signed_raw(raw_handle)
                 .zip(usize::try_from(raw_index).ok())
                 .and_then(|(handle, index)| bridge().image(handle)?.frame_duration_ms(index))
                 .and_then(|value| i64::try_from(value).ok())
@@ -562,7 +557,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jlong {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jlong> {
-            let frame = NativeImageHandle::from_jlong(raw_handle)
+            let frame = NativeImageHandle::from_signed_raw(raw_handle)
                 .zip(usize::try_from(raw_index).ok())
                 .and_then(|(handle, index)| bridge().image_frame(handle, index))
                 .and_then(|handle| i64::try_from(handle.as_raw()).ok())
@@ -585,7 +580,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jlong {
     unowned_env
         .with_env(|env| -> jni::errors::Result<jlong> {
-            let Some(session) = NativeSessionHandle::from_jlong(raw_session) else {
+            let Some(session) = NativeSessionHandle::from_signed_raw(raw_session) else {
                 return Ok(INVALID_HANDLE);
             };
             let Some(id) = request_id(raw_request_id) else {
@@ -611,7 +606,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jboolean {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jboolean> {
-            let released = NativeArchiveHandle::from_jlong(raw_handle)
+            let released = NativeArchiveHandle::from_signed_raw(raw_handle)
                 .is_some_and(|handle| bridge().release_archive(handle));
             Ok(boolean(released))
         })
@@ -628,7 +623,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jint {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jint> {
-            let count = NativeArchiveHandle::from_jlong(raw_handle)
+            let count = NativeArchiveHandle::from_signed_raw(raw_handle)
                 .and_then(|handle| bridge().archive(handle))
                 .and_then(|archive| i32::try_from(archive.entry_count()).ok())
                 .unwrap_or(0);
@@ -648,7 +643,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> JObject<'caller> {
     unowned_env
         .with_env(|env| -> jni::errors::Result<JObject<'caller>> {
-            let Some(name) = NativeArchiveHandle::from_jlong(raw_handle)
+            let Some(name) = NativeArchiveHandle::from_signed_raw(raw_handle)
                 .zip(usize::try_from(raw_index).ok())
                 .and_then(|(handle, index)| {
                     bridge()
@@ -675,7 +670,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jlong {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jlong> {
-            let size = NativeArchiveHandle::from_jlong(raw_handle)
+            let size = NativeArchiveHandle::from_signed_raw(raw_handle)
                 .zip(usize::try_from(raw_index).ok())
                 .and_then(|(handle, index)| bridge().archive(handle)?.entry_size(index))
                 .and_then(|size| i64::try_from(size).ok())
@@ -698,13 +693,13 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jlong {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jlong> {
-            let Some(session) = NativeSessionHandle::from_jlong(raw_session) else {
+            let Some(session) = NativeSessionHandle::from_signed_raw(raw_session) else {
                 return Ok(INVALID_HANDLE);
             };
             let Some(id) = request_id(raw_request_id) else {
                 return Ok(INVALID_HANDLE);
             };
-            let Some(archive) = NativeArchiveHandle::from_jlong(raw_archive) else {
+            let Some(archive) = NativeArchiveHandle::from_signed_raw(raw_archive) else {
                 return Ok(INVALID_HANDLE);
             };
             let Some(index) = usize::try_from(raw_index).ok() else {
@@ -728,7 +723,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jlong {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jlong> {
-            let length = NativeBytesHandle::from_jlong(raw_handle)
+            let length = NativeBytesHandle::from_signed_raw(raw_handle)
                 .and_then(|handle| bridge().native_bytes(handle))
                 .and_then(|bytes| i64::try_from(bytes.len()).ok())
                 .unwrap_or(-1);
@@ -747,7 +742,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> JObject<'caller> {
     unowned_env
         .with_env(|env| -> jni::errors::Result<JObject<'caller>> {
-            let Some(bytes) = NativeBytesHandle::from_jlong(raw_handle)
+            let Some(bytes) = NativeBytesHandle::from_signed_raw(raw_handle)
                 .and_then(|handle| bridge().native_bytes(handle))
             else {
                 return Ok(JObject::null());
@@ -771,7 +766,7 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jboolean {
     unowned_env
         .with_env(|_| -> jni::errors::Result<jboolean> {
-            let released = NativeBytesHandle::from_jlong(raw_handle)
+            let released = NativeBytesHandle::from_signed_raw(raw_handle)
                 .is_some_and(|handle| bridge().release_bytes(handle));
             Ok(boolean(released))
         })
@@ -792,13 +787,13 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
 ) -> jlong {
     unowned_env
         .with_env(|env| -> jni::errors::Result<jlong> {
-            let Some(session) = NativeSessionHandle::from_jlong(raw_session) else {
+            let Some(session) = NativeSessionHandle::from_signed_raw(raw_session) else {
                 return Ok(INVALID_HANDLE);
             };
             let Some(id) = request_id(raw_request_id) else {
                 return Ok(INVALID_HANDLE);
             };
-            let Some(archive) = NativeArchiveHandle::from_jlong(raw_archive) else {
+            let Some(archive) = NativeArchiveHandle::from_signed_raw(raw_archive) else {
                 return Ok(INVALID_HANDLE);
             };
             let Some(index) = usize::try_from(raw_index).ok() else {
@@ -816,6 +811,3 @@ pub extern "system" fn Java_io_github_mith_1mmk_wml2viewer_nativebridge_NativeBr
         })
         .resolve::<LogErrorAndDefault>()
 }
-
-#[cfg(test)]
-mod tests;

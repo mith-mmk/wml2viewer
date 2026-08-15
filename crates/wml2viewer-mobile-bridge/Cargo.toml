@@ -1,0 +1,10 @@
+[package]
+name = "wml2viewer-mobile-bridge"
+version = "0.0.19"
+edition = "2024"
+license = "MIT"
+description = "Platform-neutral native bridge state shared by mobile frontends"
+publish = false
+
+[dependencies]
+wml2viewer-core = { path = "../wml2viewer-core" }
