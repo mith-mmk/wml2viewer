@@ -97,6 +97,8 @@ pub fn get_decoder_extentions() -> Vec<String> {
     }
     #[cfg(feature = "webp")]
     exts.push("webp".to_string());
+    #[cfg(feature = "avif")]
+    exts.push("avif".to_string());
     #[cfg(all(feature = "mag", not(feature = "noretoro")))]
     exts.push("mag".to_string());
     #[cfg(all(feature = "maki", not(feature = "noretoro")))]
@@ -188,6 +190,8 @@ pub mod util;
 pub mod vsp;
 pub mod warning;
 //pub mod iccprofile;
+#[cfg(feature = "avif")]
+pub mod avif;
 pub mod color;
 pub mod decoder;
 pub mod metadata;

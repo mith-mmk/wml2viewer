@@ -45,6 +45,10 @@ mod capability_tests {
                 "missing enabled decoder extension: {expected}"
             );
         }
+        #[cfg(feature = "avif")]
+        assert!(extensions.iter().any(|extension| extension == "avif"));
+        #[cfg(not(feature = "avif"))]
+        assert!(!extensions.iter().any(|extension| extension == "avif"));
         assert!(extensions.windows(2).all(|pair| pair[0] < pair[1]));
     }
 }

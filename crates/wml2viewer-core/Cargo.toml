@@ -6,6 +6,10 @@ license = "MIT"
 description = "Platform-independent image and reading-session core for wml2viewer"
 publish = false
 
+[features]
+default = []
+avif = ["wml2/avif"]
+
 [dependencies]
 oxiarc-archive = "=0.3.6"
 wml2 = { path = "../wml2", features = ["multithread"] }
