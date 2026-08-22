@@ -467,6 +467,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "avif-rust"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e6267b2527cbe43d9e369f91a4af3028274f7033bb0759e906bbc9717fceba7"
+dependencies = [
+ "bin-rs",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5050,6 +5059,7 @@ dependencies = [
 name = "wml2"
 version = "0.0.23"
 dependencies = [
+ "avif-rust",
  "bin-rs",
  "miniz_oxide 0.7.4",
  "webp-rust",

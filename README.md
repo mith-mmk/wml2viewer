@@ -9,6 +9,7 @@ A lightweight native image viewer built with `egui` and `wml2`.
 ## Main Features
 
 - Native support for jpeg/webp/bmp/tiff/png/gif/mag/maki/pi/pic
+- Optional native AVIF support with the `avif` Cargo feature
 - Native support for Animation GIF/PNG/Webp
 - Direct browsing of zip files
 - Plugin support: susie64 plugin(windows) / OS decoders(windows) / ffmpeg
@@ -90,6 +91,7 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
   - Windows: WIC decode implemented
   - macOS: planned
 - Enabling providers allows formats like `avif` and `jp2` to be handled
+- The built-in AVIF decoder is opt-in for the PC build: `cargo run --features avif`
 
 # update log
 

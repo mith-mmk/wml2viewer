@@ -1660,6 +1660,10 @@ pub fn image_decoder<B: BinaryReader>(
         Webp => {
             return crate::webp::decoder::decode(reader, option);
         }
+        #[cfg(feature = "avif")]
+        Avif => {
+            return crate::avif::decoder::decode(reader, option);
+        }
         #[cfg(feature = "tiff")]
         Tiff => {
             return crate::tiff::decoder::decode(reader, option);

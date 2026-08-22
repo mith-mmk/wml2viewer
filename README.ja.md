@@ -9,6 +9,7 @@
 ## 主な機能
 
 - JPEG/Webp/BMP/Tiff/PNG/GIF/mag/maki/pi/picのネイティブ対応
+- AVIFは`avif` Cargo featureを有効にした場合だけ内蔵デコーダで対応
 - アニメーションGIF/PNG/webpのネイティブ対応
 - マルチプラットフォーム対応
 - zipファイルの直接閲覧
@@ -88,6 +89,7 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 大きい ZIP やネットワーク上の ZIP では low-I/O ワークアラウンドが有効になります。
 - Windows では `設定 -> システム` から拡張子の関連付けを操作できます。
 - `ffmpeg` は現状 `ffmpeg.exe` を起動してデコード。
+- PC版の内蔵AVIFデコーダを使う場合は `cargo run --features avif` を指定します。既定featureには含めません。
 - `susie64` は Windows 専用で、image pluginのみでサポート。
 - `system` は Windows では WIC decode までサポート。macOS system codec は今後の拡張対象です。
 - plugin を有効化すると、`avif` や `jp2` などの拡張子も filer / viewer の対象になります。

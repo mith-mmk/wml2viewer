@@ -19,6 +19,10 @@ description = "Minimal native image viewer built with egui and wml2"
 authors = ["MITH@mmk"]
 publish = false
 
+[features]
+default = []
+avif = ["wml2/avif", "wml2viewer-core/avif"]
+
 [dependencies]
 eframe = "0.33"
 serde = { version = "1", features = ["derive"] }

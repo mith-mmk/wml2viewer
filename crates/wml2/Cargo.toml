@@ -29,6 +29,7 @@ jpeg = ["exif"]
 png = ["exif"]
 tiff = ["exif"]
 webp = ["exif", "dep:webp_codec"]
+avif = ["dep:avif_codec"]
 mag = []
 maki = []
 pcd = []
@@ -51,5 +52,5 @@ noretoro = []
 [dependencies]
 bin-rs = { version = "0.0.10", features = ["util"] }
 webp_codec = { package = "webp-rust", version = "0.2.1", optional = true }
+avif_codec = { package = "avif-rust", version = "0.0.6", optional = true }
 miniz_oxide = "0.7.1"
-
