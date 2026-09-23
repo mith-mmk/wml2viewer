@@ -53,7 +53,8 @@ impl ViewerApp {
             self.last_navigation_at = Some(Instant::now());
             return Ok(());
         }
-        let command = if self.filer.ascending {
+        let command = if self.filer.ascending || self.end_of_folder == EndOfFolderOption::Recursive
+        {
             FilesystemCommand::Next {
                 request_id: 0,
                 policy: self.end_of_folder,
@@ -88,7 +89,8 @@ impl ViewerApp {
             self.last_navigation_at = Some(Instant::now());
             return Ok(());
         }
-        let command = if self.filer.ascending {
+        let command = if self.filer.ascending || self.end_of_folder == EndOfFolderOption::Recursive
+        {
             FilesystemCommand::Prev {
                 request_id: 0,
                 policy: self.end_of_folder,
@@ -296,10 +298,17 @@ impl ViewerApp {
 
     pub(crate) fn sync_navigation_sort_with_filer_sort(&mut self) {
         let desired = navigation_sort_for_filer(self.filer.sort_field, self.filer.name_sort_mode);
-        if self.navigation_sort == desired {
+        let recursive_order = RecursiveOrder {
+            sort: desired,
+            ascending: self.filer.ascending,
+            separate_dirs: self.filer.separate_dirs,
+            archive_as_container_in_sort: self.filer.archive_as_container_in_sort,
+        };
+        if self.navigation_sort == desired && self.recursive_order == recursive_order {
             return;
         }
         self.navigation_sort = desired;
+        self.recursive_order = recursive_order;
         self.log_bench_state(
             "viewer.navigation_sort.synced_from_filer",
             serde_json::json!({

@@ -1,6 +1,6 @@
 use crate::filesystem::{
-    browser_entry_path_from_dir_entry, compare_natural_str, compare_os_str, is_browser_container,
-    list_browser_entries,
+    browser_entry_display_name, browser_entry_path_from_dir_entry, compare_natural_str,
+    compare_os_str, is_browser_container, list_browser_entries,
 };
 use crate::options::NavigationSortOption;
 use crate::ui::menu::fileviewer::state::{FilerEntry, FilerMetadata, FilerSortField, NameSortMode};
@@ -270,10 +270,7 @@ fn build_filer_entry(path: PathBuf, archive_as_container_in_sort: bool) -> Filer
         .unwrap_or_default();
     let is_container = is_browser_container(&path);
     let sort_as_container = sort_group_is_container(&path, archive_as_container_in_sort);
-    let label = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "(entry)".to_string());
+    let label = browser_entry_display_name(&path);
     FilerEntry {
         path,
         label,
@@ -286,10 +283,7 @@ fn build_filer_entry(path: PathBuf, archive_as_container_in_sort: bool) -> Filer
 fn build_preview_entry(path: PathBuf, archive_as_container_in_sort: bool) -> FilerEntry {
     let is_container = is_browser_container(&path);
     let sort_as_container = sort_group_is_container(&path, archive_as_container_in_sort);
-    let label = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "(entry)".to_string());
+    let label = browser_entry_display_name(&path);
     FilerEntry {
         path,
         label,
@@ -352,7 +346,9 @@ fn sort_entries(
             compare_name(&left.label, &right.label, name_sort_mode)
         } else {
             primary
-        };
+        }
+        .then_with(|| left.label.cmp(&right.label))
+        .then_with(|| left.path.cmp(&right.path));
         if ascending { order } else { order.reverse() }
     };
 

@@ -6,7 +6,7 @@ use crate::drawers::canvas::Canvas;
 use crate::drawers::image::{LoadedImage, SaveFormat, save_loaded_image};
 use crate::filesystem::function::{FunctionParams, call_fanction_for_action};
 use crate::filesystem::{
-    FilesystemCommand, FilesystemResult, adjacent_entry, archive_prefers_low_io,
+    FilesystemCommand, FilesystemResult, RecursiveOrder, adjacent_entry, archive_prefers_low_io,
     is_browser_container, navigation_branch_path, resolve_end_path, resolve_navigation_entry_path,
     resolve_start_path, set_archive_zip_workaround, spawn_filesystem_worker,
 };
@@ -107,6 +107,7 @@ pub(crate) struct ViewerApp {
     pub(crate) input_options: InputOptions,
     pub(crate) end_of_folder: EndOfFolderOption,
     pub(crate) navigation_sort: NavigationSortOption,
+    pub(crate) recursive_order: RecursiveOrder,
     pub(crate) worker_tx: Sender<RenderCommand>,
     pub(crate) worker_rx: Receiver<RenderResult>,
     pub(crate) worker_join: Option<JoinHandle<()>>,
@@ -713,6 +714,7 @@ impl ViewerApp {
             input_options,
             end_of_folder: config.navigation.end_of_folder,
             navigation_sort: config.navigation.sort,
+            recursive_order: RecursiveOrder::default(),
             worker_tx,
             worker_rx,
             worker_join: Some(worker_join),
@@ -1952,7 +1954,10 @@ impl ViewerApp {
     }
 
     fn manga_navigation_target(&self, forward: bool) -> Option<PathBuf> {
-        if !self.navigator_ready || !self.manga_spread_active() {
+        if !self.navigator_ready
+            || !self.manga_spread_active()
+            || self.end_of_folder == EndOfFolderOption::Recursive
+        {
             return None;
         }
         let direction = self.navigation_direction_sign();
@@ -2071,7 +2076,9 @@ impl ViewerApp {
                         Some(ImageTransitionDirection::Forward),
                     )
                 } else {
-                    let command = if self.filer.ascending {
+                    let command = if self.filer.ascending
+                        || self.end_of_folder == EndOfFolderOption::Recursive
+                    {
                         FilesystemCommand::Next {
                             request_id: 0,
                             policy: self.end_of_folder,
@@ -2092,7 +2099,9 @@ impl ViewerApp {
                         Some(ImageTransitionDirection::Backward),
                     )
                 } else {
-                    let command = if self.filer.ascending {
+                    let command = if self.filer.ascending
+                        || self.end_of_folder == EndOfFolderOption::Recursive
+                    {
                         FilesystemCommand::Prev {
                             request_id: 0,
                             policy: self.end_of_folder,

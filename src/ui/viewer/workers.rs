@@ -158,7 +158,7 @@ impl ViewerApp {
 
     pub(super) fn spawn_navigation_workers(&mut self) {
         if self.fs_tx.is_none() || self.fs_rx.is_none() {
-            let (tx, rx) = spawn_filesystem_worker(self.navigation_sort);
+            let (tx, rx) = spawn_filesystem_worker(self.navigation_sort, self.recursive_order);
             self.fs_tx = Some(tx);
             self.fs_rx = Some(rx);
         }
@@ -600,7 +600,7 @@ impl ViewerApp {
     }
 
     pub(crate) fn respawn_filesystem_worker(&mut self) {
-        let (tx, rx) = spawn_filesystem_worker(self.navigation_sort);
+        let (tx, rx) = spawn_filesystem_worker(self.navigation_sort, self.recursive_order);
         self.fs_tx = Some(tx);
         self.fs_rx = Some(rx);
         self.navigator_ready = false;
