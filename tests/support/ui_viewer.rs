@@ -20,6 +20,7 @@ fn dummy_preloaded_entry(path: &str) -> PreloadedEntry {
             rendered: dummy_loaded_image(4, 4),
             texture: None,
             texture_display_scale: 1.0,
+            prepared_texture: None,
         },
     }
 }
@@ -178,6 +179,67 @@ fn transition_clock_starts_on_first_draw() {
         ),
         1.0
     );
+}
+
+#[test]
+fn transition_frame_stats_report_percentiles_and_refresh_overruns() {
+    let samples = (1..=100)
+        .map(|gap_ms| TransitionFrameSample {
+            gap: Duration::from_millis(gap_ms),
+            expected_frame_period: Duration::from_millis(16),
+        })
+        .collect::<Vec<_>>();
+
+    let stats = transition_frame_stats(&samples);
+
+    assert_eq!(stats.p50_gap, Some(Duration::from_millis(50)));
+    assert_eq!(stats.p95_gap, Some(Duration::from_millis(95)));
+    assert_eq!(stats.p99_gap, Some(Duration::from_millis(99)));
+    assert_eq!(stats.gaps_over_two_frame_periods, 68);
+}
+
+#[test]
+fn transition_frame_stats_handle_no_draw_intervals() {
+    let stats = transition_frame_stats(&[]);
+
+    assert_eq!(stats.p50_gap, None);
+    assert_eq!(stats.p95_gap, None);
+    assert_eq!(stats.p99_gap, None);
+    assert_eq!(stats.gaps_over_two_frame_periods, 0);
+}
+
+#[test]
+fn transition_frame_recorder_counts_each_frame_once_and_includes_completion_gap() {
+    let start = Instant::now();
+    let period = Duration::from_millis(16);
+    let mut recorder = TransitionFrameRecorder::default();
+
+    recorder.record(12, start, period);
+    recorder.record(12, start + Duration::from_millis(5), period);
+    recorder.record(13, start + Duration::from_millis(16), period);
+    recorder.record(14, start + Duration::from_millis(400), period);
+
+    assert_eq!(recorder.draw_count, 3);
+    assert_eq!(recorder.samples.len(), 2);
+    assert_eq!(recorder.samples[0].gap, period);
+    assert_eq!(recorder.samples[1].gap, Duration::from_millis(384));
+}
+
+#[test]
+fn transition_frame_recorder_bounds_samples_without_losing_overrun_counts() {
+    let mut recorder = TransitionFrameRecorder::default();
+    let mut now = Instant::now();
+    recorder.record(0, now, Duration::from_millis(1));
+    let total = TRANSITION_FRAME_SAMPLE_CAPACITY + 100;
+    for frame in 1..=total {
+        now += Duration::from_millis(if frame % 10 == 0 { 3 } else { 1 });
+        recorder.record(frame as u64, now, Duration::from_millis(1));
+    }
+
+    assert_eq!(recorder.samples.len(), TRANSITION_FRAME_SAMPLE_CAPACITY);
+    assert_eq!(recorder.total_gap_count, total as u64);
+    assert_eq!(recorder.gaps_over_two_frame_periods, (total / 10) as u64);
+    assert_eq!(recorder.max_gap, Some(Duration::from_millis(3)));
 }
 
 #[test]

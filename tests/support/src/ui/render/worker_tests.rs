@@ -26,14 +26,21 @@ fn resize_uses_the_displayed_source_even_after_a_cache_hit() {
         zoom: 1.0,
         method: InterpolationAlgorithm::Bilinear,
         scale_mode: RenderScaleMode::FastGpu,
+        max_texture_side: 4,
     })
     .unwrap();
     match rx.recv_timeout(Duration::from_secs(2)).unwrap() {
         RenderResult::Loaded {
-            request_id, source, ..
+            request_id,
+            source,
+            prepared_texture,
+            ..
         } => {
             assert_eq!(request_id, 42);
             assert_eq!((source.canvas.width(), source.canvas.height()), (7, 9));
+            let prepared =
+                prepared_texture.expect("resize should prepare the texture off the UI thread");
+            assert_eq!(prepared.image.size, [3, 4]);
         }
         RenderResult::Failed { message, .. } => panic!("resize failed: {message}"),
     }
@@ -73,6 +80,30 @@ fn render_load_metrics_default_is_zeroed() {
 }
 
 #[test]
+fn prepared_texture_matches_ui_downscale_and_color_conversion() {
+    use crate::ui::render::layout::canvas_to_color_image;
+    use crate::ui::render::texture::downscale_for_texture_limit;
+
+    let mut canvas = Canvas::new(5, 4);
+    for y in 0..4 {
+        for x in 0..5 {
+            let offset = ((y * 5 + x) * 4) as usize;
+            canvas.buffer_mut()[offset..offset + 4].copy_from_slice(&[
+                x as u8 * 33,
+                y as u8 * 41,
+                77,
+                255,
+            ]);
+        }
+    }
+    let method = InterpolationAlgorithm::Bilinear;
+    let prepared = super::prepare_texture(&canvas, 2, method);
+    let (expected_canvas, expected_scale) = downscale_for_texture_limit(&canvas, 2, method);
+    assert_eq!(prepared.display_scale, expected_scale);
+    assert_eq!(*prepared.image, canvas_to_color_image(&expected_canvas));
+}
+
+#[test]
 fn render_loads_lha_virtual_child() {
     let dir = crate::test_support::make_test_dir("render");
     let archive = dir.join("images.lzh");
@@ -90,6 +121,7 @@ fn render_loads_lha_virtual_child() {
         1.0,
         InterpolationAlgorithm::Bilinear,
         RenderScaleMode::FastGpu,
+        2,
     )
     .expect("render load should not fail")
     .expect("render load should complete");

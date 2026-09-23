@@ -5076,6 +5076,7 @@ dependencies = [
  "encoding_rs",
  "filetime",
  "oxiarc-archive",
+ "raw-window-handle",
  "reqwest",
  "rfd",
  "serde",

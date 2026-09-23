@@ -26,9 +26,9 @@ use crate::ui::menu::fileviewer::thumbnail::{
 };
 use crate::ui::menu::fileviewer::worker::{FilerCommand, FilerResult, spawn_filer_worker};
 use crate::ui::render::{
-    ActiveRenderRequest, LoadedRenderPage, RenderCommand, RenderLoadMetrics, RenderResult,
-    aligned_offset, canvas_to_color_image, downscale_for_texture_limit, spawn_render_worker,
-    worker_send_error,
+    ActiveRenderRequest, LoadedRenderPage, PreparedTexture, RenderCommand, RenderLoadMetrics,
+    RenderResult, aligned_offset, canvas_to_color_image, downscale_for_texture_limit,
+    spawn_render_worker, worker_send_error,
 };
 use crate::ui::viewer::options::{
     RenderOptions, RenderScaleMode, ViewerOptions, WindowOptions, WindowStartPosition,
@@ -61,6 +61,7 @@ const STARTUP_LAYOUT_SETTLE_FRAMES: usize = 8;
 const STARTUP_LAYOUT_REPAINT_INTERVAL: Duration = Duration::from_millis(16);
 const AUTO_FOLDER_REFRESH_INTERVAL: Duration = Duration::from_millis(1000);
 const PRELOAD_CACHE_CAPACITY: usize = 2;
+const TRANSITION_FRAME_SAMPLE_CAPACITY: usize = 4096;
 const ZIP_TO_ZIP_RANDOM_WALK_ROUNDS: usize = 8;
 const RENDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const HELP_HTML_TEMPLATE: &str = include_str!("../../../resources/help.html");
@@ -264,16 +265,182 @@ struct TransitionPreviousState {
     direction: Option<ImageTransitionDirection>,
 }
 
-#[derive(Clone)]
 struct ImageTransitionState {
     effect: TransitionEffect,
     prepared_at: Instant,
     started_at: Option<Instant>,
     duration: Duration,
     previous: TransitionPreviousState,
-    draw_count: u32,
-    max_draw_gap: Duration,
+    frames: TransitionFrameRecorder,
+    display_period: TransitionDisplayPeriod,
+    cache_record_ms: Option<f64>,
+}
+
+#[derive(Clone, Copy)]
+struct TransitionDisplayPeriod {
+    period: Duration,
+    source: &'static str,
+    refresh_hz: Option<u32>,
+    #[cfg(windows)]
+    monitor_key: Option<isize>,
+}
+
+impl Default for TransitionDisplayPeriod {
+    fn default() -> Self {
+        Self {
+            period: Duration::from_nanos(16_666_667),
+            source: "assumed_60_hz",
+            refresh_hz: None,
+            #[cfg(windows)]
+            monitor_key: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TransitionFrameSample {
+    gap: Duration,
+    expected_frame_period: Duration,
+}
+
+struct TransitionFrameRecorder {
+    last_frame_nr: Option<u64>,
     last_draw_at: Option<Instant>,
+    draw_count: u32,
+    samples: Vec<TransitionFrameSample>,
+    total_gap_count: u64,
+    gaps_over_two_frame_periods: u64,
+    max_gap: Option<Duration>,
+    reservoir_state: u64,
+}
+
+impl Default for TransitionFrameRecorder {
+    fn default() -> Self {
+        Self {
+            last_frame_nr: None,
+            last_draw_at: None,
+            draw_count: 0,
+            samples: Vec::new(),
+            total_gap_count: 0,
+            gaps_over_two_frame_periods: 0,
+            max_gap: None,
+            reservoir_state: 0x5eed_cafe_d15c_a11e,
+        }
+    }
+}
+
+impl TransitionFrameRecorder {
+    fn record(&mut self, frame_nr: u64, now: Instant, expected_frame_period: Duration) {
+        if self.last_frame_nr == Some(frame_nr) {
+            return;
+        }
+        if let Some(last_draw_at) = self.last_draw_at {
+            let sample = TransitionFrameSample {
+                gap: now.duration_since(last_draw_at),
+                expected_frame_period,
+            };
+            self.total_gap_count += 1;
+            self.max_gap = Some(self.max_gap.unwrap_or(Duration::ZERO).max(sample.gap));
+            if sample.gap > expected_frame_period.saturating_mul(2) {
+                self.gaps_over_two_frame_periods += 1;
+            }
+            if self.samples.len() < TRANSITION_FRAME_SAMPLE_CAPACITY {
+                self.samples.push(sample);
+            } else {
+                self.reservoir_state = self
+                    .reservoir_state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1);
+                let index = self.reservoir_state % self.total_gap_count;
+                if index < TRANSITION_FRAME_SAMPLE_CAPACITY as u64 {
+                    self.samples[index as usize] = sample;
+                }
+            }
+        }
+        self.last_frame_nr = Some(frame_nr);
+        self.last_draw_at = Some(now);
+        self.draw_count += 1;
+    }
+}
+
+struct TransitionFrameStats {
+    p50_gap: Option<Duration>,
+    p95_gap: Option<Duration>,
+    p99_gap: Option<Duration>,
+    max_gap: Option<Duration>,
+    gaps_over_two_frame_periods: usize,
+}
+
+fn transition_frame_stats(samples: &[TransitionFrameSample]) -> TransitionFrameStats {
+    let mut gaps = samples.iter().map(|sample| sample.gap).collect::<Vec<_>>();
+    gaps.sort_unstable();
+    let percentile = |percent: usize| {
+        let rank = (gaps.len() * percent).div_ceil(100);
+        rank.checked_sub(1)
+            .and_then(|index| gaps.get(index).copied())
+    };
+    TransitionFrameStats {
+        p50_gap: percentile(50),
+        p95_gap: percentile(95),
+        p99_gap: percentile(99),
+        max_gap: gaps.last().copied(),
+        gaps_over_two_frame_periods: samples
+            .iter()
+            .filter(|sample| sample.gap > sample.expected_frame_period.saturating_mul(2))
+            .count(),
+    }
+}
+
+#[cfg(windows)]
+fn transition_display_period_for_window(
+    frame: &eframe::Frame,
+    previous: TransitionDisplayPeriod,
+) -> TransitionDisplayPeriod {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::Graphics::Gdi::{
+        DEVMODEW, DM_DISPLAYFREQUENCY, ENUM_CURRENT_SETTINGS, EnumDisplaySettingsW,
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFOEXW, MonitorFromWindow,
+    };
+
+    let Ok(handle) = frame.window_handle() else {
+        return previous;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return previous;
+    };
+    // The borrowed window handle remains valid for this call on the UI thread.
+    let monitor = unsafe {
+        MonitorFromWindow(
+            handle.hwnd.get() as windows_sys::Win32::Foundation::HWND,
+            MONITOR_DEFAULTTONEAREST,
+        )
+    };
+    if monitor.is_null() || previous.monitor_key == Some(monitor as isize) {
+        return previous;
+    }
+
+    let mut result = TransitionDisplayPeriod {
+        monitor_key: Some(monitor as isize),
+        ..TransitionDisplayPeriod::default()
+    };
+    // MONITORINFOEXW starts with MONITORINFO. cbSize requests the device name too.
+    let mut info: MONITORINFOEXW = unsafe { std::mem::zeroed() };
+    info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+    if unsafe { GetMonitorInfoW(monitor, &mut info.monitorInfo) } == 0 {
+        return result;
+    }
+    let mut mode: DEVMODEW = unsafe { std::mem::zeroed() };
+    mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+    if unsafe { EnumDisplaySettingsW(info.szDevice.as_ptr(), ENUM_CURRENT_SETTINGS, &mut mode) }
+        != 0
+        && mode.dmFields & DM_DISPLAYFREQUENCY != 0
+        && mode.dmDisplayFrequency > 1
+    {
+        result.period = Duration::from_secs_f64(1.0 / f64::from(mode.dmDisplayFrequency));
+        result.source = "windows_current_display_mode";
+        result.refresh_hz = Some(mode.dmDisplayFrequency);
+    }
+    result
 }
 
 #[derive(Clone)]
@@ -282,6 +449,7 @@ struct DisplayedPageState {
     rendered: LoadedImage,
     texture: Option<TextureHandle>,
     texture_display_scale: f32,
+    prepared_texture: Option<PreparedTexture>,
 }
 
 #[derive(Clone)]
@@ -1132,7 +1300,10 @@ impl ViewerApp {
         }
         self.zoom = zoom;
         self.invalidate_preload();
-        self.request_resize_current()?;
+        // FastGpu changes only the GPU draw size. The source texture is unchanged.
+        if matches!(self.render_options.scale_mode, RenderScaleMode::PreciseCpu) {
+            self.request_resize_current()?;
+        }
         Ok(())
     }
 
@@ -1180,6 +1351,22 @@ impl ViewerApp {
             && !self.current_texture_is_default
     }
 
+    pub(super) fn cancel_image_transition(&mut self, reason: &'static str) {
+        let Some(state) = self.active_transition.take() else {
+            return;
+        };
+        self.log_bench_state(
+            "viewer.transition.cancelled",
+            serde_json::json!({
+                "effect": format!("{:?}", state.effect),
+                "reason": reason,
+                "elapsed_ms": state.started_at.map(|started| started.elapsed().as_secs_f64() * 1000.0),
+                "duration_ms": state.duration.as_millis(),
+                "draw_count": state.frames.draw_count,
+            }),
+        );
+    }
+
     fn prepare_image_transition(
         &mut self,
         switching_image: bool,
@@ -1187,7 +1374,7 @@ impl ViewerApp {
         direction: Option<ImageTransitionDirection>,
     ) {
         self.pending_transition_previous = None;
-        self.active_transition = None;
+        self.cancel_image_transition("new_image_request");
         if !switching_image || branch_changed || !self.transition_effect_enabled() {
             return;
         }
@@ -1218,9 +1405,9 @@ impl ViewerApp {
             started_at: None,
             duration: Duration::from_millis(self.options.transition.duration_ms.max(1)),
             previous,
-            draw_count: 0,
-            max_draw_gap: Duration::ZERO,
-            last_draw_at: None,
+            frames: TransitionFrameRecorder::default(),
+            display_period: TransitionDisplayPeriod::default(),
+            cache_record_ms: None,
         });
     }
 
@@ -1237,22 +1424,50 @@ impl ViewerApp {
             );
         };
         let now = Instant::now();
-        if let Some(last_draw_at) = state.last_draw_at {
-            state.max_draw_gap = state.max_draw_gap.max(now.duration_since(last_draw_at));
-        }
-        state.last_draw_at = Some(now);
-        state.draw_count += 1;
+        state.frames.record(
+            ui.ctx().cumulative_frame_nr(),
+            now,
+            state.display_period.period,
+        );
         let progress = transition_progress(&mut state.started_at, now, state.duration);
-        let state = state.clone();
         if progress >= 1.0 {
-            self.active_transition = None;
+            let state = self.active_transition.take().expect("transition is active");
+            let stats = transition_frame_stats(&state.frames.samples);
+            let gap_ms = |gap: Option<Duration>| gap.map(|gap| gap.as_secs_f64() * 1000.0);
+            let sampled_all_gaps =
+                state.frames.total_gap_count == state.frames.samples.len() as u64;
+            let (max_gap, gaps_over_two_frame_periods) = if sampled_all_gaps {
+                (stats.max_gap, stats.gaps_over_two_frame_periods as u64)
+            } else {
+                (
+                    state.frames.max_gap,
+                    state.frames.gaps_over_two_frame_periods,
+                )
+            };
             self.log_bench_state(
                 "viewer.transition.completed",
                 serde_json::json!({
+                    "effect": format!("{:?}", state.effect),
                     "duration_ms": state.duration.as_millis(),
+                    "actual_elapsed_ms": state.started_at.map(|started| now.duration_since(started).as_secs_f64() * 1000.0),
                     "prepare_to_first_draw_ms": state.started_at.map(|started| started.duration_since(state.prepared_at).as_secs_f64() * 1000.0),
-                    "draw_count": state.draw_count,
-                    "max_draw_gap_ms": state.max_draw_gap.as_secs_f64() * 1000.0,
+                    "cache_record_ms": state.cache_record_ms,
+                    "draw_count": state.frames.draw_count,
+                    "frame_gap_sample_count": state.frames.samples.len(),
+                    "frame_gap_total_count": state.frames.total_gap_count,
+                    "frame_gap_p50_ms": gap_ms(stats.p50_gap),
+                    "frame_gap_p95_ms": gap_ms(stats.p95_gap),
+                    "frame_gap_p99_ms": gap_ms(stats.p99_gap),
+                    "max_draw_gap_ms": gap_ms(max_gap).unwrap_or(0.0),
+                    "gaps_over_two_frame_periods": gaps_over_two_frame_periods,
+                    "frame_period_ms": state.display_period.period.as_secs_f64() * 1000.0,
+                    "frame_period_source": state.display_period.source,
+                    "refresh_hz": state.display_period.refresh_hz,
+                    "percentile_method": if sampled_all_gaps {
+                        "nearest_rank"
+                    } else {
+                        "nearest_rank_reservoir"
+                    },
                 }),
             );
             self.schedule_preload();
@@ -1395,6 +1610,51 @@ impl ViewerApp {
         self.current_texture_is_default = false;
     }
 
+    fn texture_from_prepared(
+        &self,
+        texture_name: &str,
+        mut prepared: PreparedTexture,
+    ) -> Option<(TextureHandle, f32)> {
+        if prepared.max_texture_side != self.max_texture_side
+            || prepared.method != self.render_options.zoom_method
+        {
+            return None;
+        }
+        if self.options.grayscale {
+            Self::apply_grayscale_to_color_image(std::sync::Arc::make_mut(&mut prepared.image));
+        }
+        let started = Instant::now();
+        let texture = self.egui_ctx.load_texture(
+            texture_name,
+            egui::ImageData::Color(prepared.image),
+            self.texture_options(),
+        );
+        self.log_bench_state(
+            "viewer.texture.prepared",
+            serde_json::json!({
+                "worker_downscale_ms": prepared.downscale_ms,
+                "worker_color_conversion_ms": prepared.color_conversion_ms,
+                "ui_registration_ms": started.elapsed().as_secs_f64() * 1000.0,
+            }),
+        );
+        Some((texture, prepared.display_scale))
+    }
+
+    fn register_prepared_texture(&mut self, prepared: PreparedTexture) -> bool {
+        if self.current_frame != 0 {
+            return false;
+        }
+        let texture_name = self.texture_name_for_path(Some(&self.current_path));
+        let Some((texture, display_scale)) = self.texture_from_prepared(&texture_name, prepared)
+        else {
+            return false;
+        };
+        self.current_texture = texture;
+        self.texture_display_scale = display_scale;
+        self.current_texture_is_default = false;
+        true
+    }
+
     fn show_loading_texture(&mut self, reset_branch_cache: bool) {
         if !self.current_texture_is_default {
             self.prev_texture = Some(self.current_texture.clone());
@@ -1402,7 +1662,7 @@ impl ViewerApp {
         if reset_branch_cache {
             self.prev_texture = None;
         }
-        self.active_transition = None;
+        self.cancel_image_transition("loading_placeholder");
         self.current_texture = self.default_texture.clone();
         self.current_texture_is_default = true;
         self.texture_display_scale = 1.0;
@@ -1446,7 +1706,7 @@ impl ViewerApp {
         self.last_frame_at = Instant::now();
         self.texture_display_scale = 1.0;
         self.pending_transition_previous = None;
-        self.active_transition = None;
+        self.cancel_image_transition("clear_display");
         self.current_texture = self.default_texture.clone();
         self.current_texture_is_default = true;
     }
@@ -1949,6 +2209,7 @@ impl ViewerApp {
                 zoom: self.zoom,
                 method: self.render_options.zoom_method,
                 scale_mode: self.render_options.scale_mode,
+                max_texture_side: self.max_texture_side,
             })
             .map_err(worker_send_error)?;
         Ok(())
@@ -1967,6 +2228,7 @@ impl ViewerApp {
                 zoom: self.zoom,
                 method: self.render_options.zoom_method,
                 scale_mode: self.render_options.scale_mode,
+                max_texture_side: self.max_texture_side,
             })
             .map_err(worker_send_error)?;
         Ok(())
@@ -2235,6 +2497,7 @@ impl ViewerApp {
         self.navigator_ready
             && self.active_request.is_none()
             && self.active_fs_request_id.is_none()
+            && self.active_transition.is_none()
             && self.companion_active_request.is_none()
             && self.active_preload_request_id.is_none()
             && self.filer.pending_request_id.is_none()
@@ -2679,6 +2942,7 @@ impl ViewerApp {
                 zoom: load_zoom,
                 method: self.render_options.zoom_method,
                 scale_mode: self.render_options.scale_mode,
+                max_texture_side: self.max_texture_side,
             })
             .map_err(worker_send_error)?;
         self.log_bench_state(
@@ -2727,6 +2991,7 @@ impl ViewerApp {
                 zoom: self.zoom,
                 method: self.render_options.zoom_method,
                 scale_mode: self.render_options.scale_mode,
+                max_texture_side: self.max_texture_side,
             })
             .map_err(worker_send_error)?;
         if let Some(path) = self.companion_navigation_path.clone() {
@@ -2763,9 +3028,17 @@ impl eframe::App for ViewerApp {
         self.file_action_dialog_ui(ctx);
         self.left_click_menu_ui(ctx);
         self.run_bench_automation(ctx);
+        if !self.transition_effect_enabled() {
+            self.cancel_image_transition("effect_disabled");
+        }
         self.filer_ui(ctx);
         self.subfiler_ui(ctx);
         self.status_panel_ui(ctx);
+        #[cfg(windows)]
+        if let Some(transition) = self.active_transition.as_mut() {
+            transition.display_period =
+                transition_display_period_for_window(_frame, transition.display_period);
+        }
 
         let zoom_delta = if self.input_options.touch.pinch_zoom {
             ctx.input(|i| i.zoom_delta())

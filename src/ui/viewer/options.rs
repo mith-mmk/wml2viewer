@@ -42,7 +42,7 @@ impl Default for TransitionOptions {
     fn default() -> Self {
         Self {
             effect: TransitionEffect::None,
-            duration_ms: 300,
+            duration_ms: 400,
         }
     }
 }

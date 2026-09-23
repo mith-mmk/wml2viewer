@@ -5,16 +5,19 @@ impl ViewerApp {
     pub(super) fn color_image_from_canvas(&self, canvas: &Canvas) -> egui::ColorImage {
         let mut image = canvas_to_color_image(canvas);
         if self.options.grayscale {
-            for pixel in &mut image.pixels {
-                let luma = (0.299 * pixel.r() as f32
-                    + 0.587 * pixel.g() as f32
-                    + 0.114 * pixel.b() as f32)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-                *pixel = egui::Color32::from_rgba_unmultiplied(luma, luma, luma, pixel.a());
-            }
+            Self::apply_grayscale_to_color_image(&mut image);
         }
         image
+    }
+
+    pub(super) fn apply_grayscale_to_color_image(image: &mut egui::ColorImage) {
+        for pixel in &mut image.pixels {
+            let luma =
+                (0.299 * pixel.r() as f32 + 0.587 * pixel.g() as f32 + 0.114 * pixel.b() as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            *pixel = egui::Color32::from_rgba_unmultiplied(luma, luma, luma, pixel.a());
+        }
     }
 
     pub(crate) fn open_save_dialog(&mut self) {

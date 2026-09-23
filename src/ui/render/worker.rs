@@ -1,8 +1,10 @@
 use crate::drawers::affine::InterpolationAlgorithm;
+use crate::drawers::canvas::Canvas;
 use crate::drawers::image::{
     LoadedImage, load_canvas_from_bytes_with_hint, load_canvas_from_file, resize_loaded_image,
 };
 use crate::filesystem::{load_virtual_image_bytes, resolve_start_path};
+use crate::ui::render::{canvas_to_color_image, downscale_for_texture_limit};
 use crate::ui::viewer::options::RenderScaleMode;
 use std::error::Error;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -21,6 +23,7 @@ pub(crate) enum RenderCommand {
         zoom: f32,
         method: InterpolationAlgorithm,
         scale_mode: RenderScaleMode,
+        max_texture_side: usize,
     },
     ResizeCurrent {
         request_id: u64,
@@ -28,6 +31,7 @@ pub(crate) enum RenderCommand {
         zoom: f32,
         method: InterpolationAlgorithm,
         scale_mode: RenderScaleMode,
+        max_texture_side: usize,
     },
     Shutdown,
 }
@@ -40,6 +44,7 @@ pub(crate) enum RenderResult {
         rendered: LoadedImage,
         companion: Option<LoadedRenderPage>,
         metrics: RenderLoadMetrics,
+        prepared_texture: Option<PreparedTexture>,
     },
     Failed {
         request_id: u64,
@@ -66,6 +71,36 @@ pub(crate) struct LoadedRenderPage {
     pub(crate) source: LoadedImage,
     pub(crate) rendered: LoadedImage,
     pub(crate) metrics: RenderLoadMetrics,
+    pub(crate) prepared_texture: Option<PreparedTexture>,
+}
+
+#[derive(Clone)]
+pub(crate) struct PreparedTexture {
+    pub(crate) image: Arc<eframe::egui::ColorImage>,
+    pub(crate) display_scale: f32,
+    pub(crate) max_texture_side: usize,
+    pub(crate) method: InterpolationAlgorithm,
+    pub(crate) downscale_ms: f64,
+    pub(crate) color_conversion_ms: f64,
+}
+
+fn prepare_texture(
+    canvas: &Canvas,
+    max_texture_side: usize,
+    method: InterpolationAlgorithm,
+) -> PreparedTexture {
+    let started = Instant::now();
+    let (canvas, display_scale) = downscale_for_texture_limit(canvas, max_texture_side, method);
+    let downscale_done = Instant::now();
+    let image = canvas_to_color_image(&canvas);
+    PreparedTexture {
+        image: Arc::new(image),
+        display_scale,
+        max_texture_side,
+        method,
+        downscale_ms: downscale_done.duration_since(started).as_secs_f64() * 1000.0,
+        color_conversion_ms: downscale_done.elapsed().as_secs_f64() * 1000.0,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,6 +130,7 @@ pub(crate) fn spawn_render_worker(
                     zoom,
                     method,
                     scale_mode,
+                    max_texture_side,
                 } => {
                     latest_load_request_id.store(request_id, Ordering::Release);
                     let result_tx = result_tx.clone();
@@ -109,6 +145,7 @@ pub(crate) fn spawn_render_worker(
                                     zoom,
                                     method,
                                     scale_mode,
+                                    max_texture_side,
                                 )? else {
                                     return Ok(None);
                                 };
@@ -121,6 +158,7 @@ pub(crate) fn spawn_render_worker(
                                         zoom,
                                         method,
                                         scale_mode,
+                                        max_texture_side,
                                     )
                                     .ok()
                                     .flatten()
@@ -139,6 +177,9 @@ pub(crate) fn spawn_render_worker(
 
                         match result {
                             Ok(Some((primary, companion))) => {
+                                if latest_load_request_id.load(Ordering::Acquire) != request_id {
+                                    return;
+                                }
                                 let _ = result_tx.send(RenderResult::Loaded {
                                     request_id,
                                     path: Some(primary.path.clone()),
@@ -146,6 +187,7 @@ pub(crate) fn spawn_render_worker(
                                     rendered: primary.rendered,
                                     companion,
                                     metrics: primary.metrics,
+                                    prepared_texture: primary.prepared_texture,
                                 });
                             }
                             Ok(None) => {}
@@ -166,6 +208,7 @@ pub(crate) fn spawn_render_worker(
                     zoom,
                     method,
                     scale_mode,
+                    max_texture_side,
                 } => {
                     let result_tx = result_tx.clone();
                     thread::spawn(move || {
@@ -182,6 +225,11 @@ pub(crate) fn spawn_render_worker(
                             )))
                         }) {
                             Ok(rendered) => {
+                                let prepared_texture = Some(prepare_texture(
+                                    rendered.frame_canvas(0),
+                                    max_texture_side,
+                                    method,
+                                ));
                                 let _ = result_tx.send(RenderResult::Loaded {
                                     request_id,
                                     path: None,
@@ -189,6 +237,7 @@ pub(crate) fn spawn_render_worker(
                                     rendered,
                                     companion: None,
                                     metrics: RenderLoadMetrics::default(),
+                                    prepared_texture,
                                 });
                             }
                             Err(err) => {
@@ -217,6 +266,7 @@ fn load_render_page(
     zoom: f32,
     method: InterpolationAlgorithm,
     scale_mode: RenderScaleMode,
+    max_texture_side: usize,
 ) -> Result<Option<LoadedRenderPage>, Box<dyn Error>> {
     let mut metrics = RenderLoadMetrics::default();
     if latest_load_request_id.load(Ordering::Acquire) != request_id {
@@ -257,11 +307,24 @@ fn load_render_page(
     };
     metrics.resize_ms = resize_started.elapsed().as_millis();
 
+    if latest_load_request_id.load(Ordering::Acquire) != request_id {
+        return Ok(None);
+    }
+    let prepared_texture = Some(prepare_texture(
+        rendered.frame_canvas(0),
+        max_texture_side,
+        method,
+    ));
+    if latest_load_request_id.load(Ordering::Acquire) != request_id {
+        return Ok(None);
+    }
+
     Ok(Some(LoadedRenderPage {
         path: load_path,
         source,
         rendered,
         metrics,
+        prepared_texture,
     }))
 }
 

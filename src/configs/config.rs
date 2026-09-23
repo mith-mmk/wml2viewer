@@ -76,7 +76,7 @@ impl Default for TransitionConfigFile {
     fn default() -> Self {
         Self {
             effect: TransitionEffectConfigFile::None,
-            duration_ms: 300,
+            duration_ms: 400,
         }
     }
 }
@@ -1225,14 +1225,25 @@ mod tests {
     }
 
     #[test]
-    fn transition_default_is_300_ms_and_saved_180_ms_is_preserved() {
-        assert_eq!(AppConfig::default().viewer.transition.duration_ms, 300);
-        assert_eq!(TransitionConfigFile::default().duration_ms, 300);
-        let saved = TransitionConfigFile {
-            effect: TransitionEffect::Fade.into(),
-            duration_ms: 180,
-        };
-        assert_eq!(TransitionOptions::from(saved).duration_ms, 180);
+    fn transition_default_is_400_ms_and_saved_180_ms_is_preserved() {
+        assert_eq!(AppConfig::default().viewer.transition.duration_ms, 400);
+        assert_eq!(TransitionOptions::default().duration_ms, 400);
+        assert_eq!(TransitionConfigFile::default().duration_ms, 400);
+        let saved: ConfigFile =
+            toml::from_str("[viewer.transition]\neffect = 'fade'\nduration_ms = 180\n").unwrap();
+        let saved = AppConfig::from(saved);
+        assert_eq!(saved.viewer.transition.effect, TransitionEffect::Fade);
+        assert_eq!(saved.viewer.transition.duration_ms, 180);
+
+        let missing_duration: ConfigFile =
+            toml::from_str("[viewer.transition]\neffect = 'fade'\n").unwrap();
+        assert_eq!(
+            AppConfig::from(missing_duration)
+                .viewer
+                .transition
+                .duration_ms,
+            400
+        );
     }
 }
 
