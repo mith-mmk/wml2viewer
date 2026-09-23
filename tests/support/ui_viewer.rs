@@ -148,10 +148,54 @@ fn should_prioritize_companion_preload_until_visible_companion_is_ready() {
 
 #[test]
 fn transition_progress_clamps_to_complete() {
-    let started = Instant::now() - Duration::from_millis(250);
-    let progress = transition_progress(started, Duration::from_millis(100));
+    let now = Instant::now();
+    let mut started = Some(now - Duration::from_millis(250));
+    let progress = transition_progress(&mut started, now, Duration::from_millis(100));
 
     assert_eq!(progress, 1.0);
+}
+
+#[test]
+fn transition_clock_starts_on_first_draw() {
+    let now = Instant::now();
+    let mut started = None;
+    assert_eq!(
+        transition_progress(&mut started, now, Duration::from_millis(300)),
+        0.0
+    );
+    assert_eq!(started, Some(now));
+    let halfway = transition_progress(
+        &mut started,
+        now + Duration::from_millis(150),
+        Duration::from_millis(300),
+    );
+    assert!((halfway - 0.5).abs() < 0.001);
+    assert_eq!(
+        transition_progress(
+            &mut started,
+            now + Duration::from_millis(300),
+            Duration::from_millis(300),
+        ),
+        1.0
+    );
+}
+
+#[test]
+fn spiral_reveal_is_continuous_at_turn_boundaries() {
+    let full = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0));
+    for boundary in [1.0 / 3.0, 2.0 / 3.0] {
+        let before = spiral_reveal_rect(full, boundary - 0.0001);
+        let after = spiral_reveal_rect(full, boundary + 0.0001);
+        assert!((before.width() - after.width()).abs() < 2.0);
+        assert!((before.height() - after.height()).abs() < 2.0);
+    }
+    let mut previous = spiral_reveal_rect(full, 0.0);
+    for step in 1..=100 {
+        let current = spiral_reveal_rect(full, step as f32 / 100.0);
+        assert!(current.width() >= previous.width());
+        assert!(current.height() >= previous.height());
+        previous = current;
+    }
 }
 
 #[test]

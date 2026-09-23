@@ -76,7 +76,7 @@ impl Default for TransitionConfigFile {
     fn default() -> Self {
         Self {
             effect: TransitionEffectConfigFile::None,
-            duration_ms: 180,
+            duration_ms: 300,
         }
     }
 }
@@ -1222,6 +1222,17 @@ mod tests {
         );
         assert_eq!(round_trip.input.touch.long_press, None);
         assert!(!round_trip.input.touch.pinch_zoom);
+    }
+
+    #[test]
+    fn transition_default_is_300_ms_and_saved_180_ms_is_preserved() {
+        assert_eq!(AppConfig::default().viewer.transition.duration_ms, 300);
+        assert_eq!(TransitionConfigFile::default().duration_ms, 300);
+        let saved = TransitionConfigFile {
+            effect: TransitionEffect::Fade.into(),
+            duration_ms: 180,
+        };
+        assert_eq!(TransitionOptions::from(saved).duration_ms, 180);
     }
 }
 

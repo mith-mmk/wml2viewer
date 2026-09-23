@@ -265,9 +265,13 @@ struct TransitionPreviousState {
 #[derive(Clone)]
 struct ImageTransitionState {
     effect: TransitionEffect,
-    started_at: Instant,
+    prepared_at: Instant,
+    started_at: Option<Instant>,
     duration: Duration,
     previous: TransitionPreviousState,
+    draw_count: u32,
+    max_draw_gap: Duration,
+    last_draw_at: Option<Instant>,
 }
 
 #[derive(Clone)]
@@ -1206,9 +1210,13 @@ impl ViewerApp {
             transition_effect_for_direction(self.options.transition.effect, previous.direction);
         self.active_transition = Some(ImageTransitionState {
             effect,
-            started_at: Instant::now(),
+            prepared_at: Instant::now(),
+            started_at: None,
             duration: Duration::from_millis(self.options.transition.duration_ms.max(1)),
             previous,
+            draw_count: 0,
+            max_draw_gap: Duration::ZERO,
+            last_draw_at: None,
         });
     }
 
@@ -1217,16 +1225,40 @@ impl ViewerApp {
         ui: &mut egui::Ui,
         draw_size: egui::Vec2,
     ) -> egui::Response {
-        let Some(state) = self.active_transition.clone() else {
+        let Some(state) = self.active_transition.as_mut() else {
             return ui.add(
                 egui::Image::from_texture(&self.current_texture)
                     .fit_to_exact_size(draw_size)
                     .sense(egui::Sense::click_and_drag()),
             );
         };
-        let progress = transition_progress(state.started_at, state.duration);
+        let now = Instant::now();
+        if let Some(last_draw_at) = state.last_draw_at {
+            state.max_draw_gap = state.max_draw_gap.max(now.duration_since(last_draw_at));
+        }
+        state.last_draw_at = Some(now);
+        state.draw_count += 1;
+        let progress = transition_progress(&mut state.started_at, now, state.duration);
+        let state = state.clone();
         if progress >= 1.0 {
             self.active_transition = None;
+            self.log_bench_state(
+                "viewer.transition.completed",
+                serde_json::json!({
+                    "duration_ms": state.duration.as_millis(),
+                    "prepare_to_first_draw_ms": state.started_at.map(|started| started.duration_since(state.prepared_at).as_secs_f64() * 1000.0),
+                    "draw_count": state.draw_count,
+                    "max_draw_gap_ms": state.max_draw_gap.as_secs_f64() * 1000.0,
+                }),
+            );
+            self.schedule_preload();
+            if self
+                .preload_cache
+                .iter()
+                .any(|entry| entry.display.texture.is_none())
+            {
+                ui.ctx().request_repaint();
+            }
             return ui.add(
                 egui::Image::from_texture(&self.current_texture)
                     .fit_to_exact_size(draw_size)
@@ -1302,7 +1334,7 @@ impl ViewerApp {
                 }
             }
         }
-        ui.ctx().request_repaint_after(Duration::from_millis(16));
+        ui.ctx().request_repaint();
         response
     }
 
@@ -1326,15 +1358,27 @@ impl ViewerApp {
         texture_name: &str,
         canvas: &Canvas,
     ) -> (TextureHandle, f32) {
+        let started_at = Instant::now();
         let (canvas, display_scale) = downscale_for_texture_limit(
             canvas,
             self.max_texture_side,
             self.render_options.zoom_method,
         );
+        let downscale_done_at = Instant::now();
         let image = self.color_image_from_canvas(&canvas);
+        let conversion_done_at = Instant::now();
         let texture =
             self.egui_ctx
                 .load_texture(texture_name.to_owned(), image, self.texture_options());
+        self.log_bench_state(
+            "viewer.texture.build",
+            serde_json::json!({
+                "downscale_ms": downscale_done_at.duration_since(started_at).as_secs_f64() * 1000.0,
+                "color_conversion_ms": conversion_done_at.duration_since(downscale_done_at).as_secs_f64() * 1000.0,
+                "texture_registration_ms": conversion_done_at.elapsed().as_secs_f64() * 1000.0,
+                "dimensions": [canvas.width(), canvas.height()],
+            }),
+        );
         (texture, display_scale)
     }
 
@@ -2644,6 +2688,7 @@ impl ViewerApp {
     }
 
     pub(crate) fn request_resize_current(&mut self) -> Result<(), Box<dyn Error>> {
+        self.invalidate_preload();
         if matches!(self.active_request, Some(ActiveRenderRequest::Load(_))) {
             self.pending_resize_after_load = true;
             return Ok(());
@@ -2666,7 +2711,6 @@ impl ViewerApp {
             }
             return Ok(());
         }
-        self.invalidate_preload();
         let request_id = self.alloc_request_id();
         self.active_request = Some(ActiveRenderRequest::Resize(request_id));
         self.active_request_started_at = Some(Instant::now());
@@ -3177,11 +3221,12 @@ fn folder_refresh_signature(path: &Path) -> Option<u64> {
     Some(hasher.finish())
 }
 
-fn transition_progress(started_at: Instant, duration: Duration) -> f32 {
+fn transition_progress(started_at: &mut Option<Instant>, now: Instant, duration: Duration) -> f32 {
+    let started_at = started_at.get_or_insert(now);
     if duration.is_zero() {
         return 1.0;
     }
-    (started_at.elapsed().as_secs_f32() / duration.as_secs_f32()).clamp(0.0, 1.0)
+    (now.duration_since(*started_at).as_secs_f32() / duration.as_secs_f32()).clamp(0.0, 1.0)
 }
 
 fn centered_rect(container: egui::Rect, size: egui::Vec2) -> egui::Rect {
@@ -3263,10 +3308,10 @@ fn transition_effect_for_direction(
 
 fn spiral_reveal_rect(rect: egui::Rect, progress: f32) -> egui::Rect {
     let eased = (progress.clamp(0.0, 1.0) * std::f32::consts::FRAC_PI_2).sin();
-    let turns = 3.0;
-    let phase = (progress * turns).fract();
-    let width_ratio = (eased + (phase * 0.12)).clamp(0.0, 1.0);
-    let height_ratio = (eased + ((1.0 - phase) * 0.12)).clamp(0.0, 1.0);
+    let phase = progress.clamp(0.0, 1.0) * std::f32::consts::TAU * 3.0;
+    let ripple = (phase.sin() * 0.06) * (1.0 - eased);
+    let width_ratio = (eased + ripple).clamp(0.0, 1.0);
+    let height_ratio = (eased - ripple).clamp(0.0, 1.0);
     egui::Rect::from_center_size(
         rect.center(),
         vec2(

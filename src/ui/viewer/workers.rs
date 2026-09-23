@@ -285,6 +285,7 @@ impl ViewerApp {
         source: LoadedImage,
         rendered: LoadedImage,
         companion: Option<LoadedRenderPage>,
+        cached_texture: Option<(TextureHandle, f32)>,
     ) {
         self.log_bench_state(
             "viewer.apply_loaded_result.begin",
@@ -401,7 +402,21 @@ impl ViewerApp {
         if defer_precise_display {
             let _ = self.request_resize_current();
         } else {
-            self.rebuild_current_texture();
+            if let Some((texture, display_scale)) =
+                cached_texture.filter(|_| self.current_frame == 0)
+            {
+                self.current_texture = texture;
+                self.texture_display_scale = display_scale;
+                self.current_texture_is_default = false;
+                self.log_bench_state("viewer.display.texture_reused", serde_json::json!({}));
+            } else {
+                let texture_start = Instant::now();
+                self.rebuild_current_texture();
+                self.log_bench_state(
+                    "viewer.display.texture_built",
+                    serde_json::json!({"elapsed_ms": texture_start.elapsed().as_secs_f64() * 1000.0}),
+                );
+            }
             self.start_image_transition();
             if self.active_fs_request_id.is_none() {
                 self.overlay.clear_loading_message();
@@ -410,12 +425,14 @@ impl ViewerApp {
         let cache_navigation_path = self.current_navigation_path.clone();
         let cache_source = self.source.clone();
         let cache_rendered = self.rendered.clone();
-        self.remember_loaded_page_in_cache(
-            &cache_navigation_path,
-            loaded_path.as_deref(),
-            &cache_source,
-            &cache_rendered,
-        );
+        if !defer_precise_display {
+            self.remember_loaded_page_in_cache(
+                &cache_navigation_path,
+                loaded_path.as_deref(),
+                &cache_source,
+                &cache_rendered,
+            );
+        }
         if !self.navigator_ready && self.active_fs_request_id.is_none() {
             if self.deferred_filesystem_init_path.is_some() {
                 self.deferred_filesystem_init_path = Some(
@@ -426,7 +443,9 @@ impl ViewerApp {
                 self.defer_initial_filesystem_sync();
             }
         }
-        self.schedule_preload();
+        if self.active_transition.is_none() {
+            self.schedule_preload();
+        }
         if !self.bench_initial_load_logged {
             self.bench_initial_load_logged = true;
             self.log_bench_state(
@@ -553,11 +572,10 @@ impl ViewerApp {
                 "load_path": entry.load_path.as_ref().map(|path| path.display().to_string()),
             }),
         );
-        if let Some(texture) = entry.display.texture {
-            self.current_texture = texture;
-            self.current_texture_is_default = false;
-            self.texture_display_scale = entry.display.texture_display_scale;
-        }
+        let cached_texture = entry
+            .display
+            .texture
+            .map(|texture| (texture, entry.display.texture_display_scale));
         self.pending_navigation_path = Some(path.to_path_buf());
         self.overlay.clear_loading_message();
         self.apply_loaded_result(
@@ -565,6 +583,7 @@ impl ViewerApp {
             entry.display.source,
             entry.display.rendered,
             None,
+            cached_texture,
         );
         true
     }
@@ -661,7 +680,7 @@ impl ViewerApp {
                             "metrics": Self::bench_metrics_payload(&metrics),
                         }),
                     );
-                    self.apply_loaded_result(path, source, rendered, companion);
+                    self.apply_loaded_result(path, source, rendered, companion, None);
                 }
                 Ok(RenderResult::Failed {
                     request_id,
@@ -786,17 +805,27 @@ impl ViewerApp {
                     let Some(navigation_path) = self.pending_preload_navigation_path.take() else {
                         continue;
                     };
-                    let texture_name = self.texture_name_for_path(path.as_deref());
-                    let (texture, display_scale) =
-                        self.build_texture_from_canvas(&texture_name, rendered.frame_canvas(0));
+                    let cached_texture = if self.active_transition.is_none() {
+                        let texture_name = self.texture_name_for_path(path.as_deref());
+                        let start = Instant::now();
+                        let texture =
+                            self.build_texture_from_canvas(&texture_name, rendered.frame_canvas(0));
+                        self.log_bench_state(
+                            "viewer.preload.texture_ready",
+                            serde_json::json!({"elapsed_ms": start.elapsed().as_secs_f64() * 1000.0}),
+                        );
+                        Some(texture)
+                    } else {
+                        None
+                    };
                     self.remember_preloaded_entry(PreloadedEntry {
                         navigation_path,
                         load_path: path,
                         display: DisplayedPageState {
                             source,
                             rendered,
-                            texture: Some(texture),
-                            texture_display_scale: display_scale,
+                            texture: cached_texture.as_ref().map(|(texture, _)| texture.clone()),
+                            texture_display_scale: cached_texture.map_or(1.0, |(_, scale)| scale),
                         },
                     });
                 }
@@ -828,6 +857,40 @@ impl ViewerApp {
                     break;
                 }
             }
+        }
+        self.materialize_deferred_preload_texture();
+    }
+
+    fn materialize_deferred_preload_texture(&mut self) {
+        if self.active_transition.is_some() || self.active_request.is_some() {
+            return;
+        }
+        let Some(index) = self
+            .preload_cache
+            .iter()
+            .position(|entry| entry.display.texture.is_none())
+        else {
+            return;
+        };
+        let entry = &self.preload_cache[index];
+        let texture_name = self.texture_name_for_path(entry.load_path.as_deref());
+        let start = Instant::now();
+        let (texture, scale) =
+            self.build_texture_from_canvas(&texture_name, entry.display.rendered.frame_canvas(0));
+        self.log_bench_state(
+            "viewer.preload.deferred_texture_ready",
+            serde_json::json!({"elapsed_ms": start.elapsed().as_secs_f64() * 1000.0}),
+        );
+        if let Some(entry) = self.preload_cache.get_mut(index) {
+            entry.display.texture = Some(texture);
+            entry.display.texture_display_scale = scale;
+        }
+        if self
+            .preload_cache
+            .iter()
+            .any(|entry| entry.display.texture.is_none())
+        {
+            self.egui_ctx.request_repaint();
         }
     }
 
