@@ -16,6 +16,7 @@ use crate::ui::input::dispatch::{
     is_pointer_binding_name, key_event_binding_name, pointer_button_binding_name,
 };
 use crate::ui::menu::fileviewer::thumbnail::set_thumbnail_workaround;
+use crate::ui::menu::style::{CONTROL_HEIGHT, category_button};
 use crate::ui::render::interpolation_label;
 use crate::ui::viewer::options::{
     BackgroundStyle, MangaSeparatorStyle, RenderScaleMode, WindowUiTheme, ZoomOption,
@@ -80,49 +81,83 @@ impl ViewerApp {
             .min_width(settings_min_width)
             .min_height(SETTINGS_MIN_HEIGHT.min(content_rect.height().max(1.0)))
             .show(ctx, |ui| {
-                self.settings_tab_strip(ui);
-                if self.settings_tab != frame_tab {
-                    ui.ctx().request_repaint();
-                }
-                ui.separator();
-
+                ui.spacing_mut().interact_size.y = CONTROL_HEIGHT;
                 let body_height = (ui.available_height() - SETTINGS_FOOTER_HEIGHT).max(160.0);
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .max_height(body_height)
-                    .show(ui, |ui| match frame_tab {
-                        SettingsTab::Viewer => self.settings_viewer_tab(ui, &mut draft_state),
-                        SettingsTab::Input => self.settings_input_tab(ui, &mut draft_state),
-                        SettingsTab::Plugins => self.settings_plugins_tab(ui, &mut draft_state),
-                        SettingsTab::Resources => self.settings_resources_tab(ui, &mut draft_state),
-                        SettingsTab::Render => self.settings_render_tab(ui, &mut draft_state),
-                        SettingsTab::Window => self.settings_window_tab(ui, &mut draft_state),
-                        SettingsTab::Navigation => {
-                            self.settings_navigation_tab(ui, &mut draft_state)
-                        }
-                        SettingsTab::System => self.settings_system_tab(ui),
-                    });
+                ui.horizontal(|ui| {
+                    let sidebar_width = if ui.available_width() < 620.0 {
+                        120.0
+                    } else {
+                        168.0
+                    };
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(sidebar_width, body_height),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            egui::ScrollArea::vertical()
+                                .id_salt("settings_categories")
+                                .max_height(body_height)
+                                .show(ui, |ui| self.settings_category_list(ui, sidebar_width));
+                        },
+                    );
+                    ui.separator();
+                    egui::ScrollArea::both()
+                        .id_salt("settings_form")
+                        .auto_shrink([false, false])
+                        .max_height(body_height)
+                        .show(ui, |ui| match self.settings_tab {
+                            SettingsTab::Viewer => self.settings_viewer_tab(ui, &mut draft_state),
+                            SettingsTab::Input => self.settings_input_tab(ui, &mut draft_state),
+                            SettingsTab::Plugins => self.settings_plugins_tab(ui, &mut draft_state),
+                            SettingsTab::Resources => {
+                                self.settings_resources_tab(ui, &mut draft_state)
+                            }
+                            SettingsTab::Render => self.settings_render_tab(ui, &mut draft_state),
+                            SettingsTab::Window => self.settings_window_tab(ui, &mut draft_state),
+                            SettingsTab::Navigation => {
+                                self.settings_navigation_tab(ui, &mut draft_state)
+                            }
+                            SettingsTab::System => self.settings_system_tab(ui),
+                        });
+                });
 
                 ui.separator();
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button(self.text(UiTextKey::Apply)).clicked() {
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_sized(
+                            [100.0, CONTROL_HEIGHT],
+                            egui::Button::new(self.text(UiTextKey::Apply)),
+                        )
+                        .clicked()
+                    {
                         apply_requested = true;
                     }
-                    if ui.button(self.text(UiTextKey::Cancel)).clicked() {
+                    if ui
+                        .add_sized(
+                            [100.0, CONTROL_HEIGHT],
+                            egui::Button::new(self.text(UiTextKey::Cancel)),
+                        )
+                        .clicked()
+                    {
                         cancel_requested = true;
                     }
-                    if ui.button(self.text(UiTextKey::Undo)).clicked() {
-                        draft_state = build_settings_draft(&self.current_config());
-                    }
-                    if ui.button(self.text(UiTextKey::Reset)).clicked() {
-                        draft_state = build_settings_draft(&AppConfig::default());
-                    }
-                    if ui.button(self.text(UiTextKey::ReloadCurrent)).clicked() {
-                        reload_requested = true;
-                    }
-                    if ui.button(self.text(UiTextKey::Help)).clicked() {
-                        self.open_help();
-                    }
+                    ui.menu_button(self.text(UiTextKey::Menu), |ui| {
+                        if ui.button(self.text(UiTextKey::Undo)).clicked() {
+                            draft_state = build_settings_draft(&self.current_config());
+                            ui.close();
+                        }
+                        if ui.button(self.text(UiTextKey::Reset)).clicked() {
+                            draft_state = build_settings_draft(&AppConfig::default());
+                            ui.close();
+                        }
+                        if ui.button(self.text(UiTextKey::ReloadCurrent)).clicked() {
+                            reload_requested = true;
+                            ui.close();
+                        }
+                        if ui.button(self.text(UiTextKey::Help)).clicked() {
+                            self.open_help();
+                            ui.close();
+                        }
+                    });
                 });
             });
 
@@ -149,7 +184,7 @@ impl ViewerApp {
         }
     }
 
-    fn settings_tab_strip(&mut self, ui: &mut egui::Ui) {
+    fn settings_category_list(&mut self, ui: &mut egui::Ui, width: f32) {
         let viewer_text = self.text(UiTextKey::Viewer);
         let input_text = self.text(UiTextKey::Input);
         let render_text = self.text(UiTextKey::Render);
@@ -158,24 +193,20 @@ impl ViewerApp {
         let plugins_text = self.text(UiTextKey::Plugins);
         let resources_text = self.text(UiTextKey::Resources);
         let system_text = self.text(UiTextKey::System);
-        ui.horizontal_wrapped(|ui| {
-            ui.selectable_value(&mut self.settings_tab, SettingsTab::Viewer, viewer_text);
-            ui.selectable_value(&mut self.settings_tab, SettingsTab::Input, input_text);
-            ui.selectable_value(&mut self.settings_tab, SettingsTab::Render, render_text);
-            ui.selectable_value(&mut self.settings_tab, SettingsTab::Window, window_text);
-            ui.selectable_value(
-                &mut self.settings_tab,
-                SettingsTab::Navigation,
-                navigation_text,
-            );
-            ui.selectable_value(&mut self.settings_tab, SettingsTab::Plugins, plugins_text);
-            ui.selectable_value(
-                &mut self.settings_tab,
-                SettingsTab::Resources,
-                resources_text,
-            );
-            ui.selectable_value(&mut self.settings_tab, SettingsTab::System, system_text);
-        });
+        for (tab, label) in [
+            (SettingsTab::Viewer, viewer_text),
+            (SettingsTab::Input, input_text),
+            (SettingsTab::Render, render_text),
+            (SettingsTab::Window, window_text),
+            (SettingsTab::Navigation, navigation_text),
+            (SettingsTab::Plugins, plugins_text),
+            (SettingsTab::Resources, resources_text),
+            (SettingsTab::System, system_text),
+        ] {
+            if category_button(ui, label, self.settings_tab == tab, width).clicked() {
+                self.settings_tab = tab;
+            }
+        }
     }
 
     fn settings_viewer_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
