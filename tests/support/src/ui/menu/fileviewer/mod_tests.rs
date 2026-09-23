@@ -1,5 +1,6 @@
 use super::{
-    ExifTagSets, ExifTagSpec, append_exif_tag_group, clamp_popup_position, filer_width_range,
+    CascadeMenuSection, CascadeMenuState, ExifTagSets, ExifTagSpec, append_exif_tag_group,
+    cascade_child_position, cascade_menu_size, clamp_popup_position, filer_width_range,
     format_exif_tag_line, locale_datetime_pattern, normalize_backslash_display,
     subfiler_height_range,
 };
@@ -73,6 +74,40 @@ fn popup_position_is_clamped_inside_tiny_initial_rect() {
     let pos = clamp_popup_position(egui::pos2(300.0, 220.0), content, egui::vec2(280.0, 220.0));
 
     assert_eq!(pos, egui::pos2(40.0, 20.0));
+}
+
+#[test]
+fn cascade_child_flips_left_and_clamps_to_viewport() {
+    let content = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(640.0, 360.0));
+    let parent = egui::Rect::from_min_size(egui::pos2(500.0, 320.0), cascade_menu_size(2));
+    let child = cascade_child_position(parent, content, 9);
+
+    assert!(child.x < parent.left());
+    assert!(child.y >= content.top());
+    assert!(child.y + cascade_menu_size(9).y <= content.bottom());
+}
+
+#[test]
+fn cascade_state_tracks_open_level_and_reset() {
+    let mut state = CascadeMenuState::default();
+    state.open_root(CascadeMenuSection::View);
+    state.toggle_zoom();
+
+    assert_eq!(
+        state.levels,
+        vec![CascadeMenuSection::View, CascadeMenuSection::Zoom]
+    );
+    assert_eq!(state.focused_item, 0);
+
+    state.move_focus(9, false);
+    assert_eq!(state.focused_item, 8);
+    state.move_focus(9, true);
+    assert_eq!(state.focused_item, 0);
+    assert!(state.close_current_level());
+    assert_eq!(state.levels, vec![CascadeMenuSection::View]);
+
+    state.close();
+    assert!(state.levels.is_empty());
 }
 
 #[test]

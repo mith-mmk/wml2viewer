@@ -1,77 +1,178 @@
+use crate::ui::theme::DesignTokens;
 use eframe::egui;
 
-pub(crate) const CONTROL_HEIGHT: f32 = 40.0;
+pub(crate) const CONTROL_HEIGHT: f32 = 32.0;
+pub(crate) const MENU_ROW_HEIGHT: f32 = 32.0;
+pub(crate) const MENU_FRAME_MARGIN: i8 = 4;
 
-pub(crate) fn refine_controls(ui: &mut egui::Ui) {
-    let visuals = &mut ui.style_mut().visuals;
-    let dark = visuals.dark_mode;
-    let (idle, hover, active, border, accent) = if dark {
-        (
-            egui::Color32::from_rgb(38, 43, 51),
-            egui::Color32::from_rgb(50, 59, 70),
-            egui::Color32::from_rgb(61, 73, 86),
-            egui::Color32::from_rgb(66, 76, 88),
-            egui::Color32::from_rgb(42, 112, 150),
-        )
-    } else {
-        (
-            egui::Color32::from_rgb(244, 247, 250),
-            egui::Color32::from_rgb(229, 239, 246),
-            egui::Color32::from_rgb(213, 230, 240),
-            egui::Color32::from_rgb(201, 215, 225),
-            egui::Color32::from_rgb(37, 111, 153),
-        )
-    };
-    for (widget, fill) in [
-        (&mut visuals.widgets.inactive, idle),
-        (&mut visuals.widgets.hovered, hover),
-        (&mut visuals.widgets.active, active),
-    ] {
-        widget.weak_bg_fill = fill;
-        widget.bg_stroke = egui::Stroke::new(1.0_f32, border);
-        widget.corner_radius = egui::CornerRadius::same(8);
-    }
-    visuals.selection.bg_fill = accent;
-    ui.spacing_mut().button_padding = egui::vec2(12.0, 7.0);
-    ui.spacing_mut().item_spacing = egui::vec2(7.0, 6.0);
+#[derive(Clone, Copy)]
+pub(crate) enum ButtonKind {
+    Primary,
+    Secondary,
+    Ghost,
+    Danger,
 }
 
-pub(crate) fn action_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    ui.add_sized(
-        [ui.available_width(), CONTROL_HEIGHT],
-        egui::Button::new(egui::RichText::new(label).size(14.0)).corner_radius(8),
+fn tokens(ui: &egui::Ui) -> DesignTokens {
+    DesignTokens::from_visuals(ui.visuals())
+}
+
+pub(crate) fn menu_frame(ctx: &egui::Context) -> egui::Frame {
+    let tokens = DesignTokens::from_visuals(&ctx.style().visuals);
+    egui::Frame::popup(&ctx.style())
+        .fill(tokens.overlay)
+        .stroke(egui::Stroke::new(1.0, tokens.border))
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::same(MENU_FRAME_MARGIN))
+}
+
+pub(crate) fn settings_frame(ctx: &egui::Context) -> egui::Frame {
+    let tokens = DesignTokens::from_visuals(&ctx.style().visuals);
+    egui::Frame::window(&ctx.style())
+        .fill(tokens.overlay)
+        .stroke(egui::Stroke::new(1.0, tokens.border))
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::same(12))
+}
+
+pub(crate) fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
+    settings_frame(ctx).inner_margin(egui::Margin::same(16))
+}
+
+pub(crate) fn panel_frame(ui: &egui::Ui) -> egui::Frame {
+    let tokens = tokens(ui);
+    egui::Frame::NONE
+        .fill(tokens.surface)
+        .stroke(egui::Stroke::new(1.0, tokens.border.gamma_multiply(0.65)))
+        .inner_margin(egui::Margin::same(8))
+}
+
+pub(crate) fn button(
+    ui: &mut egui::Ui,
+    kind: ButtonKind,
+    label: impl Into<String>,
+) -> egui::Response {
+    let tokens = tokens(ui);
+    let (fill, stroke, text) = match kind {
+        ButtonKind::Primary => (
+            tokens.accent,
+            tokens.accent,
+            ui.visuals().selection.stroke.color,
+        ),
+        ButtonKind::Secondary => (tokens.surface, tokens.border, tokens.text),
+        ButtonKind::Ghost => (
+            egui::Color32::TRANSPARENT,
+            egui::Color32::TRANSPARENT,
+            tokens.text,
+        ),
+        ButtonKind::Danger => (tokens.danger, tokens.danger, egui::Color32::WHITE),
+    };
+    ui.add(
+        egui::Button::new(egui::RichText::new(label.into()).color(text))
+            .fill(fill)
+            .stroke(egui::Stroke::new(1.0, stroke))
+            .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
     )
 }
 
-pub(crate) fn category_button(
+pub(crate) fn menu_row(
     ui: &mut egui::Ui,
     label: &str,
+    trailing: Option<&str>,
     selected: bool,
-    width: f32,
 ) -> egui::Response {
-    ui.add_sized(
-        [width, CONTROL_HEIGHT],
-        egui::Button::new(egui::RichText::new(label).size(14.0))
-            .selected(selected)
-            .corner_radius(8),
+    ui.spacing_mut().item_spacing.y = 0.0;
+    let tokens = tokens(ui);
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), MENU_ROW_HEIGHT),
+        egui::Sense::click(),
+    );
+    let fill = if selected {
+        tokens.surface_selected
+    } else if response.hovered() {
+        tokens.surface_hovered
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    ui.painter().rect_filled(rect, 5.0, fill);
+    ui.painter().text(
+        egui::pos2(rect.left() + 8.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::TextStyle::Body.resolve(ui.style()),
+        tokens.text,
+    );
+    if let Some(trailing) = trailing {
+        ui.painter().text(
+            egui::pos2(rect.right() - 8.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            trailing,
+            egui::TextStyle::Small.resolve(ui.style()),
+            tokens.weak_text,
+        );
+    }
+    response
+}
+
+pub(crate) fn sidebar_tab(ui: &mut egui::Ui, selected: bool, label: &str) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), egui::Sense::click());
+    let tokens = tokens(ui);
+    let fill = if selected {
+        tokens.surface_selected
+    } else if response.hovered() {
+        tokens.surface_hovered
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    ui.painter().rect_filled(rect, 8.0, fill);
+    if selected {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                rect.left_top(),
+                egui::pos2(rect.left() + 3.0, rect.bottom()),
+            ),
+            2.0,
+            tokens.accent,
+        );
+    }
+    ui.painter().text(
+        egui::pos2(rect.left() + 14.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(12.0),
+        if selected {
+            tokens.text
+        } else {
+            tokens.weak_text
+        },
+    );
+    response
+}
+
+pub(crate) fn top_tab(ui: &mut egui::Ui, selected: bool, label: &str) -> egui::Response {
+    let tokens = tokens(ui);
+    let (fill, stroke, text) = if selected {
+        (tokens.surface_selected, tokens.accent, tokens.text)
+    } else {
+        (
+            egui::Color32::TRANSPARENT,
+            egui::Color32::TRANSPARENT,
+            tokens.weak_text,
+        )
+    };
+    ui.add(
+        egui::Button::new(egui::RichText::new(label).color(text))
+            .fill(fill)
+            .stroke(egui::Stroke::new(1.0, stroke))
+            .min_size(egui::vec2(78.0, CONTROL_HEIGHT)),
     )
 }
 
-pub(crate) fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    let fill = if ui.visuals().dark_mode {
-        egui::Color32::from_rgb(42, 112, 150)
-    } else {
-        egui::Color32::from_rgb(37, 111, 153)
-    };
-    ui.add_sized(
-        [104.0, CONTROL_HEIGHT],
-        egui::Button::new(
-            egui::RichText::new(label)
-                .size(14.0)
-                .color(egui::Color32::WHITE),
-        )
-        .fill(fill)
-        .stroke(egui::Stroke::NONE)
-        .corner_radius(8),
-    )
+pub(crate) fn settings_card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+    panel_frame(ui)
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, add_contents);
+    ui.add_space(8.0);
 }

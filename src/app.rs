@@ -104,7 +104,6 @@ fn run_platform(
         "wml2viewer",
         native_options,
         Box::new(move |cc| {
-            apply_window_theme(&cc.egui_ctx, config.window.ui_theme);
             let _ = apply_resources(&cc.egui_ctx, &config.resources);
             let screen = cc.egui_ctx.input(|i| {
                 i.viewport()
@@ -206,14 +205,6 @@ fn configured_window_size(size: &WindowSize, screen: egui::Vec2) -> egui::Vec2 {
             .y
             .clamp(MIN_WINDOW_SIZE.y, screen.y.max(MIN_WINDOW_SIZE.y)),
     )
-}
-
-fn apply_window_theme(ctx: &egui::Context, theme: WindowUiTheme) {
-    match theme {
-        WindowUiTheme::System => {}
-        WindowUiTheme::Light => ctx.set_visuals(egui::Visuals::light()),
-        WindowUiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
-    }
 }
 
 fn blank_image() -> LoadedImage {

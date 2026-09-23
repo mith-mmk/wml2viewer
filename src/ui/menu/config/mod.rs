@@ -16,7 +16,7 @@ use crate::ui::input::dispatch::{
     is_pointer_binding_name, key_event_binding_name, pointer_button_binding_name,
 };
 use crate::ui::menu::fileviewer::thumbnail::set_thumbnail_workaround;
-use crate::ui::menu::style::{CONTROL_HEIGHT, category_button, primary_button, refine_controls};
+use crate::ui::menu::style;
 use crate::ui::render::interpolation_label;
 use crate::ui::viewer::options::{
     BackgroundStyle, MangaSeparatorStyle, RenderScaleMode, WindowUiTheme, ZoomOption,
@@ -29,12 +29,13 @@ use eframe::egui;
 use std::collections::{HashMap, HashSet};
 
 const SETTINGS_MIN_WIDTH: f32 = 560.0;
-const SETTINGS_INPUT_MIN_WIDTH: f32 = 900.0;
 const SETTINGS_MIN_HEIGHT: f32 = 360.0;
 const SETTINGS_DEFAULT_WIDTH: f32 = 760.0;
-const SETTINGS_INPUT_DEFAULT_WIDTH: f32 = 1080.0;
 const SETTINGS_DEFAULT_HEIGHT: f32 = 560.0;
 const SETTINGS_FOOTER_HEIGHT: f32 = 44.0;
+const SETTINGS_SIDEBAR_BREAKPOINT: f32 = 900.0;
+const SETTINGS_MAXIMIZED_BREAKPOINT: f32 = 640.0;
+const INPUT_BINDING_CARDS_BREAKPOINT: f32 = 780.0;
 const INPUT_ACTION_FIELD_WIDTH: f32 = 220.0;
 const INPUT_KEY_FIELD_WIDTH: f32 = 180.0;
 const INPUT_MODIFIER_FIELD_WIDTH: f32 = 56.0;
@@ -50,6 +51,27 @@ const TRANSITION_EFFECTS: &[TransitionEffect] = &[
     TransitionEffect::SpiralWipeOut,
 ];
 const INPUT_COLUMN_SPACING: f32 = 8.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SettingsLayoutMode {
+    Sidebar,
+    Selector,
+    Maximized,
+}
+
+fn settings_layout_mode(width: f32) -> SettingsLayoutMode {
+    if width < SETTINGS_MAXIMIZED_BREAKPOINT {
+        SettingsLayoutMode::Maximized
+    } else if width < SETTINGS_SIDEBAR_BREAKPOINT {
+        SettingsLayoutMode::Selector
+    } else {
+        SettingsLayoutMode::Sidebar
+    }
+}
+
+fn input_bindings_layout_uses_cards(width: f32) -> bool {
+    width < INPUT_BINDING_CARDS_BREAKPOINT
+}
 
 impl ViewerApp {
     pub(crate) fn settings_ui(&mut self, ctx: &egui::Context) {
@@ -70,97 +92,93 @@ impl ViewerApp {
         let mut reload_requested = false;
         let mut cancel_requested = false;
         let content_rect = ctx.content_rect();
-        let frame_tab = self.settings_tab;
-        let settings_default_size = settings_dialog_default_size(content_rect, frame_tab);
-        let settings_min_width = settings_dialog_min_width(content_rect, frame_tab);
+        let settings_default_size = settings_dialog_default_size(content_rect, self.settings_tab);
+        let settings_min_width = settings_dialog_min_width(content_rect, self.settings_tab);
 
         egui::Window::new(self.text(UiTextKey::Settings))
+            .title_bar(false)
             .open(&mut open)
             .resizable(true)
+            .frame(style::settings_frame(ctx))
             .default_size(settings_default_size)
             .min_width(settings_min_width)
             .min_height(SETTINGS_MIN_HEIGHT.min(content_rect.height().max(1.0)))
+            .max_size(egui::vec2(
+                (content_rect.width() - 16.0).max(1.0),
+                (content_rect.height() - 16.0).max(1.0),
+            ))
             .show(ctx, |ui| {
-                refine_controls(ui);
-                ui.spacing_mut().interact_size.y = CONTROL_HEIGHT;
-                let body_height = (ui.available_height() - SETTINGS_FOOTER_HEIGHT).max(160.0);
-                ui.horizontal(|ui| {
-                    let sidebar_width = if ui.available_width() < 620.0 {
-                        120.0
-                    } else {
-                        168.0
-                    };
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(sidebar_width, body_height),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            egui::ScrollArea::vertical()
-                                .id_salt("settings_categories")
-                                .max_height(body_height)
-                                .show(ui, |ui| self.settings_category_list(ui, sidebar_width));
-                        },
-                    );
-                    ui.separator();
-                    egui::ScrollArea::both()
-                        .id_salt("settings_form")
-                        .auto_shrink([false, false])
-                        .max_height(body_height)
-                        .show(ui, |ui| {
-                            ui.vertical(|ui| match self.settings_tab {
-                                SettingsTab::Viewer => {
-                                    self.settings_viewer_tab(ui, &mut draft_state)
-                                }
-                                SettingsTab::Input => self.settings_input_tab(ui, &mut draft_state),
-                                SettingsTab::Plugins => {
-                                    self.settings_plugins_tab(ui, &mut draft_state)
-                                }
-                                SettingsTab::Resources => {
-                                    self.settings_resources_tab(ui, &mut draft_state)
-                                }
-                                SettingsTab::Render => {
-                                    self.settings_render_tab(ui, &mut draft_state)
-                                }
-                                SettingsTab::Window => {
-                                    self.settings_window_tab(ui, &mut draft_state)
-                                }
-                                SettingsTab::Navigation => {
-                                    self.settings_navigation_tab(ui, &mut draft_state)
-                                }
-                                SettingsTab::System => self.settings_system_tab(ui),
-                            });
+                match settings_layout_mode(ui.available_width()) {
+                    SettingsLayoutMode::Sidebar => ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width(156.0);
+                            ui.heading(
+                                egui::RichText::new(self.text(UiTextKey::Settings)).strong(),
+                            );
+                            ui.label(
+                                egui::RichText::new("wml2viewer")
+                                    .small()
+                                    .color(ui.visuals().weak_text_color()),
+                            );
+                            ui.add_space(14.0);
+                            self.settings_tab_strip(ui);
                         });
-                });
+                        ui.separator();
+                        ui.vertical(|ui| self.settings_tab_content_ui(ui, &mut draft_state));
+                    }),
+                    SettingsLayoutMode::Selector | SettingsLayoutMode::Maximized => {
+                        ui.vertical(|ui| {
+                            self.settings_tab_bar(ui);
+                            ui.add_space(6.0);
+                            self.settings_tab_content_ui(ui, &mut draft_state);
+                        })
+                    }
+                };
 
                 ui.separator();
                 ui.horizontal(|ui| {
-                    if primary_button(ui, self.text(UiTextKey::Apply)).clicked() {
-                        apply_requested = true;
-                    }
-                    if ui
-                        .add_sized(
-                            [100.0, CONTROL_HEIGHT],
-                            egui::Button::new(self.text(UiTextKey::Cancel)),
-                        )
+                    if style::button(ui, style::ButtonKind::Ghost, self.text(UiTextKey::Undo))
                         .clicked()
                     {
-                        cancel_requested = true;
+                        draft_state = build_settings_draft(&self.current_config());
                     }
-                    ui.menu_button(self.text(UiTextKey::Menu), |ui| {
-                        if ui.button(self.text(UiTextKey::Undo)).clicked() {
-                            draft_state = build_settings_draft(&self.current_config());
-                            ui.close();
+                    if style::button(ui, style::ButtonKind::Ghost, self.text(UiTextKey::Reset))
+                        .clicked()
+                    {
+                        draft_state = build_settings_draft(&AppConfig::default());
+                    }
+                    if style::button(
+                        ui,
+                        style::ButtonKind::Ghost,
+                        self.text(UiTextKey::ReloadCurrent),
+                    )
+                    .clicked()
+                    {
+                        reload_requested = true;
+                    }
+                    if style::button(ui, style::ButtonKind::Ghost, self.text(UiTextKey::Help))
+                        .clicked()
+                    {
+                        self.open_help();
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if style::button(
+                            ui,
+                            style::ButtonKind::Primary,
+                            self.text(UiTextKey::Apply),
+                        )
+                        .clicked()
+                        {
+                            apply_requested = true;
                         }
-                        if ui.button(self.text(UiTextKey::Reset)).clicked() {
-                            draft_state = build_settings_draft(&AppConfig::default());
-                            ui.close();
-                        }
-                        if ui.button(self.text(UiTextKey::ReloadCurrent)).clicked() {
-                            reload_requested = true;
-                            ui.close();
-                        }
-                        if ui.button(self.text(UiTextKey::Help)).clicked() {
-                            self.open_help();
-                            ui.close();
+                        if style::button(
+                            ui,
+                            style::ButtonKind::Secondary,
+                            self.text(UiTextKey::Cancel),
+                        )
+                        .clicked()
+                        {
+                            cancel_requested = true;
                         }
                     });
                 });
@@ -189,7 +207,7 @@ impl ViewerApp {
         }
     }
 
-    fn settings_category_list(&mut self, ui: &mut egui::Ui, width: f32) {
+    fn settings_tab_strip(&mut self, ui: &mut egui::Ui) {
         let viewer_text = self.text(UiTextKey::Viewer);
         let input_text = self.text(UiTextKey::Input);
         let render_text = self.text(UiTextKey::Render);
@@ -208,15 +226,86 @@ impl ViewerApp {
             (SettingsTab::Resources, resources_text),
             (SettingsTab::System, system_text),
         ] {
-            if category_button(ui, label, self.settings_tab == tab, width).clicked() {
+            if style::sidebar_tab(ui, self.settings_tab == tab, label).clicked() {
                 self.settings_tab = tab;
+                ui.ctx().request_repaint();
             }
+            ui.add_space(2.0);
+        }
+    }
+
+    fn settings_tab_bar(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::horizontal()
+            .id_salt("settings_tab_bar")
+            .max_height(style::CONTROL_HEIGHT + 8.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    for tab in [
+                        SettingsTab::Viewer,
+                        SettingsTab::Input,
+                        SettingsTab::Render,
+                        SettingsTab::Window,
+                        SettingsTab::Navigation,
+                        SettingsTab::Plugins,
+                        SettingsTab::Resources,
+                        SettingsTab::System,
+                    ] {
+                        let label = self.settings_tab_title(tab);
+                        if style::top_tab(ui, self.settings_tab == tab, label).clicked() {
+                            self.settings_tab = tab;
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                });
+            });
+    }
+
+    fn settings_tab_content_ui(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
+        let selected_tab = self.settings_tab;
+        ui.horizontal(|ui| {
+            ui.heading(egui::RichText::new(self.settings_tab_title(selected_tab)).strong());
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new("Preferences")
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
+        });
+        ui.add_space(8.0);
+        let body_height = (ui.available_height() - SETTINGS_FOOTER_HEIGHT).max(120.0);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .max_height(body_height)
+            .show(ui, |ui| match selected_tab {
+                SettingsTab::Viewer => self.settings_viewer_tab(ui, draft_state),
+                SettingsTab::Input => self.settings_input_tab(ui, draft_state),
+                SettingsTab::Plugins => self.settings_plugins_tab(ui, draft_state),
+                SettingsTab::Resources => self.settings_resources_tab(ui, draft_state),
+                SettingsTab::Render => self.settings_render_tab(ui, draft_state),
+                SettingsTab::Window => self.settings_window_tab(ui, draft_state),
+                SettingsTab::Navigation => self.settings_navigation_tab(ui, draft_state),
+                SettingsTab::System => self.settings_system_tab(ui),
+            });
+    }
+
+    fn settings_tab_title(&self, tab: SettingsTab) -> &'static str {
+        match tab {
+            SettingsTab::Viewer => self.text(UiTextKey::Viewer),
+            SettingsTab::Input => self.text(UiTextKey::Input),
+            SettingsTab::Render => self.text(UiTextKey::Render),
+            SettingsTab::Window => self.text(UiTextKey::Window),
+            SettingsTab::Navigation => self.text(UiTextKey::Navigation),
+            SettingsTab::Plugins => self.text(UiTextKey::Plugins),
+            SettingsTab::Resources => self.text(UiTextKey::Resources),
+            SettingsTab::System => self.text(UiTextKey::System),
         }
     }
 
     fn settings_viewer_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
-        ui.group(|ui| {
+        style::settings_card(ui, |ui| {
             ui.checkbox(&mut draft.viewer.animation, self.text(UiTextKey::Animation));
             ui.checkbox(&mut draft.viewer.grayscale, self.text(UiTextKey::Grayscale));
             ui.checkbox(
@@ -315,7 +404,7 @@ impl ViewerApp {
 
     fn settings_plugins_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
-        ui.group(|ui| {
+        style::settings_card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label("internal priority");
                 ui.add(
@@ -429,8 +518,7 @@ impl ViewerApp {
 
     fn settings_input_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
-        ui.set_min_width(input_settings_content_width());
-        ui.group(|ui| {
+        style::settings_card(ui, |ui| {
             let japanese = self.applied_locale.starts_with("ja");
             ui.heading(if japanese {
                 "タッチ操作"
@@ -487,8 +575,7 @@ impl ViewerApp {
             );
         });
         ui.add_space(8.0);
-        ui.group(|ui| {
-            ui.set_min_width(input_settings_content_width());
+        style::settings_card(ui, |ui| {
             ui.checkbox(
                 &mut draft.input.replace_default_keymap,
                 self.text(UiTextKey::ReplaceDefaultKeyBindings),
@@ -496,8 +583,14 @@ impl ViewerApp {
             ui.label(self.text(UiTextKey::InputBeginnerModeHelp));
             ui.label(self.text(UiTextKey::InputKeyboardOnlyNotice));
 
-            ui.horizontal(|ui| {
-                if ui.button(self.text(UiTextKey::AddBinding)).clicked() {
+            ui.horizontal_wrapped(|ui| {
+                if style::button(
+                    ui,
+                    style::ButtonKind::Primary,
+                    self.text(UiTextKey::AddBinding),
+                )
+                .clicked()
+                {
                     draft_state.key_mapping_rows.insert(
                         0,
                         KeyMappingRowDraft {
@@ -506,15 +599,21 @@ impl ViewerApp {
                         },
                     );
                 }
-                if ui
-                    .button(self.text(UiTextKey::LoadCurrentCustomBindings))
-                    .clicked()
+                if style::button(
+                    ui,
+                    style::ButtonKind::Secondary,
+                    self.text(UiTextKey::LoadCurrentCustomBindings),
+                )
+                .clicked()
                 {
                     draft_state.key_mapping_rows = key_mapping_rows_from_map(&self.keymap);
                 }
-                if ui
-                    .button(self.text(UiTextKey::ResetToDefaultBindings))
-                    .clicked()
+                if style::button(
+                    ui,
+                    style::ButtonKind::Ghost,
+                    self.text(UiTextKey::ResetToDefaultBindings),
+                )
+                .clicked()
                 {
                     draft.input.key_mapping.clear();
                     draft.input.replace_default_keymap = false;
@@ -527,116 +626,130 @@ impl ViewerApp {
             ui.separator();
             let mut remove_index = None;
             let duplicate_rows = duplicate_binding_row_indices(&draft_state.key_mapping_rows);
-            egui::ScrollArea::both()
-                .id_salt("input_bindings_scroll")
-                .auto_shrink([false, false])
-                .max_height(320.0)
-                .show(ui, |ui| {
-                    ui.set_min_width(input_bindings_table_width());
-                    input_bindings_header_ui(ui, self);
+            if input_bindings_layout_uses_cards(ui.available_width()) {
+                for (index, row) in draft_state.key_mapping_rows.iter_mut().enumerate() {
+                    if input_binding_card_ui(ui, self, index, row, duplicate_rows.contains(&index))
+                    {
+                        remove_index = Some(index);
+                    }
+                    ui.add_space(6.0);
+                }
+            } else {
+                egui::ScrollArea::horizontal()
+                    .id_salt("input_bindings_scroll")
+                    .auto_shrink([false, false])
+                    .max_height(320.0)
+                    .show(ui, |ui| {
+                        ui.set_min_width(input_bindings_table_width());
+                        input_bindings_header_ui(ui, self);
 
-                    for (index, row) in draft_state.key_mapping_rows.iter_mut().enumerate() {
-                        let reserved_row = is_reserved_binding(&row.binding);
-                        let row_height = ui.spacing().interact_size.y;
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = INPUT_COLUMN_SPACING;
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(INPUT_ACTION_FIELD_WIDTH, row_height),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    ui.add_enabled_ui(!reserved_row, |ui| {
-                                        ui.set_width(INPUT_ACTION_FIELD_WIDTH);
-                                        egui::ComboBox::from_id_salt(("input_action", index))
-                                            .width(INPUT_ACTION_FIELD_WIDTH)
-                                            .selected_text(viewer_action_label(self, row.action))
-                                            .show_ui(ui, |ui| {
-                                                for action in ViewerAction::all() {
-                                                    ui.selectable_value(
-                                                        &mut row.action,
-                                                        *action,
-                                                        viewer_action_label(self, *action),
-                                                    );
-                                                }
-                                            });
-                                    });
-                                },
-                            );
-
-                            let key_response = ui
-                                .add_enabled_ui(!reserved_row, |ui| {
-                                    ui.add_sized(
-                                        [INPUT_KEY_FIELD_WIDTH, row_height],
-                                        egui::TextEdit::singleline(&mut row.binding.key)
-                                            .desired_width(INPUT_KEY_FIELD_WIDTH)
-                                            .hint_text(self.text(UiTextKey::PressKeyToAssign)),
-                                    )
-                                })
-                                .inner;
-                            if duplicate_rows.contains(&index) {
-                                let rect = key_response.rect.expand(1.0);
-                                ui.painter().rect_stroke(
-                                    rect,
-                                    2.0,
-                                    egui::Stroke::new(1.0, ui.visuals().warn_fg_color),
-                                    egui::StrokeKind::Outside,
+                        for (index, row) in draft_state.key_mapping_rows.iter_mut().enumerate() {
+                            let reserved_row = is_reserved_binding(&row.binding);
+                            let row_height = ui.spacing().interact_size.y;
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = INPUT_COLUMN_SPACING;
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(INPUT_ACTION_FIELD_WIDTH, row_height),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        ui.add_enabled_ui(!reserved_row, |ui| {
+                                            ui.set_width(INPUT_ACTION_FIELD_WIDTH);
+                                            egui::ComboBox::from_id_salt(("input_action", index))
+                                                .width(INPUT_ACTION_FIELD_WIDTH)
+                                                .selected_text(viewer_action_label(
+                                                    self, row.action,
+                                                ))
+                                                .show_ui(ui, |ui| {
+                                                    for action in ViewerAction::all() {
+                                                        ui.selectable_value(
+                                                            &mut row.action,
+                                                            *action,
+                                                            viewer_action_label(self, *action),
+                                                        );
+                                                    }
+                                                });
+                                        });
+                                    },
                                 );
-                            }
-                            if !reserved_row
-                                && key_response.has_focus()
-                                && !key_response.gained_focus()
-                            {
-                                if let Some(pressed_key_name) = capture_pressed_key_name(ui.ctx()) {
-                                    if !is_pointer_binding_name(&pressed_key_name)
-                                        || key_response.hovered()
+
+                                let key_response = ui
+                                    .add_enabled_ui(!reserved_row, |ui| {
+                                        ui.add_sized(
+                                            [INPUT_KEY_FIELD_WIDTH, row_height],
+                                            egui::TextEdit::singleline(&mut row.binding.key)
+                                                .desired_width(INPUT_KEY_FIELD_WIDTH)
+                                                .hint_text(self.text(UiTextKey::PressKeyToAssign)),
+                                        )
+                                    })
+                                    .inner;
+                                if duplicate_rows.contains(&index) {
+                                    let rect = key_response.rect.expand(1.0);
+                                    ui.painter().rect_stroke(
+                                        rect,
+                                        2.0,
+                                        egui::Stroke::new(1.0, ui.visuals().warn_fg_color),
+                                        egui::StrokeKind::Outside,
+                                    );
+                                }
+                                if !reserved_row
+                                    && key_response.has_focus()
+                                    && !key_response.gained_focus()
+                                {
+                                    if let Some(pressed_key_name) =
+                                        capture_pressed_key_name(ui.ctx())
                                     {
-                                        let candidate = KeyBinding {
-                                            key: pressed_key_name.clone(),
-                                            ..row.binding.clone()
-                                        };
-                                        if !is_reserved_binding(&candidate) {
-                                            row.binding.key = pressed_key_name;
+                                        if !is_pointer_binding_name(&pressed_key_name)
+                                            || key_response.hovered()
+                                        {
+                                            let candidate = KeyBinding {
+                                                key: pressed_key_name.clone(),
+                                                ..row.binding.clone()
+                                            };
+                                            if !is_reserved_binding(&candidate) {
+                                                row.binding.key = pressed_key_name;
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            modifier_checkbox_ui(ui, !reserved_row, &mut row.binding.ctrl);
-                            modifier_checkbox_ui(ui, !reserved_row, &mut row.binding.alt);
-                            modifier_checkbox_ui(ui, !reserved_row, &mut row.binding.shift);
+                                modifier_checkbox_ui(ui, !reserved_row, &mut row.binding.ctrl);
+                                modifier_checkbox_ui(ui, !reserved_row, &mut row.binding.alt);
+                                modifier_checkbox_ui(ui, !reserved_row, &mut row.binding.shift);
+
+                                if reserved_row {
+                                    ui.add_sized(
+                                        [INPUT_REMOVE_FIELD_WIDTH, row_height],
+                                        egui::Button::new(self.text(UiTextKey::Remove)),
+                                    );
+                                } else if ui
+                                    .add_sized(
+                                        [INPUT_REMOVE_FIELD_WIDTH, row_height],
+                                        egui::Button::new(self.text(UiTextKey::Remove)),
+                                    )
+                                    .clicked()
+                                {
+                                    remove_index = Some(index);
+                                }
+                            });
 
                             if reserved_row {
-                                ui.add_sized(
-                                    [INPUT_REMOVE_FIELD_WIDTH, row_height],
-                                    egui::Button::new(self.text(UiTextKey::Remove)),
-                                );
-                            } else if ui
-                                .add_sized(
-                                    [INPUT_REMOVE_FIELD_WIDTH, row_height],
-                                    egui::Button::new(self.text(UiTextKey::Remove)),
-                                )
-                                .clicked()
-                            {
-                                remove_index = Some(index);
+                                ui.horizontal(|ui| {
+                                    ui.add_space(
+                                        INPUT_ACTION_FIELD_WIDTH
+                                            + INPUT_COLUMN_SPACING
+                                            + INPUT_KEY_FIELD_WIDTH
+                                            + INPUT_COLUMN_SPACING,
+                                    );
+                                    ui.colored_label(
+                                        ui.visuals().warn_fg_color,
+                                        self.text(UiTextKey::ReservedKeyWarning),
+                                    );
+                                });
                             }
-                        });
-
-                        if reserved_row {
-                            ui.horizontal(|ui| {
-                                ui.add_space(
-                                    INPUT_ACTION_FIELD_WIDTH
-                                        + INPUT_COLUMN_SPACING
-                                        + INPUT_KEY_FIELD_WIDTH
-                                        + INPUT_COLUMN_SPACING,
-                                );
-                                ui.colored_label(
-                                    ui.visuals().warn_fg_color,
-                                    self.text(UiTextKey::ReservedKeyWarning),
-                                );
-                            });
+                            ui.add_space(2.0);
                         }
-                        ui.add_space(2.0);
-                    }
-                });
+                    });
+            }
             if let Some(index) = remove_index {
                 draft_state.key_mapping_rows.remove(index);
             }
@@ -673,7 +786,7 @@ impl ViewerApp {
 
     fn settings_resources_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
-        ui.group(|ui| {
+        style::settings_card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(self.text(UiTextKey::Locale));
                 ui.text_edit_singleline(&mut draft_state.resource_locale_input);
@@ -748,7 +861,7 @@ impl ViewerApp {
     fn settings_render_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
         normalize_draft_render_options(&mut draft.render);
-        ui.group(|ui| {
+        style::settings_card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(self.text(UiTextKey::ZoomMode));
                 egui::ComboBox::from_id_salt("zoom_option")
@@ -848,7 +961,7 @@ impl ViewerApp {
 
     fn settings_window_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
-        ui.group(|ui| {
+        style::settings_card(ui, |ui| {
             ui.checkbox(
                 &mut draft.window.fullscreen,
                 self.text(UiTextKey::Fullscreen),
@@ -932,7 +1045,7 @@ impl ViewerApp {
 
     fn settings_navigation_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
-        ui.group(|ui| {
+        style::settings_card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(self.text(UiTextKey::EndOfFolder));
                 egui::ComboBox::from_id_salt("end_of_folder")
@@ -986,10 +1099,7 @@ impl ViewerApp {
             ui.horizontal(|ui| {
                 ui.label(self.text(UiTextKey::MoveFolder1));
                 if ui
-                    .add_sized(
-                        [220.0, CONTROL_HEIGHT],
-                        egui::TextEdit::singleline(&mut draft_state.move_folder1_input),
-                    )
+                    .text_edit_singleline(&mut draft_state.move_folder1_input)
                     .changed()
                 {
                     draft.file_action.move_folder1 =
@@ -1013,10 +1123,7 @@ impl ViewerApp {
             ui.horizontal(|ui| {
                 ui.label(self.text(UiTextKey::MoveFolder2));
                 if ui
-                    .add_sized(
-                        [220.0, CONTROL_HEIGHT],
-                        egui::TextEdit::singleline(&mut draft_state.move_folder2_input),
-                    )
+                    .text_edit_singleline(&mut draft_state.move_folder2_input)
                     .changed()
                 {
                     draft.file_action.move_folder2 =
@@ -1051,10 +1158,7 @@ impl ViewerApp {
             ui.horizontal(|ui| {
                 ui.label(self.text(UiTextKey::CopyFolder1));
                 if ui
-                    .add_sized(
-                        [220.0, CONTROL_HEIGHT],
-                        egui::TextEdit::singleline(&mut draft_state.copy_folder1_input),
-                    )
+                    .text_edit_singleline(&mut draft_state.copy_folder1_input)
                     .changed()
                 {
                     draft.file_action.copy_folder1 =
@@ -1078,10 +1182,7 @@ impl ViewerApp {
             ui.horizontal(|ui| {
                 ui.label(self.text(UiTextKey::CopyFolder2));
                 if ui
-                    .add_sized(
-                        [220.0, CONTROL_HEIGHT],
-                        egui::TextEdit::singleline(&mut draft_state.copy_folder2_input),
-                    )
+                    .text_edit_singleline(&mut draft_state.copy_folder2_input)
                     .changed()
                 {
                     draft.file_action.copy_folder2 =
@@ -1129,7 +1230,7 @@ impl ViewerApp {
     }
 
     fn settings_system_tab(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
+        style::settings_card(ui, |ui| {
             ui.label(format!(
                 "{}: {}",
                 self.text(UiTextKey::ProgramName),
@@ -1292,9 +1393,12 @@ impl ViewerApp {
             .open(&mut open)
             .resizable(false)
             .collapsible(false)
+            .frame(style::dialog_frame(ctx))
             .show(ctx, |ui| {
                 ui.label(self.text(UiTextKey::RestartToApplyPluginChanges));
-                if ui.button(self.text(UiTextKey::Close)).clicked() {
+                if style::button(ui, style::ButtonKind::Primary, self.text(UiTextKey::Close))
+                    .clicked()
+                {
                     close_requested = true;
                 }
             });
@@ -1324,26 +1428,14 @@ impl ViewerApp {
     }
 }
 
-fn settings_dialog_default_size(content: egui::Rect, tab: SettingsTab) -> egui::Vec2 {
-    let preferred_width = match tab {
-        SettingsTab::Input => SETTINGS_INPUT_DEFAULT_WIDTH,
-        _ => SETTINGS_DEFAULT_WIDTH,
-    };
-    let min_width = match tab {
-        SettingsTab::Input => SETTINGS_INPUT_MIN_WIDTH,
-        _ => SETTINGS_MIN_WIDTH,
-    };
-    let width = preferred_width.min((content.width() - 32.0).max(min_width));
+fn settings_dialog_default_size(content: egui::Rect, _tab: SettingsTab) -> egui::Vec2 {
+    let width = SETTINGS_DEFAULT_WIDTH.min((content.width() - 32.0).max(1.0));
     let height = SETTINGS_DEFAULT_HEIGHT.min((content.height() - 32.0).max(SETTINGS_MIN_HEIGHT));
     egui::vec2(width, height)
 }
 
-fn settings_dialog_min_width(content: egui::Rect, tab: SettingsTab) -> f32 {
-    let min_width = match tab {
-        SettingsTab::Input => SETTINGS_INPUT_MIN_WIDTH,
-        _ => SETTINGS_MIN_WIDTH,
-    };
-    min_width.min(content.width().max(1.0))
+fn settings_dialog_min_width(content: egui::Rect, _tab: SettingsTab) -> f32 {
+    SETTINGS_MIN_WIDTH.min(content.width().max(1.0))
 }
 
 fn input_bindings_table_width() -> f32 {
@@ -1352,10 +1444,6 @@ fn input_bindings_table_width() -> f32 {
         + INPUT_MODIFIER_FIELD_WIDTH * 3.0
         + INPUT_REMOVE_FIELD_WIDTH
         + INPUT_COLUMN_SPACING * 5.0
-}
-
-fn input_settings_content_width() -> f32 {
-    input_bindings_table_width()
 }
 
 fn input_bindings_header_ui(ui: &mut egui::Ui, viewer: &ViewerApp) {
@@ -1386,6 +1474,90 @@ fn input_bindings_header_ui(ui: &mut egui::Ui, viewer: &ViewerApp) {
             egui::Label::new(""),
         );
     });
+}
+
+fn input_binding_card_ui(
+    ui: &mut egui::Ui,
+    viewer: &ViewerApp,
+    index: usize,
+    row: &mut KeyMappingRowDraft,
+    duplicate: bool,
+) -> bool {
+    let reserved_row = is_reserved_binding(&row.binding);
+    let mut remove_requested = false;
+    style::panel_frame(ui).show(ui, |ui| {
+        ui.add_enabled_ui(!reserved_row, |ui| {
+            egui::ComboBox::from_id_salt(("input_action_card", index))
+                .width(ui.available_width())
+                .selected_text(viewer_action_label(viewer, row.action))
+                .show_ui(ui, |ui| {
+                    for action in ViewerAction::all() {
+                        ui.selectable_value(
+                            &mut row.action,
+                            *action,
+                            viewer_action_label(viewer, *action),
+                        );
+                    }
+                });
+        });
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            let key_response = ui
+                .add_enabled_ui(!reserved_row, |ui| {
+                    ui.add_sized(
+                        [
+                            INPUT_KEY_FIELD_WIDTH.min(ui.available_width()),
+                            style::CONTROL_HEIGHT,
+                        ],
+                        egui::TextEdit::singleline(&mut row.binding.key)
+                            .desired_width(INPUT_KEY_FIELD_WIDTH)
+                            .hint_text(viewer.text(UiTextKey::PressKeyToAssign)),
+                    )
+                })
+                .inner;
+            if duplicate {
+                ui.painter().rect_stroke(
+                    key_response.rect.expand(1.0),
+                    2.0,
+                    egui::Stroke::new(1.0, ui.visuals().warn_fg_color),
+                    egui::StrokeKind::Outside,
+                );
+            }
+            if !reserved_row && key_response.has_focus() && !key_response.gained_focus() {
+                if let Some(pressed_key_name) = capture_pressed_key_name(ui.ctx()) {
+                    if !is_pointer_binding_name(&pressed_key_name) || key_response.hovered() {
+                        let candidate = KeyBinding {
+                            key: pressed_key_name.clone(),
+                            ..row.binding.clone()
+                        };
+                        if !is_reserved_binding(&candidate) {
+                            row.binding.key = pressed_key_name;
+                        }
+                    }
+                }
+            }
+            ui.add_enabled_ui(!reserved_row, |ui| {
+                ui.checkbox(&mut row.binding.ctrl, viewer.text(UiTextKey::CtrlLabel));
+                ui.checkbox(&mut row.binding.alt, viewer.text(UiTextKey::AltLabel));
+                ui.checkbox(&mut row.binding.shift, viewer.text(UiTextKey::ShiftLabel));
+            });
+            if reserved_row {
+                ui.label(
+                    egui::RichText::new(viewer.text(UiTextKey::ReservedKeyWarning))
+                        .color(ui.visuals().warn_fg_color),
+                );
+            } else if style::button(
+                ui,
+                style::ButtonKind::Danger,
+                viewer.text(UiTextKey::Remove),
+            )
+            .clicked()
+            {
+                remove_requested = true;
+            }
+        });
+    });
+    remove_requested
 }
 
 fn modifier_checkbox_ui(ui: &mut egui::Ui, enabled: bool, value: &mut bool) {

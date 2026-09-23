@@ -18,9 +18,7 @@ impl ViewerApp {
     pub(crate) fn handle_keyboard(&mut self, ctx: &egui::Context) {
         if self.show_left_menu {
             self.cancel_pending_single_click_navigation();
-            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                self.show_left_menu = false;
-            }
+            self.handle_cascade_menu_keyboard(ctx);
             return;
         }
 

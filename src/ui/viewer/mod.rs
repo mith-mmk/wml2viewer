@@ -17,6 +17,7 @@ use crate::options::{
 };
 use crate::ui::i18n::{UiTextKey, tr};
 use crate::ui::input::dispatch::canonical_key_binding_name;
+use crate::ui::menu::fileviewer::CascadeMenuState;
 use crate::ui::menu::fileviewer::state::{
     FilerEntry, FilerSortField, FilerState, FilerUserRequest, NameSortMode,
 };
@@ -31,7 +32,6 @@ use crate::ui::render::{
 };
 use crate::ui::viewer::options::{
     RenderOptions, RenderScaleMode, ViewerOptions, WindowOptions, WindowStartPosition,
-    WindowUiTheme,
 };
 use eframe::egui::{self, Pos2, TextureHandle, TextureOptions, vec2};
 use std::collections::HashMap;
@@ -77,6 +77,7 @@ pub(crate) struct ViewerApp {
     pending_transition_previous: Option<TransitionPreviousState>,
     active_transition: Option<ImageTransitionState>,
     pub(crate) egui_ctx: egui::Context,
+    system_visuals: egui::Visuals,
 
     pub(crate) zoom: f32,
     pub(crate) zoom_factor: f32,
@@ -148,6 +149,7 @@ pub(crate) struct ViewerApp {
     pub(crate) config_path: Option<PathBuf>,
     pub(crate) bench_logger: Option<BenchLogger>,
     pub(crate) show_left_menu: bool,
+    pub(crate) cascade_menu: CascadeMenuState,
     pub(crate) suppress_next_pointer_intent: bool,
     pub(crate) left_menu_pos: Pos2,
     pub(crate) save_dialog: SaveDialogState,
@@ -688,6 +690,7 @@ impl ViewerApp {
             pending_transition_previous: None,
             active_transition: None,
             egui_ctx: cc.egui_ctx.clone(),
+            system_visuals: cc.egui_ctx.style().visuals.clone(),
 
             zoom,
             zoom_factor,
@@ -759,6 +762,7 @@ impl ViewerApp {
             config_path,
             bench_logger,
             show_left_menu: false,
+            cascade_menu: CascadeMenuState::default(),
             suppress_next_pointer_intent: false,
             left_menu_pos: Pos2::ZERO,
             save_dialog: SaveDialogState {
@@ -910,11 +914,11 @@ impl ViewerApp {
     }
 
     pub(crate) fn apply_window_theme(&self, ctx: &egui::Context) {
-        match self.window_options.ui_theme {
-            WindowUiTheme::System => {}
-            WindowUiTheme::Light => ctx.set_visuals(egui::Visuals::light()),
-            WindowUiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
-        }
+        crate::ui::theme::apply_window_theme(
+            ctx,
+            self.window_options.ui_theme,
+            &self.system_visuals,
+        );
     }
 
     pub(crate) fn open_help(&self) {
