@@ -1,5 +1,4 @@
 use crate::drawers::affine::InterpolationAlgorithm;
-use crate::drawers::canvas::Canvas;
 use crate::drawers::image::{
     LoadedImage, load_canvas_from_bytes_with_hint, load_canvas_from_file, resize_loaded_image,
 };
@@ -8,9 +7,9 @@ use crate::ui::viewer::options::RenderScaleMode;
 use std::error::Error;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
@@ -25,6 +24,7 @@ pub(crate) enum RenderCommand {
     },
     ResizeCurrent {
         request_id: u64,
+        source: LoadedImage,
         zoom: f32,
         method: InterpolationAlgorithm,
         scale_mode: RenderScaleMode,
@@ -74,16 +74,8 @@ pub(crate) enum ActiveRenderRequest {
     Resize(u64),
 }
 
-fn blank_loaded_image() -> LoadedImage {
-    LoadedImage {
-        canvas: Canvas::new(1, 1),
-        animation: Vec::new(),
-        loop_count: None,
-    }
-}
-
 pub(crate) fn spawn_render_worker(
-    initial_source: LoadedImage,
+    _initial_source: LoadedImage,
 ) -> (
     Sender<RenderCommand>,
     Receiver<RenderResult>,
@@ -91,7 +83,6 @@ pub(crate) fn spawn_render_worker(
 ) {
     let (command_tx, command_rx) = mpsc::channel::<RenderCommand>();
     let (result_tx, result_rx) = mpsc::channel::<RenderResult>();
-    let current_source = Arc::new(Mutex::new(initial_source));
     let latest_load_request_id = Arc::new(AtomicU64::new(0));
 
     let join = thread::spawn(move || {
@@ -107,7 +98,6 @@ pub(crate) fn spawn_render_worker(
                 } => {
                     latest_load_request_id.store(request_id, Ordering::Release);
                     let result_tx = result_tx.clone();
-                    let current_source = Arc::clone(&current_source);
                     let latest_load_request_id = Arc::clone(&latest_load_request_id);
                     thread::spawn(move || {
                         let result = catch_unwind(AssertUnwindSafe(|| {
@@ -149,11 +139,6 @@ pub(crate) fn spawn_render_worker(
 
                         match result {
                             Ok(Some((primary, companion))) => {
-                                if latest_load_request_id.load(Ordering::Acquire) == request_id {
-                                    if let Ok(mut current) = current_source.lock() {
-                                        *current = primary.source.clone();
-                                    }
-                                }
                                 let _ = result_tx.send(RenderResult::Loaded {
                                     request_id,
                                     path: Some(primary.path.clone()),
@@ -177,17 +162,14 @@ pub(crate) fn spawn_render_worker(
                 }
                 RenderCommand::ResizeCurrent {
                     request_id,
+                    source,
                     zoom,
                     method,
                     scale_mode,
                 } => {
                     let result_tx = result_tx.clone();
-                    let current_source = Arc::clone(&current_source);
                     thread::spawn(move || {
-                        let source_snapshot = current_source
-                            .lock()
-                            .map(|current| current.clone())
-                            .unwrap_or_else(|_| blank_loaded_image());
+                        let source_snapshot = source;
                         match catch_unwind(AssertUnwindSafe(|| match scale_mode {
                             RenderScaleMode::FastGpu => Ok(source_snapshot.clone()),
                             RenderScaleMode::PreciseCpu => {

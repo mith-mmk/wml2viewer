@@ -1518,6 +1518,9 @@ impl ViewerApp {
         let Some(filer_tx) = self.filer_tx.clone() else {
             return;
         };
+        if self.filer.directory.as_ref() != Some(&dir) {
+            self.filer.entries.clear();
+        }
         self.filer.directory = Some(dir.clone());
         self.filer.selected = selected.clone();
         let request_id = self.alloc_filer_request_id();
@@ -1739,6 +1742,20 @@ impl ViewerApp {
         }
     }
 
+    pub(crate) fn accept_filer_selection(&mut self, navigation_path: &Path) {
+        self.active_fs_request_id = None;
+        self.active_navigation_transition_direction = None;
+        self.queued_filesystem_init_path = None;
+        self.queued_navigation = None;
+        self.pending_viewer_navigation = None;
+        self.filer.pending_request_id = None;
+        if self.navigator_ready {
+            self.set_filesystem_current(navigation_path.to_path_buf());
+        } else {
+            let _ = self.init_filesystem(navigation_path.to_path_buf());
+        }
+    }
+
     pub(crate) fn save_current_as(&mut self, format: SaveFormat) {
         if self.save_dialog.in_progress {
             return;
@@ -1896,6 +1913,7 @@ impl ViewerApp {
         self.companion_tx
             .send(RenderCommand::ResizeCurrent {
                 request_id,
+                source: self.companion_display.as_ref().unwrap().source.clone(),
                 zoom: self.zoom,
                 method: self.render_options.zoom_method,
                 scale_mode: self.render_options.scale_mode,
@@ -2648,6 +2666,7 @@ impl ViewerApp {
         self.worker_tx
             .send(RenderCommand::ResizeCurrent {
                 request_id,
+                source: self.source.clone(),
                 zoom: self.zoom,
                 method: self.render_options.zoom_method,
                 scale_mode: self.render_options.scale_mode,

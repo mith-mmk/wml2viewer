@@ -937,6 +937,7 @@ impl ViewerApp {
         self.filer.pending_user_request = Some(FilerUserRequest::SelectFile {
             navigation_path: navigation_path.clone(),
         });
+        self.accept_filer_selection(&navigation_path);
         self.filer.committed_browse_directory = None;
         self.filer.selected = Some(navigation_path.clone());
         self.empty_mode = false;

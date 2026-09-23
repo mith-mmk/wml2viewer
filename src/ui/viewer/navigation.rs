@@ -13,6 +13,10 @@ impl ViewerApp {
             );
             self.filer.pending_user_request = None;
             self.filer.committed_browse_directory = None;
+            self.filer.pending_request_id = None;
+            if let Some(directory) = self.current_directory() {
+                self.request_filer_directory(directory, Some(self.current_navigation_path.clone()));
+            }
             return;
         }
         if !should_handoff_filer_control_to_viewer_navigation(
@@ -36,6 +40,7 @@ impl ViewerApp {
             return Ok(());
         }
         if self.navigation_blocked_by_active_load() {
+            self.handoff_filer_control_to_viewer_navigation();
             self.queue_viewer_navigation(PendingViewerNavigation::Next);
             return Ok(());
         }
@@ -70,6 +75,7 @@ impl ViewerApp {
             return Ok(());
         }
         if self.navigation_blocked_by_active_load() {
+            self.handoff_filer_control_to_viewer_navigation();
             self.queue_viewer_navigation(PendingViewerNavigation::Prev);
             return Ok(());
         }
@@ -104,6 +110,7 @@ impl ViewerApp {
             return Ok(());
         }
         if self.navigation_blocked_by_active_load() {
+            self.handoff_filer_control_to_viewer_navigation();
             self.queue_viewer_navigation(PendingViewerNavigation::First);
             return Ok(());
         }
@@ -161,6 +168,7 @@ impl ViewerApp {
             return Ok(());
         }
         if self.navigation_blocked_by_active_load() {
+            self.handoff_filer_control_to_viewer_navigation();
             self.queue_viewer_navigation(PendingViewerNavigation::Last);
             return Ok(());
         }
@@ -273,6 +281,7 @@ impl ViewerApp {
                 }),
             );
             self.filer.pending_user_request = None;
+            self.filer.pending_request_id = None;
         }
     }
 

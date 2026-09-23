@@ -719,6 +719,15 @@ impl ViewerApp {
                             }),
                         );
                         self.filer.pending_user_request = None;
+                        self.active_fs_request_id = None;
+                        self.queued_filesystem_init_path = None;
+                        self.queued_navigation = None;
+                        if self.navigator_ready {
+                            self.set_filesystem_current(self.current_navigation_path.clone());
+                        } else {
+                            let _ = self.init_filesystem(self.current_navigation_path.clone());
+                        }
+                        self.sync_filer_directory_with_current_path();
                     }
                     self.flush_pending_viewer_navigation();
                     if !self.navigator_ready && self.active_fs_request_id.is_none() {
@@ -969,8 +978,14 @@ impl ViewerApp {
                         match (navigation_path, load_path) {
                             (Some(navigation_path), Some(load_path)) => {
                                 self.empty_mode = false;
-                                if self.current_navigation_path != navigation_path
-                                    || self.current_path != load_path
+                                if (self.current_navigation_path != navigation_path
+                                    || self.current_path != load_path)
+                                    && !(self.pending_navigation_path.as_deref()
+                                        == Some(navigation_path.as_path())
+                                        && matches!(
+                                            self.active_request,
+                                            Some(ActiveRenderRequest::Load(_))
+                                        ))
                                 {
                                     let _ = self.request_load_target_with_transition_direction(
                                         navigation_path,
@@ -1015,8 +1030,14 @@ impl ViewerApp {
                         self.empty_mode = false;
                         self.startup_phase = StartupPhase::MultiViewer;
                         self.log_bench_startup_sync_once("path_resolved");
-                        if self.current_navigation_path != navigation_path
-                            || self.current_path != load_path
+                        if (self.current_navigation_path != navigation_path
+                            || self.current_path != load_path)
+                            && !(self.pending_navigation_path.as_deref()
+                                == Some(navigation_path.as_path())
+                                && matches!(
+                                    self.active_request,
+                                    Some(ActiveRenderRequest::Load(_))
+                                ))
                         {
                             let _ = self.request_load_target_with_transition_direction(
                                 navigation_path,

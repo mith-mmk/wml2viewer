@@ -1,11 +1,45 @@
-use super::{RenderLoadMetrics, load_render_page};
+use super::{
+    RenderCommand, RenderLoadMetrics, RenderResult, load_render_page, spawn_render_worker,
+};
 use crate::drawers::affine::InterpolationAlgorithm;
+use crate::drawers::canvas::Canvas;
+use crate::drawers::image::LoadedImage;
 use crate::options::NavigationSortOption;
 use crate::ui::viewer::options::RenderScaleMode;
 use oxiarc_archive::LzhWriter;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
+use std::time::Duration;
+
+#[test]
+fn resize_uses_the_displayed_source_even_after_a_cache_hit() {
+    let image = |width, height| LoadedImage {
+        canvas: Canvas::new(width, height),
+        animation: Vec::new(),
+        loop_count: None,
+    };
+    let (tx, rx, join) = spawn_render_worker(image(1, 1));
+    tx.send(RenderCommand::ResizeCurrent {
+        request_id: 42,
+        source: image(7, 9),
+        zoom: 1.0,
+        method: InterpolationAlgorithm::Bilinear,
+        scale_mode: RenderScaleMode::FastGpu,
+    })
+    .unwrap();
+    match rx.recv_timeout(Duration::from_secs(2)).unwrap() {
+        RenderResult::Loaded {
+            request_id, source, ..
+        } => {
+            assert_eq!(request_id, 42);
+            assert_eq!((source.canvas.width(), source.canvas.height()), (7, 9));
+        }
+        RenderResult::Failed { message, .. } => panic!("resize failed: {message}"),
+    }
+    tx.send(RenderCommand::Shutdown).unwrap();
+    join.join().unwrap();
+}
 
 const TINY_PNG: &[u8] = &[
     0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, b'I', b'H', b'D', b'R',
