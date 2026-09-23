@@ -16,7 +16,7 @@ use crate::ui::input::dispatch::{
     is_pointer_binding_name, key_event_binding_name, pointer_button_binding_name,
 };
 use crate::ui::menu::fileviewer::thumbnail::set_thumbnail_workaround;
-use crate::ui::menu::style::{CONTROL_HEIGHT, category_button};
+use crate::ui::menu::style::{CONTROL_HEIGHT, category_button, primary_button, refine_controls};
 use crate::ui::render::interpolation_label;
 use crate::ui::viewer::options::{
     BackgroundStyle, MangaSeparatorStyle, RenderScaleMode, WindowUiTheme, ZoomOption,
@@ -81,6 +81,7 @@ impl ViewerApp {
             .min_width(settings_min_width)
             .min_height(SETTINGS_MIN_HEIGHT.min(content_rect.height().max(1.0)))
             .show(ctx, |ui| {
+                refine_controls(ui);
                 ui.spacing_mut().interact_size.y = CONTROL_HEIGHT;
                 let body_height = (ui.available_height() - SETTINGS_FOOTER_HEIGHT).max(160.0);
                 ui.horizontal(|ui| {
@@ -104,31 +105,35 @@ impl ViewerApp {
                         .id_salt("settings_form")
                         .auto_shrink([false, false])
                         .max_height(body_height)
-                        .show(ui, |ui| match self.settings_tab {
-                            SettingsTab::Viewer => self.settings_viewer_tab(ui, &mut draft_state),
-                            SettingsTab::Input => self.settings_input_tab(ui, &mut draft_state),
-                            SettingsTab::Plugins => self.settings_plugins_tab(ui, &mut draft_state),
-                            SettingsTab::Resources => {
-                                self.settings_resources_tab(ui, &mut draft_state)
-                            }
-                            SettingsTab::Render => self.settings_render_tab(ui, &mut draft_state),
-                            SettingsTab::Window => self.settings_window_tab(ui, &mut draft_state),
-                            SettingsTab::Navigation => {
-                                self.settings_navigation_tab(ui, &mut draft_state)
-                            }
-                            SettingsTab::System => self.settings_system_tab(ui),
+                        .show(ui, |ui| {
+                            ui.vertical(|ui| match self.settings_tab {
+                                SettingsTab::Viewer => {
+                                    self.settings_viewer_tab(ui, &mut draft_state)
+                                }
+                                SettingsTab::Input => self.settings_input_tab(ui, &mut draft_state),
+                                SettingsTab::Plugins => {
+                                    self.settings_plugins_tab(ui, &mut draft_state)
+                                }
+                                SettingsTab::Resources => {
+                                    self.settings_resources_tab(ui, &mut draft_state)
+                                }
+                                SettingsTab::Render => {
+                                    self.settings_render_tab(ui, &mut draft_state)
+                                }
+                                SettingsTab::Window => {
+                                    self.settings_window_tab(ui, &mut draft_state)
+                                }
+                                SettingsTab::Navigation => {
+                                    self.settings_navigation_tab(ui, &mut draft_state)
+                                }
+                                SettingsTab::System => self.settings_system_tab(ui),
+                            });
                         });
                 });
 
                 ui.separator();
                 ui.horizontal(|ui| {
-                    if ui
-                        .add_sized(
-                            [100.0, CONTROL_HEIGHT],
-                            egui::Button::new(self.text(UiTextKey::Apply)),
-                        )
-                        .clicked()
-                    {
+                    if primary_button(ui, self.text(UiTextKey::Apply)).clicked() {
                         apply_requested = true;
                     }
                     if ui
@@ -981,7 +986,10 @@ impl ViewerApp {
             ui.horizontal(|ui| {
                 ui.label(self.text(UiTextKey::MoveFolder1));
                 if ui
-                    .text_edit_singleline(&mut draft_state.move_folder1_input)
+                    .add_sized(
+                        [220.0, CONTROL_HEIGHT],
+                        egui::TextEdit::singleline(&mut draft_state.move_folder1_input),
+                    )
                     .changed()
                 {
                     draft.file_action.move_folder1 =
@@ -1005,7 +1013,10 @@ impl ViewerApp {
             ui.horizontal(|ui| {
                 ui.label(self.text(UiTextKey::MoveFolder2));
                 if ui
-                    .text_edit_singleline(&mut draft_state.move_folder2_input)
+                    .add_sized(
+                        [220.0, CONTROL_HEIGHT],
+                        egui::TextEdit::singleline(&mut draft_state.move_folder2_input),
+                    )
                     .changed()
                 {
                     draft.file_action.move_folder2 =
@@ -1040,7 +1051,10 @@ impl ViewerApp {
             ui.horizontal(|ui| {
                 ui.label(self.text(UiTextKey::CopyFolder1));
                 if ui
-                    .text_edit_singleline(&mut draft_state.copy_folder1_input)
+                    .add_sized(
+                        [220.0, CONTROL_HEIGHT],
+                        egui::TextEdit::singleline(&mut draft_state.copy_folder1_input),
+                    )
                     .changed()
                 {
                     draft.file_action.copy_folder1 =
@@ -1064,7 +1078,10 @@ impl ViewerApp {
             ui.horizontal(|ui| {
                 ui.label(self.text(UiTextKey::CopyFolder2));
                 if ui
-                    .text_edit_singleline(&mut draft_state.copy_folder2_input)
+                    .add_sized(
+                        [220.0, CONTROL_HEIGHT],
+                        egui::TextEdit::singleline(&mut draft_state.copy_folder2_input),
+                    )
                     .changed()
                 {
                     draft.file_action.copy_folder2 =

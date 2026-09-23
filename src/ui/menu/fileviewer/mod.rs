@@ -11,7 +11,7 @@ use crate::ui::menu::fileviewer::icons::{SvgIcon, paint_svg_icon};
 use crate::ui::menu::fileviewer::state::{
     FilerEntry, FilerSortField, FilerUserRequest, FilerViewMode, NameSortMode,
 };
-use crate::ui::menu::style::{CONTROL_HEIGHT, action_button};
+use crate::ui::menu::style::{CONTROL_HEIGHT, action_button, refine_controls};
 use crate::ui::viewer::ViewerApp;
 use crate::ui::viewer::options::PaneSide;
 use chrono::{DateTime, Local};
@@ -70,6 +70,7 @@ impl ViewerApp {
             .default_size(egui::vec2(POPUP_MENU_WIDTH, menu_height.min(440.0)))
             .open(&mut open)
             .show(ctx, |ui| {
+                refine_controls(ui);
                 ui.spacing_mut().interact_size.y = CONTROL_HEIGHT;
                 ui.set_min_width(popup_max_width.min(260.0));
                 ui.set_max_width(popup_max_width);
@@ -331,6 +332,7 @@ impl ViewerApp {
             .min_width(width_range.min)
             .max_width(width_range.max)
             .show(ctx, |ui| {
+                refine_controls(ui);
                 ui.spacing_mut().interact_size.y = CONTROL_HEIGHT;
                 let mut refresh_requested = false;
                 let list_text = self.text(UiTextKey::List);
@@ -386,7 +388,13 @@ impl ViewerApp {
                 if let Some(dir) = self.filer.directory.clone() {
                     ui.horizontal(|ui| {
                         if let Some(parent) = dir.parent() {
-                            if icon_toolbar_button(ui, SvgIcon::Up, false, up_text, icon_color) {
+                            if ui
+                                .add_sized(
+                                    [84.0, CONTROL_HEIGHT],
+                                    egui::Button::new(format!("↑ {up_text}")),
+                                )
+                                .clicked()
+                            {
                                 self.browse_filer_directory(parent.to_path_buf());
                             }
                         }
@@ -394,56 +402,28 @@ impl ViewerApp {
                     });
                 }
                 ui.horizontal_wrapped(|ui| {
-                    if icon_toolbar_button(
-                        ui,
-                        SvgIcon::ThumbnailGrid,
-                        self.filer.view_mode == FilerViewMode::List,
-                        list_text,
-                        icon_color,
-                    ) {
-                        self.filer.view_mode = FilerViewMode::List;
-                        refresh_requested = true;
-                    }
-                    if icon_toolbar_button(
-                        ui,
-                        SvgIcon::ThumbnailSmall,
-                        self.filer.view_mode == FilerViewMode::ThumbnailSmall,
-                        thumb_small_text,
-                        icon_color,
-                    ) {
-                        self.filer.view_mode = FilerViewMode::ThumbnailSmall;
-                        refresh_requested = true;
-                    }
-                    if icon_toolbar_button(
-                        ui,
-                        SvgIcon::ThumbnailMedium,
-                        self.filer.view_mode == FilerViewMode::ThumbnailMedium,
-                        thumb_medium_text,
-                        icon_color,
-                    ) {
-                        self.filer.view_mode = FilerViewMode::ThumbnailMedium;
-                        refresh_requested = true;
-                    }
-                    if icon_toolbar_button(
-                        ui,
-                        SvgIcon::ThumbnailLarge,
-                        self.filer.view_mode == FilerViewMode::ThumbnailLarge,
-                        thumb_large_text,
-                        icon_color,
-                    ) {
-                        self.filer.view_mode = FilerViewMode::ThumbnailLarge;
-                        refresh_requested = true;
-                    }
-                    if icon_toolbar_button(
-                        ui,
-                        SvgIcon::Detail,
-                        self.filer.view_mode == FilerViewMode::Detail,
-                        detail_text,
-                        icon_color,
-                    ) {
-                        self.filer.view_mode = FilerViewMode::Detail;
-                        refresh_requested = true;
-                    }
+                    let previous_mode = self.filer.view_mode;
+                    let selected_mode = match self.filer.view_mode {
+                        FilerViewMode::List => list_text,
+                        FilerViewMode::ThumbnailSmall => thumb_small_text,
+                        FilerViewMode::ThumbnailMedium => thumb_medium_text,
+                        FilerViewMode::ThumbnailLarge => thumb_large_text,
+                        FilerViewMode::Detail => detail_text,
+                    };
+                    egui::ComboBox::from_id_salt("filer_view_mode")
+                        .selected_text(selected_mode)
+                        .show_ui(ui, |ui| {
+                            for (mode, label) in [
+                                (FilerViewMode::List, list_text),
+                                (FilerViewMode::ThumbnailSmall, thumb_small_text),
+                                (FilerViewMode::ThumbnailMedium, thumb_medium_text),
+                                (FilerViewMode::ThumbnailLarge, thumb_large_text),
+                                (FilerViewMode::Detail, detail_text),
+                            ] {
+                                ui.selectable_value(&mut self.filer.view_mode, mode, label);
+                            }
+                        });
+                    refresh_requested |= self.filer.view_mode != previous_mode;
                     if matches!(
                         self.filer.view_mode,
                         FilerViewMode::ThumbnailSmall
