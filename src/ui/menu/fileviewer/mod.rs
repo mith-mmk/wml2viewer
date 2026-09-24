@@ -902,7 +902,12 @@ impl ViewerApp {
                     });
                 }
                 let panel_width = ui.available_width();
-                let focus_target = self.pending_filer_focus_path.clone();
+                let focus_target = self
+                    .filer
+                    .pending_request_id
+                    .is_none()
+                    .then(|| self.pending_filer_focus_path.clone())
+                    .flatten();
                 let mut focus_consumed = false;
                 if matches!(
                     self.filer.view_mode,
@@ -925,33 +930,63 @@ impl ViewerApp {
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                         let visible_entries = self.filer.entries[range].to_vec();
                         for entry in visible_entries {
-                            self.filer_entry_row(
-                                ui,
-                                entry,
-                                focus_target.as_ref(),
-                                &mut focus_consumed,
-                            );
+                            ui.push_id(entry.path.clone(), |ui| {
+                                self.filer_entry_row(
+                                    ui,
+                                    entry,
+                                    focus_target.as_ref(),
+                                    &mut focus_consumed,
+                                );
+                            });
                         }
                     });
                 } else {
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.set_min_width(panel_width.max(160.0));
-                            let item_width = match self.filer.view_mode {
-                                FilerViewMode::ThumbnailSmall => 72.0,
-                                FilerViewMode::ThumbnailMedium => 112.0,
-                                FilerViewMode::ThumbnailLarge => 160.0,
-                                _ => 96.0,
-                            } * self.filer.thumbnail_scale;
-                            self.filer_thumbnail_grid(
-                                ui,
-                                self.filer.entries.clone(),
-                                item_width,
-                                focus_target.as_ref(),
-                                &mut focus_consumed,
-                            );
-                        });
+                    let item_width = match self.filer.view_mode {
+                        FilerViewMode::ThumbnailSmall => 72.0,
+                        FilerViewMode::ThumbnailMedium => 112.0,
+                        FilerViewMode::ThumbnailLarge => 160.0,
+                        _ => 96.0,
+                    } * self.filer.thumbnail_scale;
+                    let spacing = ui.spacing().item_spacing;
+                    let columns = ((panel_width.max(item_width) + spacing.x)
+                        / (item_width.max(1.0) + spacing.x))
+                        .floor()
+                        .max(1.0) as usize;
+                    let row_height = item_width + 56.0;
+                    let row_count = self.filer.entries.len().div_ceil(columns);
+                    let focus_index = focus_target.as_ref().and_then(|path| {
+                        self.filer
+                            .entries
+                            .iter()
+                            .position(|entry| &entry.path == path)
+                    });
+                    let mut scroll = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                    if let Some(index) = focus_index {
+                        scroll = scroll.vertical_scroll_offset(
+                            (index / columns) as f32 * (row_height + spacing.y),
+                        );
+                    }
+                    scroll.show_rows(ui, row_height, row_count, |ui, rows| {
+                        ui.set_min_width(panel_width.max(160.0));
+                        for row in rows {
+                            ui.horizontal(|ui| {
+                                for index in row * columns
+                                    ..((row + 1) * columns).min(self.filer.entries.len())
+                                {
+                                    let entry = self.filer.entries[index].clone();
+                                    ui.push_id(entry.path.clone(), |ui| {
+                                        self.filer_thumbnail_tile(
+                                            ui,
+                                            entry,
+                                            item_width,
+                                            focus_target.as_ref(),
+                                            &mut focus_consumed,
+                                        );
+                                    });
+                                }
+                            });
+                        }
+                    });
                 }
                 if focus_consumed {
                     self.pending_filer_focus_path = None;
@@ -1007,32 +1042,6 @@ impl ViewerApp {
         if response.clicked() {
             self.activate_filer_entry(entry);
         }
-    }
-
-    fn filer_thumbnail_grid(
-        &mut self,
-        ui: &mut egui::Ui,
-        entries: Vec<FilerEntry>,
-        item_width: f32,
-        focus_target: Option<&std::path::PathBuf>,
-        focus_consumed: &mut bool,
-    ) {
-        let available = ui.available_width().max(item_width);
-        let spacing = 8.0;
-        let columns = ((available + spacing) / (item_width.max(1.0) + spacing))
-            .floor()
-            .max(1.0) as usize;
-        egui::Grid::new("filer_thumbnail_grid")
-            .num_columns(columns)
-            .spacing(egui::vec2(spacing, spacing))
-            .show(ui, |ui| {
-                for (index, entry) in entries.into_iter().enumerate() {
-                    self.filer_thumbnail_tile(ui, entry, item_width, focus_target, focus_consumed);
-                    if (index + 1) % columns == 0 {
-                        ui.end_row();
-                    }
-                }
-            });
     }
 
     fn filer_thumbnail_tile(
@@ -1152,7 +1161,12 @@ impl ViewerApp {
             .max_height(height_range.max)
             .show(ctx, |ui| {
                 let mut close_requested = false;
-                let focus_target = self.pending_subfiler_focus_path.clone();
+                let focus_target = self
+                    .filer
+                    .pending_request_id
+                    .is_none()
+                    .then(|| self.pending_subfiler_focus_path.clone())
+                    .flatten();
                 let mut focus_consumed = false;
                 ui.horizontal(|ui| {
                     ui.label(self.text(UiTextKey::Subfiler));
@@ -1165,72 +1179,88 @@ impl ViewerApp {
                         close_requested = true;
                     }
                 });
-                egui::ScrollArea::horizontal().show(ui, |ui| {
+                let mut file_indices = self
+                    .filer
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, entry)| (!entry.is_container).then_some(index))
+                    .collect::<Vec<_>>();
+                if self.options.manga_right_to_left {
+                    file_indices.reverse();
+                }
+                let tile_width = 112.0;
+                let stride = tile_width + ui.spacing().item_spacing.x;
+                let focus_index = focus_target.as_ref().and_then(|path| {
+                    file_indices
+                        .iter()
+                        .position(|&index| &self.filer.entries[index].path == path)
+                });
+                let mut scroll = egui::ScrollArea::horizontal();
+                if let Some(index) = focus_index {
+                    let offset = index as f32 * stride;
+                    scroll = scroll.horizontal_scroll_offset(if self.options.manga_right_to_left {
+                        (offset - ui.available_width() + stride).max(0.0)
+                    } else {
+                        offset
+                    });
+                }
+                scroll.show_viewport(ui, |ui, viewport| {
+                    ui.set_min_width(file_indices.len() as f32 * stride);
+                    let start = ((viewport.min.x / stride).floor() as usize)
+                        .saturating_sub(1)
+                        .min(file_indices.len());
+                    let end = ((viewport.max.x / stride).ceil() as usize + 1)
+                        .min(file_indices.len())
+                        .max(start);
                     ui.horizontal(|ui| {
-                        let mut entries = self.filer.entries.clone();
-                        if self.options.manga_right_to_left {
-                            entries.reverse();
+                        if start > 0 {
+                            ui.add_space(start as f32 * stride - ui.spacing().item_spacing.x);
                         }
-                        if let Some(index) = entries
-                            .iter()
-                            .position(|entry| focus_target.as_ref() == Some(&entry.path))
-                        {
-                            let start = index.saturating_sub(2);
-                            let end = (index + 3).min(entries.len());
-                            for entry in &entries[start..end] {
-                                if !entry.is_container {
-                                    self.ensure_thumbnail(&entry.path, 72);
-                                }
-                            }
-                        }
-                        for entry in entries {
-                            if entry.is_container {
-                                continue;
-                            }
+                        for &index in &file_indices[start..end] {
+                            let entry = self.filer.entries[index].clone();
                             self.ensure_thumbnail(&entry.path, 72);
                             let selected = self.current_navigation_path == entry.path;
-                            let mut frame = egui::Frame::group(ui.style());
-                            if selected {
-                                frame.stroke =
-                                    egui::Stroke::new(2.0, ui.visuals().selection.stroke.color);
-                            }
-                            frame.show(ui, |ui| {
-                                if let Some(texture) = self.thumbnail_cache.get(&entry.path) {
-                                    let response = ui.add(egui::Button::image(
-                                        egui::Image::from_texture(texture)
-                                            .fit_to_exact_size(egui::vec2(72.0, 72.0)),
-                                    ));
-                                    if focus_target.as_ref() == Some(&entry.path) {
-                                        ui.scroll_to_rect(
-                                            response.rect,
-                                            Some(if self.options.manga_right_to_left {
-                                                egui::Align::Max
+                            ui.push_id(&entry.path, |ui| {
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(tile_width, 96.0),
+                                    egui::Layout::top_down(egui::Align::Center),
+                                    |ui| {
+                                        let mut frame = egui::Frame::group(ui.style());
+                                        if selected {
+                                            frame.stroke = egui::Stroke::new(
+                                                2.0,
+                                                ui.visuals().selection.stroke.color,
+                                            );
+                                        }
+                                        frame.show(ui, |ui| {
+                                            let response = if let Some(texture) =
+                                                self.thumbnail_cache.get(&entry.path)
+                                            {
+                                                ui.add(egui::Button::image(
+                                                    egui::Image::from_texture(texture)
+                                                        .fit_to_exact_size(egui::vec2(72.0, 72.0)),
+                                                ))
                                             } else {
-                                                egui::Align::Min
-                                            }),
-                                        );
-                                        focus_consumed = true;
-                                    }
-                                    if response.clicked() {
-                                        self.activate_filer_entry(entry.clone());
-                                    }
-                                } else {
-                                    let response = ui.button("...");
-                                    if focus_target.as_ref() == Some(&entry.path) {
-                                        ui.scroll_to_rect(
-                                            response.rect,
-                                            Some(if self.options.manga_right_to_left {
-                                                egui::Align::Max
-                                            } else {
-                                                egui::Align::Min
-                                            }),
-                                        );
-                                        focus_consumed = true;
-                                    }
-                                    if response.clicked() {
-                                        self.activate_filer_entry(entry.clone());
-                                    }
-                                }
+                                                ui.button("...")
+                                            };
+                                            if focus_target.as_ref() == Some(&entry.path) {
+                                                ui.scroll_to_rect(
+                                                    response.rect,
+                                                    Some(if self.options.manga_right_to_left {
+                                                        egui::Align::Max
+                                                    } else {
+                                                        egui::Align::Min
+                                                    }),
+                                                );
+                                                focus_consumed = true;
+                                            }
+                                            if response.clicked() {
+                                                self.activate_filer_entry(entry.clone());
+                                            }
+                                        });
+                                    },
+                                );
                             });
                         }
                     });
