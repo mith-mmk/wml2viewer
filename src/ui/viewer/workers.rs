@@ -148,8 +148,8 @@ impl ViewerApp {
     }
 
     pub(super) fn apply_spread_companion_result(&mut self, companion: Option<LoadedRenderPage>) {
-        let desired =
-            self.desired_manga_companion_path_for_navigation(&self.current_navigation_path);
+        let navigation_path = self.current_navigation_path.clone();
+        let desired = self.desired_manga_companion_path_for_navigation(&navigation_path);
         match companion {
             Some(companion) if desired.as_ref() == Some(&companion.path) => {
                 self.companion_navigation_path = Some(companion.path.clone());
@@ -313,16 +313,12 @@ impl ViewerApp {
         );
         let previous_navigation_path = self.current_navigation_path.clone();
         if let Some(pending_navigation_path) = self.pending_navigation_path.take() {
-            self.current_navigation_path = if path
-                .as_ref()
-                .is_some_and(|_| is_browser_container(&pending_navigation_path))
-            {
-                resolve_navigation_entry_path(&pending_navigation_path)
-                    .or_else(|| path.clone())
-                    .unwrap_or(pending_navigation_path)
-            } else {
-                pending_navigation_path
-            };
+            self.current_navigation_path =
+                resolved_navigation_path_for_load(pending_navigation_path, path.as_deref());
+        }
+        if previous_navigation_path != self.current_navigation_path {
+            self.zoom_factor = 1.0;
+            self.zoom = 1.0;
         }
         let loaded_path = path.clone();
         if let Some(path) = path {
@@ -489,7 +485,7 @@ impl ViewerApp {
         self.flush_pending_viewer_navigation();
     }
 
-    pub(super) fn next_preload_candidate(&self) -> Option<PathBuf> {
+    pub(super) fn next_preload_candidate(&mut self) -> Option<PathBuf> {
         if let Some(companion) = self.desired_manga_companion_path() {
             let companion_ready = self.visible_companion().is_some();
             if should_prioritize_companion_preload(
@@ -1264,6 +1260,7 @@ impl ViewerApp {
                     self.filer.pending_request_id = None;
                     self.filer.directory = Some(directory);
                     self.filer.entries = entries;
+                    self.manga_companion_lookup = None;
                     let snapshot_signature = filer_entries_signature(&self.filer.entries);
                     let snapshot_changed_in_same_directory =
                         filer_snapshot_changed_in_same_directory(

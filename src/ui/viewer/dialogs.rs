@@ -395,13 +395,10 @@ impl ViewerApp {
     }
 
     pub(super) fn loading_card_ui(&self, ctx: &egui::Context) {
-        if !self.current_texture_is_default {
-            return;
-        }
-        if self.empty_mode {
-            return;
-        }
-        if self.active_request.is_none() && self.active_fs_request_id.is_none() {
+        if !waiting_card_should_show(
+            self.active_request.is_some(),
+            self.active_fs_request_id.is_some(),
+        ) {
             return;
         }
         let Some(loading_started_at) = self.overlay.loading_started_at else {

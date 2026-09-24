@@ -293,6 +293,50 @@ fn slide_transition_effect_reverses_for_backward_navigation() {
 }
 
 #[test]
+fn outgoing_slide_keeps_original_image_dimensions_when_next_image_is_smaller() {
+    let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let previous = egui::Rect::from_min_size(egui::pos2(100.0, 0.0), egui::vec2(600.0, 600.0));
+    let next = egui::Rect::from_min_size(egui::pos2(300.0, 150.0), egui::vec2(200.0, 300.0));
+    let halfway = slide_transition_offset(TransitionEffect::SlideRightToLeft, viewport.size(), 0.5);
+
+    assert_eq!(previous.translate(halfway.previous).size(), previous.size());
+    assert_eq!(next.translate(halfway.current).size(), next.size());
+    assert_eq!(halfway.previous.x, -400.0);
+    assert_eq!(halfway.current.x, 400.0);
+    let done = slide_transition_offset(TransitionEffect::SlideRightToLeft, viewport.size(), 1.0);
+    assert!(!slide_layer_clip(viewport, done.previous).is_positive());
+    assert_eq!(slide_layer_clip(viewport, done.current), viewport);
+}
+
+#[test]
+fn scanning_a_folder_shows_waiting_card_before_first_image() {
+    assert!(waiting_card_should_show(false, true));
+    assert!(waiting_card_should_show(true, false));
+    assert!(!waiting_card_should_show(false, false));
+}
+
+#[test]
+fn hidden_filer_defers_large_directory_scan_until_a_filer_is_visible() {
+    assert!(should_defer_filer_scan(false, false));
+    assert!(!should_defer_filer_scan(true, false));
+    assert!(!should_defer_filer_scan(false, true));
+}
+
+#[test]
+fn directory_load_commits_the_path_returned_by_the_render_worker() {
+    let folder = crate::test_support::make_test_dir("loaded-navigation-path");
+    let first = folder.join("001.png");
+    let loaded = folder.join("002.png");
+    std::fs::write(&first, b"first").unwrap();
+    std::fs::write(&loaded, b"second").unwrap();
+
+    assert_eq!(
+        resolved_navigation_path_for_load(folder, Some(&loaded)),
+        loaded
+    );
+}
+
+#[test]
 fn non_slide_transition_effects_ignore_navigation_direction() {
     for effect in [
         TransitionEffect::None,
@@ -867,6 +911,43 @@ fn spread_companion_path_for_navigation_uses_same_branch_neighbor() {
     assert_eq!(companion.as_deref(), Some(second.as_path()));
 
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn companion_lookup_reuses_result_until_key_changes() {
+    let mut cache = None;
+    let key = MangaCompanionLookupKey {
+        navigation_path: PathBuf::from("001.png"),
+        sort: NavigationSortOption::Name,
+        direction: 1,
+        branch_path: Some(PathBuf::from("pages")),
+        branch_modified: None,
+        branch_len: Some(2),
+    };
+    let lookups = std::cell::Cell::new(0);
+    let resolve = || {
+        lookups.set(lookups.get() + 1);
+        Some(PathBuf::from("002.png"))
+    };
+    assert_eq!(
+        cached_spread_companion_path(&mut cache, key.clone(), resolve),
+        Some(PathBuf::from("002.png"))
+    );
+    assert_eq!(
+        cached_spread_companion_path(&mut cache, key.clone(), resolve),
+        Some(PathBuf::from("002.png"))
+    );
+    assert_eq!(lookups.get(), 1);
+
+    let changed = MangaCompanionLookupKey {
+        branch_len: Some(3),
+        ..key
+    };
+    assert_eq!(
+        cached_spread_companion_path(&mut cache, changed, resolve),
+        Some(PathBuf::from("002.png"))
+    );
+    assert_eq!(lookups.get(), 2);
 }
 
 #[test]

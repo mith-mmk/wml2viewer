@@ -986,44 +986,56 @@ fn recursive_edge_leaf(cache: &mut FilesystemCache, item: &Path, forward: bool) 
     }
 }
 
-fn recursive_sort_group(path: &Path, order: RecursiveOrder) -> bool {
-    path.is_dir()
-        || is_listed_file_path(path)
-        || (order.archive_as_container_in_sort
-            && (is_zip_file_path(path) || is_lha_file_path(path)))
-}
-
 fn sort_recursive_children(children: &mut [PathBuf], order: RecursiveOrder) {
-    children.sort_by(|left, right| {
+    struct SortEntry {
+        path: PathBuf,
+        name: String,
+        group: bool,
+        modified: Option<SystemTime>,
+        size: Option<u64>,
+    }
+    let need_metadata = order.separate_dirs
+        || matches!(
+            order.sort,
+            NavigationSortOption::Date | NavigationSortOption::Size
+        );
+    let mut entries = children
+        .iter()
+        .map(|path| {
+            let metadata = need_metadata.then(|| fs::metadata(path).ok()).flatten();
+            SortEntry {
+                path: path.clone(),
+                name: browser_entry_display_name(path),
+                group: metadata.as_ref().is_some_and(|metadata| metadata.is_dir())
+                    || is_listed_file_path(path)
+                    || (order.archive_as_container_in_sort
+                        && (is_zip_file_path(path) || is_lha_file_path(path))),
+                modified: metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.modified().ok()),
+                size: metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.is_file().then_some(metadata.len())),
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
         if order.separate_dirs {
-            let group = recursive_sort_group(right, order).cmp(&recursive_sort_group(left, order));
+            let group = right.group.cmp(&left.group);
             if group != std::cmp::Ordering::Equal {
                 return group;
             }
         }
-        let left_name = browser_entry_display_name(left);
-        let right_name = browser_entry_display_name(right);
         let name_order = || match order.sort {
-            NavigationSortOption::OsName => compare_os_str(&left_name, &right_name),
+            NavigationSortOption::OsName => compare_os_str(&left.name, &right.name),
             NavigationSortOption::NameCaseSensitive => {
-                compare_natural_str(&left_name, &right_name, true)
+                compare_natural_str(&left.name, &right.name, true)
             }
-            _ => compare_natural_str(&left_name, &right_name, false),
+            _ => compare_natural_str(&left.name, &right.name, false),
         };
         let primary = match order.sort {
-            NavigationSortOption::Date => {
-                let modified =
-                    |path: &Path| fs::metadata(path).ok().and_then(|m| m.modified().ok());
-                modified(left).cmp(&modified(right))
-            }
-            NavigationSortOption::Size => {
-                let size = |path: &Path| {
-                    fs::metadata(path)
-                        .ok()
-                        .and_then(|m| m.is_file().then_some(m.len()))
-                };
-                size(left).cmp(&size(right))
-            }
+            NavigationSortOption::Date => left.modified.cmp(&right.modified),
+            NavigationSortOption::Size => left.size.cmp(&right.size),
             _ => name_order(),
         };
         let compared = if primary == std::cmp::Ordering::Equal {
@@ -1032,14 +1044,17 @@ fn sort_recursive_children(children: &mut [PathBuf], order: RecursiveOrder) {
             primary
         };
         let compared = compared
-            .then_with(|| left_name.cmp(&right_name))
-            .then_with(|| left.cmp(right));
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.path.cmp(&right.path));
         if order.ascending {
             compared
         } else {
             compared.reverse()
         }
     });
+    for (destination, entry) in children.iter_mut().zip(entries) {
+        *destination = entry.path;
+    }
 }
 
 impl FilesystemCache {

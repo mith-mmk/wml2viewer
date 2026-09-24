@@ -268,6 +268,13 @@ impl ViewerApp {
         self.show_filer = show;
         if show {
             self.filer.committed_browse_directory = None;
+            if matches!(
+                self.filesystem_options.folder_refresh,
+                FolderRefreshMode::Auto
+            ) {
+                self.filer.entries.clear();
+                self.last_filer_snapshot_signature = None;
+            }
             self.pending_filer_focus_path = Some(self.current_navigation_path.clone());
             self.sync_filer_directory_with_current_path();
             return;
@@ -275,6 +282,9 @@ impl ViewerApp {
 
         self.pending_filer_focus_path = None;
         self.filer.committed_browse_directory = None;
+        if !self.show_subfiler {
+            self.cancel_filer_scan();
+        }
         if should_clear_filer_request_on_hide(self.filer.pending_user_request.as_ref()) {
             self.log_bench_state(
                 "viewer.filer.pending_request_cleared_on_hide",
@@ -291,8 +301,12 @@ impl ViewerApp {
         self.show_subfiler = show;
         if show {
             self.pending_subfiler_focus_path = Some(self.current_navigation_path.clone());
+            self.sync_filer_directory_with_current_path();
         } else {
             self.pending_subfiler_focus_path = None;
+            if !self.show_filer {
+                self.cancel_filer_scan();
+            }
         }
     }
 

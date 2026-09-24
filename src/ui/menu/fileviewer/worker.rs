@@ -13,6 +13,9 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 pub(crate) enum FilerCommand {
+    Cancel {
+        request_id: u64,
+    },
     OpenDirectory {
         request_id: u64,
         dir: PathBuf,
@@ -58,6 +61,9 @@ pub(crate) fn spawn_filer_worker() -> (Sender<FilerCommand>, Receiver<FilerResul
                 latest = next;
             }
             match latest {
+                FilerCommand::Cancel { request_id } => {
+                    latest_request_id.store(request_id, Ordering::Relaxed);
+                }
                 FilerCommand::OpenDirectory {
                     request_id,
                     dir,
@@ -152,10 +158,16 @@ fn scan_directory_request(
         return Vec::new();
     }
 
-    let mut entries = collected
-        .into_iter()
-        .map(|path| build_filer_entry(path, archive_as_container_in_sort))
-        .collect::<Vec<_>>();
+    let mut entries = Vec::with_capacity(collected.len());
+    for path in collected {
+        if request_is_stale(latest_request_id, request_id) {
+            return Vec::new();
+        }
+        entries.push(build_filer_entry(path, archive_as_container_in_sort));
+    }
+    if request_is_stale(latest_request_id, request_id) {
+        return Vec::new();
+    }
     sort_entries(
         &mut entries,
         sort_field,
@@ -229,7 +241,15 @@ fn collect_browser_entries(
         collected.push(path);
     }
 
-    sort_paths_for_navigation(&mut collected, sort);
+    if request_is_stale(latest_request_id, request_id) {
+        return Vec::new();
+    }
+    sort_paths_for_navigation(&mut collected, sort, || {
+        request_is_stale(latest_request_id, request_id)
+    });
+    if request_is_stale(latest_request_id, request_id) {
+        return Vec::new();
+    }
 
     let mut preview_chunk = Vec::new();
     for path in &collected {
@@ -383,7 +403,11 @@ fn compare_name(left: &str, right: &str, mode: NameSortMode) -> std::cmp::Orderi
     }
 }
 
-fn sort_paths_for_navigation(paths: &mut [PathBuf], sort: NavigationSortOption) {
+fn sort_paths_for_navigation(
+    paths: &mut [PathBuf],
+    sort: NavigationSortOption,
+    cancelled: impl Fn() -> bool,
+) {
     match sort {
         NavigationSortOption::OsName => {
             paths.sort_by(|left, right| {
@@ -408,18 +432,34 @@ fn sort_paths_for_navigation(paths: &mut [PathBuf], sort: NavigationSortOption) 
         NavigationSortOption::Date => {
             paths.sort_by_cached_key(|path| {
                 (
-                    fs::metadata(path)
-                        .and_then(|metadata| metadata.modified())
-                        .ok(),
-                    label_for_path(path),
+                    if cancelled() {
+                        None
+                    } else {
+                        fs::metadata(path)
+                            .and_then(|metadata| metadata.modified())
+                            .ok()
+                    },
+                    if cancelled() {
+                        String::new()
+                    } else {
+                        label_for_path(path)
+                    },
                 )
             });
         }
         NavigationSortOption::Size => {
             paths.sort_by_cached_key(|path| {
                 (
-                    fs::metadata(path).map(|metadata| metadata.len()).ok(),
-                    label_for_path(path),
+                    if cancelled() {
+                        None
+                    } else {
+                        fs::metadata(path).map(|metadata| metadata.len()).ok()
+                    },
+                    if cancelled() {
+                        String::new()
+                    } else {
+                        label_for_path(path)
+                    },
                 )
             });
         }

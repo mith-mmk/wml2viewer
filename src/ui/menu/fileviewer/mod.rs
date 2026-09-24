@@ -895,42 +895,64 @@ impl ViewerApp {
                     self.sync_navigation_sort_with_filer_sort();
                     self.refresh_current_filer_directory();
                 }
+                if self.filer.pending_request_id.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(self.text(UiTextKey::Loading));
+                    });
+                }
                 let panel_width = ui.available_width();
                 let focus_target = self.pending_filer_focus_path.clone();
                 let mut focus_consumed = false;
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
+                if matches!(
+                    self.filer.view_mode,
+                    FilerViewMode::List | FilerViewMode::Detail
+                ) {
+                    let row_height = ui.spacing().interact_size.y;
+                    let row_stride = row_height + ui.spacing().item_spacing.y;
+                    let focus_index = focus_target.as_ref().and_then(|path| {
+                        self.filer
+                            .entries
+                            .iter()
+                            .position(|entry| &entry.path == path)
+                    });
+                    let mut scroll = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                    if let Some(index) = focus_index {
+                        scroll = scroll.vertical_scroll_offset(index as f32 * row_stride);
+                    }
+                    scroll.show_rows(ui, row_height, self.filer.entries.len(), |ui, range| {
                         ui.set_min_width(panel_width.max(160.0));
-                        let entries = self.filer.entries.clone();
-                        match self.filer.view_mode {
-                            FilerViewMode::List | FilerViewMode::Detail => {
-                                for entry in entries {
-                                    self.filer_entry_row(
-                                        ui,
-                                        entry,
-                                        focus_target.as_ref(),
-                                        &mut focus_consumed,
-                                    );
-                                }
-                            }
-                            _ => {
-                                let item_width = match self.filer.view_mode {
-                                    FilerViewMode::ThumbnailSmall => 72.0,
-                                    FilerViewMode::ThumbnailMedium => 112.0,
-                                    FilerViewMode::ThumbnailLarge => 160.0,
-                                    _ => 96.0,
-                                } * self.filer.thumbnail_scale;
-                                self.filer_thumbnail_grid(
-                                    ui,
-                                    entries,
-                                    item_width,
-                                    focus_target.as_ref(),
-                                    &mut focus_consumed,
-                                );
-                            }
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                        let visible_entries = self.filer.entries[range].to_vec();
+                        for entry in visible_entries {
+                            self.filer_entry_row(
+                                ui,
+                                entry,
+                                focus_target.as_ref(),
+                                &mut focus_consumed,
+                            );
                         }
                     });
+                } else {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_min_width(panel_width.max(160.0));
+                            let item_width = match self.filer.view_mode {
+                                FilerViewMode::ThumbnailSmall => 72.0,
+                                FilerViewMode::ThumbnailMedium => 112.0,
+                                FilerViewMode::ThumbnailLarge => 160.0,
+                                _ => 96.0,
+                            } * self.filer.thumbnail_scale;
+                            self.filer_thumbnail_grid(
+                                ui,
+                                self.filer.entries.clone(),
+                                item_width,
+                                focus_target.as_ref(),
+                                &mut focus_consumed,
+                            );
+                        });
+                }
                 if focus_consumed {
                     self.pending_filer_focus_path = None;
                 }

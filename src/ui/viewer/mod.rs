@@ -42,7 +42,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 mod dialogs;
 mod navigation;
 pub mod options;
@@ -77,6 +77,7 @@ pub(crate) struct ViewerApp {
     pub(crate) current_texture: TextureHandle,
     pending_transition_previous: Option<TransitionPreviousState>,
     active_transition: Option<ImageTransitionState>,
+    last_drawn_scene: Option<TransitionScene>,
     pub(crate) egui_ctx: egui::Context,
     system_visuals: egui::Visuals,
 
@@ -173,6 +174,7 @@ pub(crate) struct ViewerApp {
     pub(crate) companion_active_request: Option<ActiveRenderRequest>,
     pub(crate) companion_navigation_path: Option<PathBuf>,
     companion_display: Option<DisplayedPageState>,
+    manga_companion_lookup: Option<MangaCompanionLookup>,
     pub(crate) preload_tx: Sender<RenderCommand>,
     pub(crate) preload_rx: Receiver<RenderResult>,
     pub(crate) preload_join: Option<JoinHandle<()>>,
@@ -186,6 +188,11 @@ pub(crate) struct ViewerApp {
     bench_automation: Option<BenchAutomationState>,
     last_auto_refresh_at: Instant,
     pub(crate) last_auto_refresh_signature: Option<(PathBuf, u64)>,
+    auto_refresh_tx: Sender<AutoRefreshResult>,
+    auto_refresh_rx: Receiver<AutoRefreshResult>,
+    auto_refresh_pending: Option<(u64, PathBuf)>,
+    next_auto_refresh_id: u64,
+    auto_refresh_dirty: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -260,9 +267,48 @@ struct BenchAutomationState {
 
 #[derive(Clone)]
 struct TransitionPreviousState {
-    texture: TextureHandle,
-    draw_size: egui::Vec2,
+    scene: TransitionScene,
     direction: Option<ImageTransitionDirection>,
+}
+
+#[derive(Clone)]
+struct TransitionImageLayer {
+    texture: TextureHandle,
+    rect: egui::Rect,
+}
+
+#[derive(Clone)]
+struct TransitionSeparatorLayer {
+    rect: egui::Rect,
+    options: crate::ui::viewer::options::MangaSeparatorOptions,
+}
+
+#[derive(Clone)]
+struct TransitionScene {
+    viewport: egui::Rect,
+    images: Vec<TransitionImageLayer>,
+    separator: Option<TransitionSeparatorLayer>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MangaCompanionLookupKey {
+    navigation_path: PathBuf,
+    sort: NavigationSortOption,
+    direction: isize,
+    branch_path: Option<PathBuf>,
+    branch_modified: Option<SystemTime>,
+    branch_len: Option<u64>,
+}
+
+struct MangaCompanionLookup {
+    key: MangaCompanionLookupKey,
+    path: Option<PathBuf>,
+}
+
+struct AutoRefreshResult {
+    request_id: u64,
+    directory: PathBuf,
+    signature: Option<u64>,
 }
 
 struct ImageTransitionState {
@@ -673,6 +719,31 @@ fn loading_card_message(message: Option<&str>) -> String {
     }
 }
 
+fn waiting_card_should_show(active_render_request: bool, active_filesystem_request: bool) -> bool {
+    active_render_request || active_filesystem_request
+}
+
+fn should_defer_filer_scan(show_filer: bool, show_subfiler: bool) -> bool {
+    !show_filer && !show_subfiler
+}
+
+fn resolved_navigation_path_for_load(
+    pending_navigation_path: PathBuf,
+    loaded_path: Option<&Path>,
+) -> PathBuf {
+    if pending_navigation_path.is_dir() {
+        return loaded_path
+            .map(Path::to_path_buf)
+            .unwrap_or(pending_navigation_path);
+    }
+    if loaded_path.is_some() && is_browser_container(&pending_navigation_path) {
+        return resolve_navigation_entry_path(&pending_navigation_path)
+            .or_else(|| loaded_path.map(Path::to_path_buf))
+            .unwrap_or(pending_navigation_path);
+    }
+    pending_navigation_path
+}
+
 fn ellipsize_end(text: &str, max_chars: usize) -> String {
     let chars: Vec<char> = text.chars().collect();
     if chars.len() <= max_chars {
@@ -834,6 +905,7 @@ impl ViewerApp {
         let (worker_tx, worker_rx, worker_join) = spawn_render_worker(source.clone());
         let (companion_tx, companion_rx, companion_join) = spawn_render_worker(source.clone());
         let (preload_tx, preload_rx, preload_join) = spawn_render_worker(source.clone());
+        let (auto_refresh_tx, auto_refresh_rx) = mpsc::channel();
         let resource_locale_input = config.resources.locale.clone().unwrap_or_default();
         let resource_font_paths_input = join_search_paths(&config.resources.font_paths);
         let defer_navigation_workers = !show_filer_on_start;
@@ -857,6 +929,7 @@ impl ViewerApp {
             current_texture: default_texture.clone(),
             pending_transition_previous: None,
             active_transition: None,
+            last_drawn_scene: None,
             egui_ctx: cc.egui_ctx.clone(),
             system_visuals: cc.egui_ctx.style().visuals.clone(),
 
@@ -956,6 +1029,7 @@ impl ViewerApp {
             companion_active_request: None,
             companion_navigation_path: None,
             companion_display: None,
+            manga_companion_lookup: None,
             preload_tx,
             preload_rx,
             preload_join: Some(preload_join),
@@ -975,6 +1049,11 @@ impl ViewerApp {
             }),
             last_auto_refresh_at: Instant::now(),
             last_auto_refresh_signature: None,
+            auto_refresh_tx,
+            auto_refresh_rx,
+            auto_refresh_pending: None,
+            next_auto_refresh_id: 0,
+            auto_refresh_dirty: None,
         };
 
         this.save_dialog.output_dir = this
@@ -1029,51 +1108,42 @@ impl ViewerApp {
         self.source_size()
     }
 
-    fn paint_manga_separator(&self, ui: &mut egui::Ui, height: f32) {
+    fn paint_manga_separator(
+        &self,
+        ui: &mut egui::Ui,
+        height: f32,
+    ) -> Option<TransitionSeparatorLayer> {
         let width = self.options.manga_separator.pixels.max(0.0);
         if width <= 0.0 {
-            return;
+            return None;
         }
 
         let (rect, _) = ui.allocate_exact_size(vec2(width, height.max(1.0)), egui::Sense::hover());
-        match self.options.manga_separator.style {
-            crate::ui::viewer::options::MangaSeparatorStyle::None => {}
-            crate::ui::viewer::options::MangaSeparatorStyle::Solid => {
-                ui.painter().rect_filled(
-                    rect,
-                    0.0,
-                    egui::Color32::from_rgba_unmultiplied(
-                        self.options.manga_separator.color[0],
-                        self.options.manga_separator.color[1],
-                        self.options.manga_separator.color[2],
-                        self.options.manga_separator.color[3],
-                    ),
-                );
-            }
-            crate::ui::viewer::options::MangaSeparatorStyle::Shadow => {
-                let base = self.options.manga_separator.color;
-                let steps = width.max(2.0) as usize;
-                for step in 0..steps {
-                    let t = (step as f32 + 0.5) / steps as f32;
-                    let alpha = (1.0 - ((t - 0.5).abs() * 2.0)).max(0.0) * (base[3] as f32);
-                    let x0 = rect.left() + (step as f32 / steps as f32) * rect.width();
-                    let x1 = rect.left() + ((step + 1) as f32 / steps as f32) * rect.width();
-                    let band = egui::Rect::from_min_max(
-                        egui::pos2(x0, rect.top()),
-                        egui::pos2(x1, rect.bottom()),
-                    );
-                    ui.painter().rect_filled(
-                        band,
-                        0.0,
-                        egui::Color32::from_rgba_unmultiplied(
-                            base[0],
-                            base[1],
-                            base[2],
-                            alpha.round().clamp(0.0, 255.0) as u8,
-                        ),
-                    );
-                }
-            }
+        let layer = TransitionSeparatorLayer {
+            rect,
+            options: self.options.manga_separator.clone(),
+        };
+        if self.active_transition.is_none() {
+            paint_transition_separator(ui.painter(), &layer, egui::Vec2::ZERO, 1.0);
+        }
+        Some(layer)
+    }
+
+    fn add_transition_image_widget(
+        &self,
+        ui: &mut egui::Ui,
+        texture: &TextureHandle,
+        size: egui::Vec2,
+    ) -> egui::Response {
+        if self.active_transition.is_some() {
+            ui.allocate_exact_size(size, egui::Sense::click_and_drag())
+                .1
+        } else {
+            ui.add(
+                egui::Image::from_texture(texture)
+                    .fit_to_exact_size(size)
+                    .sense(egui::Sense::click_and_drag()),
+            )
         }
     }
 
@@ -1216,49 +1286,117 @@ impl ViewerApp {
     }
 
     fn poll_auto_folder_refresh(&mut self) {
-        if !matches!(
+        let auto_enabled = matches!(
             self.filesystem_options.folder_refresh,
             FolderRefreshMode::Auto
-        ) {
+        );
+        let filer_visible = self.show_filer || self.show_subfiler;
+        let observed_directory = if filer_visible {
+            self.filer
+                .directory
+                .clone()
+                .or_else(|| self.current_directory())
+        } else {
+            self.current_directory()
+        };
+        if self
+            .auto_refresh_pending
+            .as_ref()
+            .is_some_and(|(_, directory)| observed_directory.as_ref() != Some(directory))
+        {
+            self.auto_refresh_pending = None;
             self.last_auto_refresh_signature = None;
+            self.last_auto_refresh_at = Instant::now() - AUTO_FOLDER_REFRESH_INTERVAL;
+        }
+        while let Ok(result) = self.auto_refresh_rx.try_recv() {
+            if self.auto_refresh_pending.as_ref()
+                != Some(&(result.request_id, result.directory.clone()))
+            {
+                continue;
+            }
+            self.auto_refresh_pending = None;
+            if !auto_enabled || observed_directory.as_ref() != Some(&result.directory) {
+                continue;
+            }
+            let Some(signature) = result.signature else {
+                self.last_auto_refresh_signature = None;
+                continue;
+            };
+            let previous = self
+                .last_auto_refresh_signature
+                .replace((result.directory.clone(), signature));
+            if previous
+                .as_ref()
+                .is_none_or(|(previous_dir, _)| previous_dir != &result.directory)
+            {
+                self.manga_companion_lookup = None;
+            }
+            let changed = previous
+                .as_ref()
+                .is_some_and(|(previous_dir, previous_signature)| {
+                    previous_dir == &result.directory && *previous_signature != signature
+                });
+            if !changed {
+                continue;
+            }
+            self.manga_companion_lookup = None;
+            self.log_bench_state(
+                "viewer.filer.auto_refresh_detected",
+                serde_json::json!({"directory": result.directory.display().to_string()}),
+            );
+            if filer_visible {
+                if self.filer.pending_request_id.is_some() {
+                    self.auto_refresh_dirty = Some(result.directory);
+                } else {
+                    self.refresh_current_filer_directory();
+                }
+            } else {
+                self.filer.entries.clear();
+                self.last_filer_snapshot_signature = None;
+            }
+        }
+        if !auto_enabled {
+            self.last_auto_refresh_signature = None;
+            self.auto_refresh_dirty = None;
+            self.auto_refresh_pending = None;
             return;
         }
-        if self.last_auto_refresh_at.elapsed() < AUTO_FOLDER_REFRESH_INTERVAL {
+        if let Some(dirty_dir) = self.auto_refresh_dirty.take() {
+            if filer_visible && observed_directory.as_ref() == Some(&dirty_dir) {
+                if self.filer.pending_request_id.is_some() {
+                    self.auto_refresh_dirty = Some(dirty_dir);
+                } else {
+                    self.refresh_current_filer_directory();
+                }
+            }
+        }
+        self.egui_ctx
+            .request_repaint_after(AUTO_FOLDER_REFRESH_INTERVAL);
+        if (filer_visible && self.filer.pending_request_id.is_some())
+            || self.auto_refresh_pending.is_some()
+            || self.last_auto_refresh_at.elapsed() < AUTO_FOLDER_REFRESH_INTERVAL
+        {
             return;
         }
         self.last_auto_refresh_at = Instant::now();
-
-        let Some(dir) = self
-            .filer
-            .directory
-            .clone()
-            .or_else(|| self.current_directory())
-        else {
+        let Some(dir) = observed_directory else {
             self.last_auto_refresh_signature = None;
             return;
         };
-        let Some(signature) = folder_refresh_signature(&dir) else {
-            self.last_auto_refresh_signature = None;
-            return;
-        };
-        let previous = self
-            .last_auto_refresh_signature
-            .replace((dir.clone(), signature));
-        if previous
-            .as_ref()
-            .is_some_and(|(previous_dir, previous_signature)| {
-                previous_dir == &dir && *previous_signature != signature
-            })
-            && self.filer.pending_request_id.is_none()
-        {
-            self.log_bench_state(
-                "viewer.filer.auto_refresh_detected",
-                serde_json::json!({
-                    "directory": dir.display().to_string(),
-                }),
-            );
-            self.refresh_current_filer_directory();
-        }
+        self.next_auto_refresh_id = self.next_auto_refresh_id.wrapping_add(1).max(1);
+        let request_id = self.next_auto_refresh_id;
+        self.auto_refresh_pending = Some((request_id, dir.clone()));
+        let tx = self.auto_refresh_tx.clone();
+        let ctx = self.egui_ctx.clone();
+        std::thread::spawn(move || {
+            let signature = folder_refresh_signature(&dir);
+            let _ = tx.send(AutoRefreshResult {
+                request_id,
+                directory: dir,
+                signature,
+            });
+            ctx.request_repaint();
+        });
     }
 
     fn texture_options(&self) -> TextureOptions {
@@ -1347,7 +1485,6 @@ impl ViewerApp {
     fn transition_effect_enabled(&self) -> bool {
         self.options.animation
             && !matches!(self.options.transition.effect, TransitionEffect::None)
-            && !self.options.manga_mode
             && !self.current_texture_is_default
     }
 
@@ -1378,14 +1515,17 @@ impl ViewerApp {
         if !switching_image || branch_changed || !self.transition_effect_enabled() {
             return;
         }
-        self.pending_transition_previous = Some(TransitionPreviousState {
-            texture: self.current_texture.clone(),
-            draw_size: vec2(
-                self.current_canvas().width() as f32 * self.current_draw_scale(),
-                self.current_canvas().height() as f32 * self.current_draw_scale(),
-            ),
-            direction,
-        });
+        let Some(scene) = self.last_drawn_scene.clone() else {
+            return;
+        };
+        if !scene
+            .images
+            .iter()
+            .any(|image| image.texture.id() == self.current_texture.id())
+        {
+            return;
+        }
+        self.pending_transition_previous = Some(TransitionPreviousState { scene, direction });
     }
 
     fn start_image_transition(&mut self) {
@@ -1411,18 +1551,15 @@ impl ViewerApp {
         });
     }
 
-    fn draw_transition_image(
-        &mut self,
-        ui: &mut egui::Ui,
-        draw_size: egui::Vec2,
-    ) -> egui::Response {
+    fn draw_transition_scene(&mut self, ui: &mut egui::Ui, current: &TransitionScene) {
         let Some(state) = self.active_transition.as_mut() else {
-            return ui.add(
-                egui::Image::from_texture(&self.current_texture)
-                    .fit_to_exact_size(draw_size)
-                    .sense(egui::Sense::click_and_drag()),
-            );
+            return;
         };
+        if state.previous.scene.viewport != current.viewport {
+            self.cancel_image_transition("viewport_changed");
+            paint_transition_scene(ui.painter(), current, egui::Vec2::ZERO, 1.0);
+            return;
+        }
         let now = Instant::now();
         state.frames.record(
             ui.ctx().cumulative_frame_nr(),
@@ -1478,83 +1615,60 @@ impl ViewerApp {
             {
                 ui.ctx().request_repaint();
             }
-            return ui.add(
-                egui::Image::from_texture(&self.current_texture)
-                    .fit_to_exact_size(draw_size)
-                    .sense(egui::Sense::click_and_drag()),
-            );
+            paint_transition_scene(ui.painter(), current, egui::Vec2::ZERO, 1.0);
+            return;
         }
 
-        let (rect, response) = ui.allocate_exact_size(draw_size, egui::Sense::click_and_drag());
-        let previous_rect = centered_rect(rect, state.previous.draw_size);
-        let current_rect = rect;
+        let viewport = current.viewport;
+        let previous = &state.previous.scene;
         match state.effect {
             TransitionEffect::None => {
-                ui.painter().image(
-                    self.current_texture.id(),
-                    current_rect,
-                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
+                paint_transition_scene(ui.painter(), current, egui::Vec2::ZERO, 1.0);
             }
             TransitionEffect::Fade => {
-                paint_texture(
-                    ui.painter(),
-                    state.previous.texture.id(),
-                    previous_rect,
-                    1.0 - progress,
-                );
-                paint_texture(
-                    ui.painter(),
-                    self.current_texture.id(),
-                    current_rect,
-                    progress,
-                );
+                paint_transition_scene(ui.painter(), previous, egui::Vec2::ZERO, 1.0 - progress);
+                paint_transition_scene(ui.painter(), current, egui::Vec2::ZERO, progress);
             }
             TransitionEffect::SlideRightToLeft
             | TransitionEffect::SlideLeftToRight
             | TransitionEffect::SlideTopToBottom
             | TransitionEffect::SlideBottomToTop => {
-                let offset = slide_transition_offset(state.effect, rect.size(), progress);
-                paint_texture(
-                    ui.painter(),
-                    state.previous.texture.id(),
-                    previous_rect.translate(offset.previous),
+                let offset = slide_transition_offset(state.effect, viewport.size(), progress);
+                let old_clip = slide_layer_clip(viewport, offset.previous);
+                let new_clip = slide_layer_clip(viewport, offset.current);
+                paint_transition_scene(
+                    &ui.painter().with_clip_rect(old_clip),
+                    previous,
+                    offset.previous,
                     1.0,
                 );
-                paint_texture(
-                    ui.painter(),
-                    self.current_texture.id(),
-                    current_rect.translate(offset.current),
+                paint_transition_scene(
+                    &ui.painter().with_clip_rect(new_clip),
+                    current,
+                    offset.current,
                     1.0,
                 );
             }
             TransitionEffect::SpiralWipeIn | TransitionEffect::SpiralWipeOut => {
-                paint_texture(
-                    ui.painter(),
-                    state.previous.texture.id(),
-                    previous_rect,
+                paint_transition_scene(ui.painter(), previous, egui::Vec2::ZERO, 1.0);
+                let reveal = spiral_reveal_rect(viewport, progress);
+                paint_transition_scene(
+                    &ui.painter().with_clip_rect(reveal),
+                    current,
+                    egui::Vec2::ZERO,
                     1.0,
                 );
-                let reveal = spiral_reveal_rect(current_rect, progress);
-                ui.painter().with_clip_rect(reveal).image(
-                    self.current_texture.id(),
-                    current_rect,
-                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
                 if matches!(state.effect, TransitionEffect::SpiralWipeOut) {
-                    paint_texture(
+                    paint_transition_scene(
                         ui.painter(),
-                        state.previous.texture.id(),
-                        previous_rect,
+                        previous,
+                        egui::Vec2::ZERO,
                         1.0 - progress,
                     );
                 }
             }
         }
         ui.ctx().request_repaint();
-        response
     }
 
     fn current_canvas(&self) -> &Canvas {
@@ -1858,6 +1972,18 @@ impl ViewerApp {
         });
     }
 
+    pub(crate) fn cancel_filer_scan(&mut self) {
+        if self.filer.pending_request_id.take().is_none() {
+            return;
+        }
+        self.filer.entries.clear();
+        self.last_filer_snapshot_signature = None;
+        let request_id = self.alloc_filer_request_id();
+        if let Some(filer_tx) = &self.filer_tx {
+            let _ = filer_tx.send(FilerCommand::Cancel { request_id });
+        }
+    }
+
     pub(crate) fn browse_filer_directory(&mut self, dir: PathBuf) {
         self.filer.pending_user_request = Some(FilerUserRequest::BrowseDirectory {
             directory: dir.clone(),
@@ -1997,6 +2123,17 @@ impl ViewerApp {
                 return;
             }
         }
+        if should_defer_filer_scan(self.show_filer, self.show_subfiler) {
+            if self.filer.directory.as_ref() != Some(&dir) {
+                self.filer.entries.clear();
+                self.last_filer_snapshot_signature = None;
+            }
+            self.filer.directory = Some(dir);
+            self.filer.selected = selected;
+            self.pending_filer_focus_path = None;
+            self.cancel_filer_scan();
+            return;
+        }
         if self.filer.directory.as_ref() == Some(&dir) {
             self.filer.selected = selected.clone();
             self.pending_filer_focus_path = selected.clone();
@@ -2023,6 +2160,8 @@ impl ViewerApp {
     }
 
     pub(crate) fn refresh_current_filer_directory(&mut self) {
+        self.auto_refresh_dirty = None;
+        self.manga_companion_lookup = None;
         if let Some(dir) = self
             .filer
             .directory
@@ -2058,7 +2197,7 @@ impl ViewerApp {
         self.queued_filesystem_init_path = None;
         self.queued_navigation = None;
         self.pending_viewer_navigation = None;
-        self.filer.pending_request_id = None;
+        self.cancel_filer_scan();
         if self.navigator_ready {
             self.set_filesystem_current(navigation_path.to_path_buf());
         } else {
@@ -2122,7 +2261,7 @@ impl ViewerApp {
         self.source.canvas.height() >= self.source.canvas.width()
     }
 
-    fn desired_manga_companion_path(&self) -> Option<PathBuf> {
+    fn desired_manga_companion_path(&mut self) -> Option<PathBuf> {
         if !self.options.manga_mode
             || self.empty_mode
             || !self.navigator_ready
@@ -2130,24 +2269,36 @@ impl ViewerApp {
         {
             return None;
         }
-        spread_companion_path_for_navigation(
-            &self.current_navigation_path,
-            self.navigation_sort,
-            self.navigation_direction_sign(),
-            self.options.manga_mode,
-        )
+        let navigation_path = self.current_navigation_path.clone();
+        self.desired_manga_companion_path_for_navigation(&navigation_path)
     }
 
     fn desired_manga_companion_path_for_navigation(
-        &self,
+        &mut self,
         navigation_path: &Path,
     ) -> Option<PathBuf> {
-        spread_companion_path_for_navigation(
-            navigation_path,
-            self.navigation_sort,
-            self.navigation_direction_sign(),
-            self.options.manga_mode,
-        )
+        if !self.options.manga_mode {
+            return None;
+        }
+        let branch_path = navigation_branch_path(navigation_path);
+        let branch_metadata = branch_path
+            .as_ref()
+            .and_then(|path| std::fs::metadata(path).ok());
+        let sort = self.navigation_sort;
+        let direction = self.navigation_direction_sign();
+        let key = MangaCompanionLookupKey {
+            navigation_path: navigation_path.to_path_buf(),
+            sort,
+            direction,
+            branch_path,
+            branch_modified: branch_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.modified().ok()),
+            branch_len: branch_metadata.as_ref().map(|metadata| metadata.len()),
+        };
+        cached_spread_companion_path(&mut self.manga_companion_lookup, key, || {
+            spread_companion_path_for_navigation(navigation_path, sort, direction, true)
+        })
     }
 
     fn clear_manga_companion(&mut self) {
@@ -2909,10 +3060,6 @@ impl ViewerApp {
             );
             return Ok(());
         }
-        if switching_image {
-            self.zoom_factor = 1.0;
-            self.zoom = 1.0;
-        }
         if branch_changed {
             self.show_loading_texture(true); // フォルダ変わった時だけリセット
             self.clear_current_image_display();
@@ -2923,7 +3070,9 @@ impl ViewerApp {
         self.active_request = Some(ActiveRenderRequest::Load(request_id));
         self.active_request_started_at = Some(Instant::now());
         self.pending_navigation_path = Some(navigation_path.clone());
-        self.pending_fit_recalc = !matches!(self.render_options.zoom_option, ZoomOption::None);
+        if switching_image {
+            self.pending_fit_recalc = false;
+        }
         self.overlay
             .set_loading_message(format!("Loading {}", navigation_path.display()));
         let load_zoom = if switching_image { 1.0 } else { self.zoom };
@@ -3099,6 +3248,11 @@ impl eframe::App for ViewerApp {
                 self.current_canvas().width() as f32 * self.current_draw_scale(),
                 self.current_canvas().height() as f32 * self.current_draw_scale(),
             );
+            let mut current_scene = TransitionScene {
+                viewport: display_rect,
+                images: Vec::with_capacity(2),
+                separator: None,
+            };
             egui::ScrollArea::both()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
@@ -3116,7 +3270,9 @@ impl eframe::App for ViewerApp {
                         let total_draw_size = if let Some(companion_draw_size) = companion_draw_size
                         {
                             vec2(
-                                draw_size.x + companion_draw_size.x,
+                                draw_size.x
+                                    + companion_draw_size.x
+                                    + self.options.manga_separator.pixels.max(0.0),
                                 draw_size.y.max(companion_draw_size.y),
                             )
                         } else {
@@ -3129,48 +3285,53 @@ impl eframe::App for ViewerApp {
                             ui.add_space(offset.x.max(0.0));
                             if let Some((_, companion_texture)) = companion {
                                 let companion_draw_size = companion_draw_size.unwrap_or(draw_size);
-                                let draw_companion_first = self.options.manga_right_to_left;
-                                if draw_companion_first {
-                                    let first = ui.add(
-                                        egui::Image::from_texture(companion_texture)
-                                            .fit_to_exact_size(companion_draw_size)
-                                            .sense(egui::Sense::click_and_drag()),
-                                    );
-                                    self.paint_manga_separator(
-                                        ui,
-                                        draw_size.y.max(companion_draw_size.y),
-                                    );
-                                    ui.add(
-                                        egui::Image::from_texture(&self.current_texture)
-                                            .fit_to_exact_size(draw_size)
-                                            .sense(egui::Sense::click_and_drag()),
-                                    );
-                                    Some(first)
-                                } else {
-                                    let first = ui.add(
-                                        egui::Image::from_texture(&self.current_texture)
-                                            .fit_to_exact_size(draw_size)
-                                            .sense(egui::Sense::click_and_drag()),
-                                    );
-                                    self.paint_manga_separator(
-                                        ui,
-                                        draw_size.y.max(companion_draw_size.y),
-                                    );
-                                    ui.add(
-                                        egui::Image::from_texture(companion_texture)
-                                            .fit_to_exact_size(companion_draw_size)
-                                            .sense(egui::Sense::click_and_drag()),
-                                    );
-                                    Some(first)
-                                }
+                                let (first_texture, first_size, second_texture, second_size) =
+                                    if self.options.manga_right_to_left {
+                                        (
+                                            companion_texture,
+                                            companion_draw_size,
+                                            &self.current_texture,
+                                            draw_size,
+                                        )
+                                    } else {
+                                        (
+                                            &self.current_texture,
+                                            draw_size,
+                                            companion_texture,
+                                            companion_draw_size,
+                                        )
+                                    };
+                                let first =
+                                    self.add_transition_image_widget(ui, first_texture, first_size);
+                                current_scene.images.push(TransitionImageLayer {
+                                    texture: first_texture.clone(),
+                                    rect: first.rect,
+                                });
+                                current_scene.separator = self.paint_manga_separator(
+                                    ui,
+                                    draw_size.y.max(companion_draw_size.y),
+                                );
+                                let second = self.add_transition_image_widget(
+                                    ui,
+                                    second_texture,
+                                    second_size,
+                                );
+                                current_scene.images.push(TransitionImageLayer {
+                                    texture: second_texture.clone(),
+                                    rect: second.rect,
+                                });
+                                Some(first)
                             } else {
-                                Some(
-                                    ui.add(
-                                        egui::Image::from_texture(&self.current_texture)
-                                            .fit_to_exact_size(draw_size)
-                                            .sense(egui::Sense::click_and_drag()),
-                                    ),
-                                )
+                                let first = self.add_transition_image_widget(
+                                    ui,
+                                    &self.current_texture,
+                                    draw_size,
+                                );
+                                current_scene.images.push(TransitionImageLayer {
+                                    texture: self.current_texture.clone(),
+                                    rect: first.rect,
+                                });
+                                Some(first)
                             }
                         })
                         .inner
@@ -3180,7 +3341,16 @@ impl eframe::App for ViewerApp {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 0.0;
                             ui.add_space(offset.x.max(0.0));
-                            Some(self.draw_transition_image(ui, draw_size))
+                            let first = self.add_transition_image_widget(
+                                ui,
+                                &self.current_texture,
+                                draw_size,
+                            );
+                            current_scene.images.push(TransitionImageLayer {
+                                texture: self.current_texture.clone(),
+                                rect: first.rect,
+                            });
+                            Some(first)
                         })
                         .inner
                     };
@@ -3199,7 +3369,7 @@ impl eframe::App for ViewerApp {
                         let _ = self.handle_pointer_input(&display_response);
                     }
 
-                    if self.empty_mode {
+                    if self.empty_mode && self.active_fs_request_id.is_none() {
                         ui.add_space(8.0);
                         ui.label(format!(
                             "{} {}",
@@ -3208,6 +3378,10 @@ impl eframe::App for ViewerApp {
                         ));
                     }
                 });
+            if self.active_transition.is_some() {
+                self.draw_transition_scene(ui, &current_scene);
+            }
+            self.last_drawn_scene = Some(current_scene);
         });
         self.loading_overlay_ui(ctx);
         self.loading_card_ui(ctx);
@@ -3412,6 +3586,22 @@ fn spread_companion_path_for_navigation(
     (current_branch == companion_branch).then_some(companion)
 }
 
+fn cached_spread_companion_path(
+    cache: &mut Option<MangaCompanionLookup>,
+    key: MangaCompanionLookupKey,
+    resolve: impl FnOnce() -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    if let Some(cached) = cache.as_ref().filter(|cached| cached.key == key) {
+        return cached.path.clone();
+    }
+    let path = resolve();
+    *cache = Some(MangaCompanionLookup {
+        key,
+        path: path.clone(),
+    });
+    path
+}
+
 fn should_cancel_filesystem_request_for_filer_select(
     pending_user_request: Option<&FilerUserRequest>,
     current_navigation_path: &Path,
@@ -3506,12 +3696,78 @@ fn transition_progress(started_at: &mut Option<Instant>, now: Instant, duration:
     (now.duration_since(*started_at).as_secs_f32() / duration.as_secs_f32()).clamp(0.0, 1.0)
 }
 
-fn centered_rect(container: egui::Rect, size: egui::Vec2) -> egui::Rect {
-    let size = vec2(
-        size.x.min(container.width()),
-        size.y.min(container.height()),
-    );
-    egui::Rect::from_center_size(container.center(), size)
+fn slide_layer_clip(viewport: egui::Rect, offset: egui::Vec2) -> egui::Rect {
+    viewport.intersect(viewport.translate(offset))
+}
+
+fn paint_transition_scene(
+    painter: &egui::Painter,
+    scene: &TransitionScene,
+    offset: egui::Vec2,
+    opacity: f32,
+) {
+    if opacity <= 0.0 {
+        return;
+    }
+    for image in &scene.images {
+        paint_texture(
+            painter,
+            image.texture.id(),
+            image.rect.translate(offset),
+            opacity,
+        );
+    }
+    if let Some(separator) = &scene.separator {
+        paint_transition_separator(painter, separator, offset, opacity);
+    }
+}
+
+fn paint_transition_separator(
+    painter: &egui::Painter,
+    separator: &TransitionSeparatorLayer,
+    offset: egui::Vec2,
+    opacity: f32,
+) {
+    use crate::ui::viewer::options::MangaSeparatorStyle;
+    let rect = separator.rect.translate(offset);
+    let base = separator.options.color;
+    match separator.options.style {
+        MangaSeparatorStyle::None => {}
+        MangaSeparatorStyle::Solid => {
+            painter.rect_filled(
+                rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(
+                    base[0],
+                    base[1],
+                    base[2],
+                    (base[3] as f32 * opacity).round() as u8,
+                ),
+            );
+        }
+        MangaSeparatorStyle::Shadow => {
+            let steps = rect.width().max(2.0) as usize;
+            for step in 0..steps {
+                let t = (step as f32 + 0.5) / steps as f32;
+                let alpha = (1.0 - ((t - 0.5).abs() * 2.0)).max(0.0) * base[3] as f32 * opacity;
+                let x0 = rect.left() + (step as f32 / steps as f32) * rect.width();
+                let x1 = rect.left() + ((step + 1) as f32 / steps as f32) * rect.width();
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(x0, rect.top()),
+                        egui::pos2(x1, rect.bottom()),
+                    ),
+                    0.0,
+                    egui::Color32::from_rgba_unmultiplied(
+                        base[0],
+                        base[1],
+                        base[2],
+                        alpha.round().clamp(0.0, 255.0) as u8,
+                    ),
+                );
+            }
+        }
+    }
 }
 
 fn paint_texture(

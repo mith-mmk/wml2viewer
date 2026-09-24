@@ -94,7 +94,7 @@ fn os_sort_orders_zip_names_naturally() {
         PathBuf::from("pack2.zip"),
         PathBuf::from("pack1.zip"),
     ];
-    sort_paths_for_navigation(&mut paths, NavigationSortOption::OsName);
+    sort_paths_for_navigation(&mut paths, NavigationSortOption::OsName, || false);
     let labels = paths
         .iter()
         .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
