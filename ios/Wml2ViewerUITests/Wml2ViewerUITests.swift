@@ -134,11 +134,7 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
         openPickerFromSourceChooser(app, surface: surface, action: "sourceChooser.addFolder")
 
-        let folder = app.cells.matching(
-            NSPredicate(format: "identifier == %@", "\(PickerFixture.folderName), Folder")
-        ).firstMatch
-        XCTAssertTrue(folder.waitForExistence(timeout: 15), pickerFailureDescription(app))
-        folder.tap()
+        openPickerFixtureFolder(app)
 
         let firstPage = app.descendants(matching: .any).matching(
             NSPredicate(
@@ -192,11 +188,7 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
         openPickerFromSourceChooser(app, surface: surface, action: "sourceChooser.openFile")
 
-        let folder = app.cells.matching(
-            NSPredicate(format: "identifier == %@", "\(PickerFixture.folderName), Folder")
-        ).firstMatch
-        XCTAssertTrue(folder.waitForExistence(timeout: 15), pickerFailureDescription(app))
-        folder.tap()
+        openPickerFixtureFolder(app)
 
         let selectedName = PickerFixture.pageNames[1]
         let selectedURL = URL(fileURLWithPath: selectedName)
@@ -270,11 +262,7 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
         openPickerFromSourceChooser(app, surface: surface, action: "sourceChooser.openFile")
 
-        let folder = app.cells.matching(
-            NSPredicate(format: "identifier == %@", "\(PickerFixture.folderName), Folder")
-        ).firstMatch
-        XCTAssertTrue(folder.waitForExistence(timeout: 15), pickerFailureDescription(app))
-        folder.tap()
+        openPickerFixtureFolder(app)
         let unsupported = app.cells.matching(
             NSPredicate(format: "identifier == 'unsupported, pdf'")
         ).firstMatch
@@ -304,11 +292,7 @@ final class Wml2ViewerUITests: XCTestCase {
         let surface = app.otherElements["viewer.touchSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
         openPickerFromSourceChooser(app, surface: surface, action: "sourceChooser.addFolder")
-        let folder = app.cells.matching(
-            NSPredicate(format: "identifier == %@", "\(PickerFixture.folderName), Folder")
-        ).firstMatch
-        XCTAssertTrue(folder.waitForExistence(timeout: 15), pickerFailureDescription(app))
-        folder.tap()
+        openPickerFixtureFolder(app)
         let open = app.buttons.matching(
             NSPredicate(format: "label == 'Open' OR label == '開く'")
         ).firstMatch
@@ -607,6 +591,24 @@ final class Wml2ViewerUITests: XCTestCase {
         XCTAssertTrue(image.waitForExistence(timeout: 15), "\(format) entry was not displayed")
         XCTAssertFalse(app.descendants(matching: .any)["viewer.error"].exists)
         return app
+    }
+
+    private func openPickerFixtureFolder(_ app: XCUIApplication) {
+        let folder = app.cells.matching(
+            NSPredicate(format: "identifier == %@", "\(PickerFixture.folderName), Folder")
+        ).firstMatch
+        if !folder.waitForExistence(timeout: 5) {
+            // On iPad the system picker can ignore directoryURL and open at
+            // On My iPad, one level above the app's Documents directory.
+            let appContainer = app.cells.matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "WML2Viewer,")
+            ).firstMatch
+            if appContainer.waitForExistence(timeout: 5) {
+                appContainer.tap()
+            }
+        }
+        XCTAssertTrue(folder.waitForExistence(timeout: 15), pickerFailureDescription(app))
+        folder.tap()
     }
 
     private func pickerFailureDescription(_ app: XCUIApplication) -> String {
