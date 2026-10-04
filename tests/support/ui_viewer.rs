@@ -1,6 +1,7 @@
 use super::*;
 use crate::drawers::canvas::Canvas;
 use crate::ui::menu::fileviewer::state::FilerViewMode;
+use crate::ui::viewer::options::WindowUiTheme;
 use std::fs;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -259,6 +260,37 @@ fn cpu_preloads_match_navigation_zoom_and_reject_old_zoomed_pages() {
     app.preload_cache.push_back(stale);
     assert!(!app.try_take_preloaded(Path::new("c.png")));
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn system_theme_tracks_the_current_os_theme_after_explicit_theme_selection() {
+    let ctx = egui::Context::default();
+    let _ = ctx.run(
+        egui::RawInput {
+            system_theme: Some(egui::Theme::Dark),
+            ..Default::default()
+        },
+        |_| {},
+    );
+    crate::ui::theme::apply_window_theme(&ctx, WindowUiTheme::Light);
+    assert!(!ctx.style().visuals.dark_mode);
+    let _ = ctx.run(
+        egui::RawInput {
+            system_theme: Some(egui::Theme::Light),
+            ..Default::default()
+        },
+        |_| {},
+    );
+    crate::ui::theme::apply_window_theme(&ctx, WindowUiTheme::System);
+    assert!(!ctx.style().visuals.dark_mode);
+    let _ = ctx.run(
+        egui::RawInput {
+            system_theme: Some(egui::Theme::Dark),
+            ..Default::default()
+        },
+        |_| {},
+    );
+    assert!(ctx.style().visuals.dark_mode);
 }
 
 #[test]

@@ -1,17 +1,13 @@
 use crate::ui::viewer::options::WindowUiTheme;
 use eframe::egui;
 
-pub(crate) fn apply_window_theme(
-    ctx: &egui::Context,
-    theme: WindowUiTheme,
-    system_visuals: &egui::Visuals,
-) {
-    let visuals = match theme {
-        WindowUiTheme::System => system_visuals.clone(),
-        WindowUiTheme::Light => egui::Visuals::light(),
-        WindowUiTheme::Dark => egui::Visuals::dark(),
+pub(crate) fn apply_window_theme(ctx: &egui::Context, theme: WindowUiTheme) {
+    let preference = match theme {
+        WindowUiTheme::System => egui::ThemePreference::System,
+        WindowUiTheme::Light => egui::ThemePreference::Light,
+        WindowUiTheme::Dark => egui::ThemePreference::Dark,
     };
-    ctx.set_visuals(visuals);
+    ctx.set_theme(preference);
 }
 
 #[derive(Clone, Copy)]

@@ -79,7 +79,6 @@ pub(crate) struct ViewerApp {
     active_transition: Option<ImageTransitionState>,
     last_drawn_scene: Option<TransitionScene>,
     pub(crate) egui_ctx: egui::Context,
-    system_visuals: egui::Visuals,
 
     pub(crate) zoom: f32,
     pub(crate) zoom_factor: f32,
@@ -932,7 +931,6 @@ impl ViewerApp {
             active_transition: None,
             last_drawn_scene: None,
             egui_ctx: cc.egui_ctx.clone(),
-            system_visuals: cc.egui_ctx.style().visuals.clone(),
 
             zoom,
             zoom_factor,
@@ -1153,11 +1151,7 @@ impl ViewerApp {
     }
 
     pub(crate) fn apply_window_theme(&self, ctx: &egui::Context) {
-        crate::ui::theme::apply_window_theme(
-            ctx,
-            self.window_options.ui_theme,
-            &self.system_visuals,
-        );
+        crate::ui::theme::apply_window_theme(ctx, self.window_options.ui_theme);
     }
 
     pub(crate) fn open_help(&self) {
