@@ -65,6 +65,92 @@ fn recursive_navigation_continues_after_current_file_is_removed() {
 }
 
 #[test]
+fn recursive_spreads_keep_even_and_odd_folder_boundaries_in_both_orders() {
+    for count in [4, 5] {
+        for ascending in [true, false] {
+            let root = make_temp_dir();
+            let current_dir = root.join(if ascending { "001" } else { "002" });
+            let adjacent_dir = root.join(if ascending { "002" } else { "001" });
+            fs::create_dir_all(&current_dir).unwrap();
+            fs::create_dir_all(&adjacent_dir).unwrap();
+            let mut pages = (1..=count)
+                .map(|page| current_dir.join(format!("{page:03}.png")))
+                .collect::<Vec<_>>();
+            let mut adjacent = (1..=2)
+                .map(|page| adjacent_dir.join(format!("{page:03}.png")))
+                .collect::<Vec<_>>();
+            for page in pages.iter().chain(&adjacent) {
+                fs::write(page, TINY_PNG).unwrap();
+            }
+            if !ascending {
+                pages.reverse();
+                adjacent.reverse();
+            }
+            let mut cache = FilesystemCache::default();
+            cache.recursive_order.ascending = ascending;
+            let mut nav = FileNavigator::from_current_path(pages[0].clone(), &mut cache);
+            let NavigationOutcome::Resolved(target) = nav.recursive_spread_step(&mut cache, true)
+            else {
+                panic!("second spread missing");
+            };
+            assert_eq!(target.navigation_path, pages[2]);
+            if count == 5 {
+                let NavigationOutcome::Resolved(target) =
+                    nav.recursive_spread_step(&mut cache, true)
+                else {
+                    panic!("odd trailing page missing");
+                };
+                assert_eq!(target.navigation_path, pages[4]);
+            }
+            let NavigationOutcome::Resolved(target) = nav.recursive_spread_step(&mut cache, true)
+            else {
+                panic!("adjacent folder missing");
+            };
+            assert_eq!(target.navigation_path, adjacent[0]);
+            let NavigationOutcome::Resolved(target) = nav.recursive_spread_step(&mut cache, false)
+            else {
+                panic!("previous branch edge missing");
+            };
+            assert_eq!(target.navigation_path, *pages.last().unwrap());
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+}
+
+#[test]
+fn recursive_spread_at_end_does_not_commit_the_already_displayed_companion() {
+    // A cached archive stream followed by an unavailable container makes the end deterministic.
+    let archive = PathBuf::from("unavailable-spread-test.zip");
+    let pages = vec![
+        zip_virtual_child_path(&archive, 0, "a.png"),
+        zip_virtual_child_path(&archive, 1, "b.png"),
+    ];
+    let mut cache = FilesystemCache::default();
+    cache.listings_by_dir.insert(
+        archive.clone(),
+        DirectoryListing {
+            files: pages.clone(),
+            file_entries: pages.clone(),
+            files_expanded: true,
+            first_file: Some(pages[0].clone()),
+            last_file: Some(pages[1].clone()),
+            dirs: Vec::new(),
+        },
+    );
+    cache
+        .recursive_children_by_dir
+        .insert(archive, pages.clone());
+    let mut nav = FileNavigator::from_current_path(pages[0].clone(), &mut cache);
+    for _ in 0..2 {
+        assert!(matches!(
+            nav.recursive_spread_step(&mut cache, true),
+            NavigationOutcome::NoPath
+        ));
+        assert_eq!(nav.current(), pages[0]);
+    }
+}
+
+#[test]
 fn opening_unsorted_zip_agrees_with_recursive_navigation_and_edges() {
     let root = make_temp_dir();
     let archive = root.join("pages.zip");

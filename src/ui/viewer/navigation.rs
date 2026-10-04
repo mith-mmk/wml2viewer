@@ -53,18 +53,7 @@ impl ViewerApp {
             self.last_navigation_at = Some(Instant::now());
             return Ok(());
         }
-        let command = if self.filer.ascending || self.end_of_folder == EndOfFolderOption::Recursive
-        {
-            FilesystemCommand::Next {
-                request_id: 0,
-                policy: self.end_of_folder,
-            }
-        } else {
-            FilesystemCommand::Prev {
-                request_id: 0,
-                policy: self.end_of_folder,
-            }
-        };
+        let command = self.page_navigation_command(true);
         self.request_navigation(command, Some(ImageTransitionDirection::Forward))?;
         self.last_navigation_at = Some(Instant::now());
         Ok(())
@@ -89,18 +78,7 @@ impl ViewerApp {
             self.last_navigation_at = Some(Instant::now());
             return Ok(());
         }
-        let command = if self.filer.ascending || self.end_of_folder == EndOfFolderOption::Recursive
-        {
-            FilesystemCommand::Prev {
-                request_id: 0,
-                policy: self.end_of_folder,
-            }
-        } else {
-            FilesystemCommand::Next {
-                request_id: 0,
-                policy: self.end_of_folder,
-            }
-        };
+        let command = self.page_navigation_command(false);
         self.request_navigation(command, Some(ImageTransitionDirection::Backward))?;
         self.last_navigation_at = Some(Instant::now());
         Ok(())

@@ -2444,6 +2444,27 @@ impl ViewerApp {
         if self.filer.ascending { 1 } else { -1 }
     }
 
+    fn page_navigation_command(&self, forward: bool) -> FilesystemCommand {
+        if self.end_of_folder == EndOfFolderOption::Recursive && self.manga_spread_active() {
+            return FilesystemCommand::RecursiveSpread {
+                request_id: 0,
+                forward,
+            };
+        }
+        let ascending = self.filer.ascending || self.end_of_folder == EndOfFolderOption::Recursive;
+        if forward == ascending {
+            FilesystemCommand::Next {
+                request_id: 0,
+                policy: self.end_of_folder,
+            }
+        } else {
+            FilesystemCommand::Prev {
+                request_id: 0,
+                policy: self.end_of_folder,
+            }
+        }
+    }
+
     pub(crate) fn log_bench_state(&self, event: &str, payload: serde_json::Value) {
         let Some(logger) = &self.bench_logger else {
             return;
@@ -2535,19 +2556,7 @@ impl ViewerApp {
                         Some(ImageTransitionDirection::Forward),
                     )
                 } else {
-                    let command = if self.filer.ascending
-                        || self.end_of_folder == EndOfFolderOption::Recursive
-                    {
-                        FilesystemCommand::Next {
-                            request_id: 0,
-                            policy: self.end_of_folder,
-                        }
-                    } else {
-                        FilesystemCommand::Prev {
-                            request_id: 0,
-                            policy: self.end_of_folder,
-                        }
-                    };
+                    let command = self.page_navigation_command(true);
                     self.request_navigation(command, Some(ImageTransitionDirection::Forward))
                 }
             }
@@ -2558,19 +2567,7 @@ impl ViewerApp {
                         Some(ImageTransitionDirection::Backward),
                     )
                 } else {
-                    let command = if self.filer.ascending
-                        || self.end_of_folder == EndOfFolderOption::Recursive
-                    {
-                        FilesystemCommand::Prev {
-                            request_id: 0,
-                            policy: self.end_of_folder,
-                        }
-                    } else {
-                        FilesystemCommand::Next {
-                            request_id: 0,
-                            policy: self.end_of_folder,
-                        }
-                    };
+                    let command = self.page_navigation_command(false);
                     self.request_navigation(command, Some(ImageTransitionDirection::Backward))
                 }
             }

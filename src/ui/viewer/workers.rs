@@ -279,6 +279,12 @@ impl ViewerApp {
             FilesystemCommand::Prev { policy, .. } => {
                 FilesystemCommand::Prev { request_id, policy }
             }
+            FilesystemCommand::RecursiveSpread { forward, .. } => {
+                FilesystemCommand::RecursiveSpread {
+                    request_id,
+                    forward,
+                }
+            }
             FilesystemCommand::First { .. } => FilesystemCommand::First { request_id },
             FilesystemCommand::Last { .. } => FilesystemCommand::Last { request_id },
         };

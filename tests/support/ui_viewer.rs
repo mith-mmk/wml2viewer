@@ -133,6 +133,42 @@ fn receive_test_navigation(app: &mut ViewerApp) -> PathBuf {
 }
 
 #[test]
+fn additional_review_recursive_spread_navigation_skips_displayed_companion() {
+    for ascending in [true, false] {
+        let root = make_temp_dir();
+        let pages = (1..=5)
+            .map(|page| root.join(format!("{page:03}.png")))
+            .collect::<Vec<_>>();
+        for page in &pages {
+            fs::write(page, []).unwrap();
+        }
+        let mut app = make_test_viewer();
+        app.filer.ascending = ascending;
+        app.end_of_folder = EndOfFolderOption::Recursive;
+        app.options.manga_mode = true;
+        app.last_viewport_size = egui::vec2(1000.0, 600.0);
+        app.source = dummy_loaded_image(4, 8);
+        app.rendered = app.source.clone();
+        let start = if ascending { 0 } else { 4 };
+        app.companion_navigation_path = Some(pages[if ascending { 1 } else { 3 }].clone());
+        let mut companion = dummy_preloaded_entry("companion").display;
+        companion.source = dummy_loaded_image(4, 8);
+        companion.rendered = companion.source.clone();
+        app.companion_display = Some(companion);
+        initialize_test_navigator(&mut app, &pages[start]);
+        assert!(app.manga_spread_active());
+        app.next_image().unwrap();
+        assert_eq!(receive_test_navigation(&mut app), pages[2]);
+        // Exercise the deferred input route too.
+        app.current_navigation_path = pages[2].clone();
+        app.pending_viewer_navigation = Some(PendingViewerNavigation::Prev);
+        app.flush_pending_viewer_navigation();
+        assert_eq!(receive_test_navigation(&mut app), pages[start]);
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
 fn additional_review_descending_archive_edges_match_hidden_filer_controls() {
     use std::io::Write;
     for extension in ["zip", "lha"] {

@@ -117,6 +117,10 @@ pub enum FilesystemCommand {
         request_id: u64,
         policy: EndOfFolderOption,
     },
+    RecursiveSpread {
+        request_id: u64,
+        forward: bool,
+    },
     First {
         request_id: u64,
     },
@@ -328,6 +332,45 @@ impl FileNavigator {
             self.current_target()
         })
         .unwrap_or(NavigationOutcome::NoPath)
+    }
+
+    fn recursive_spread_step(
+        &mut self,
+        cache: &mut FilesystemCache,
+        forward: bool,
+    ) -> NavigationOutcome {
+        let original = self.clone();
+        let first = self.recursive_step(cache, forward);
+        let NavigationOutcome::Resolved(first_target) = &first else {
+            return first;
+        };
+        if navigation_branch_path(&original.current_path)
+            != navigation_branch_path(&first_target.navigation_path)
+        {
+            // Crossing directly into another branch starts at its edge, without skipping a page.
+            return first;
+        }
+        let after_first = self.clone();
+        let second = self.recursive_step(cache, forward);
+        match &second {
+            NavigationOutcome::Resolved(target)
+                if forward
+                    || navigation_branch_path(&target.navigation_path)
+                        == navigation_branch_path(&original.current_path) =>
+            {
+                second
+            }
+            _ if !forward => {
+                *self = after_first;
+                first
+            }
+            _ => {
+                // The first step was the already displayed companion. Keep the current spread
+                // when no unread page follows it, including on repeated navigation requests.
+                *self = original;
+                NavigationOutcome::NoPath
+            }
+        }
     }
 
     fn jump_to_adjacent_directory(
@@ -687,6 +730,7 @@ pub fn spawn_filesystem_worker(
                         request_id,
                         policy,
                         PendingDirection::Next,
+                        false,
                     );
                 }
                 FilesystemCommand::Prev { request_id, policy } => {
@@ -697,6 +741,25 @@ pub fn spawn_filesystem_worker(
                         request_id,
                         policy,
                         PendingDirection::Prev,
+                        false,
+                    );
+                }
+                FilesystemCommand::RecursiveSpread {
+                    request_id,
+                    forward,
+                } => {
+                    handle_navigation_request(
+                        &result_tx,
+                        navigator.as_mut(),
+                        &mut cache,
+                        request_id,
+                        EndOfFolderOption::Recursive,
+                        if forward {
+                            PendingDirection::Next
+                        } else {
+                            PendingDirection::Prev
+                        },
+                        true,
                     );
                 }
                 FilesystemCommand::First { request_id } => {
@@ -750,12 +813,16 @@ fn handle_navigation_request(
     request_id: u64,
     policy: EndOfFolderOption,
     direction: PendingDirection,
+    spread: bool,
 ) {
     let started_at = Instant::now();
     let current_path = navigator
         .as_ref()
         .map(|nav| nav.current().display().to_string());
     let outcome = match navigator {
+        Some(nav) if spread => {
+            nav.recursive_spread_step(cache, matches!(direction, PendingDirection::Next))
+        }
         Some(nav) => match direction {
             PendingDirection::Next => nav.next_with_policy(policy, cache),
             PendingDirection::Prev => nav.prev_with_policy(policy, cache),
@@ -772,6 +839,7 @@ fn handle_navigation_request(
                 PendingDirection::Prev => "prev",
             },
             "policy": format!("{policy:?}"),
+            "spread": spread,
             "current_path": current_path,
             "navigation_path": target.as_ref().map(|target| target.navigation_path.display().to_string()),
             "load_path": target.as_ref().map(|target| target.load_path.display().to_string()),
