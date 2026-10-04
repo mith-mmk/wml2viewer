@@ -1973,6 +1973,9 @@ impl ViewerApp {
     }
 
     pub(crate) fn cancel_filer_scan(&mut self) {
+        if should_clear_filer_request_on_hide(self.filer.pending_user_request.as_ref()) {
+            self.filer.pending_user_request = None;
+        }
         if self.filer.pending_request_id.take().is_none() {
             return;
         }

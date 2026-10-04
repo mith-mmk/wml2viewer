@@ -968,12 +968,13 @@ impl ViewerApp {
                     }
                     scroll.show_rows(ui, row_height, row_count, |ui, rows| {
                         ui.set_min_width(panel_width.max(160.0));
-                        for row in rows {
+                        // Activation can clear the live listing. Snapshot only the visible tiles.
+                        let start = (rows.start * columns).min(self.filer.entries.len());
+                        let end = (rows.end * columns).min(self.filer.entries.len());
+                        let visible_entries = self.filer.entries[start..end].to_vec();
+                        for row in visible_entries.chunks(columns) {
                             ui.horizontal(|ui| {
-                                for index in row * columns
-                                    ..((row + 1) * columns).min(self.filer.entries.len())
-                                {
-                                    let entry = self.filer.entries[index].clone();
+                                for entry in row.iter().cloned() {
                                     ui.push_id(entry.path.clone(), |ui| {
                                         self.filer_thumbnail_tile(
                                             ui,
@@ -1213,12 +1214,15 @@ impl ViewerApp {
                     let end = ((viewport.max.x / stride).ceil() as usize + 1)
                         .min(file_indices.len())
                         .max(start);
+                    let visible_entries = file_indices[start..end]
+                        .iter()
+                        .map(|&index| self.filer.entries[index].clone())
+                        .collect::<Vec<_>>();
                     ui.horizontal(|ui| {
                         if start > 0 {
                             ui.add_space(start as f32 * stride - ui.spacing().item_spacing.x);
                         }
-                        for &index in &file_indices[start..end] {
-                            let entry = self.filer.entries[index].clone();
+                        for entry in visible_entries {
                             self.ensure_thumbnail(&entry.path, 72);
                             let selected = self.current_navigation_path == entry.path;
                             ui.push_id(&entry.path, |ui| {

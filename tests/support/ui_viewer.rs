@@ -1,5 +1,6 @@
 use super::*;
 use crate::drawers::canvas::Canvas;
+use crate::ui::menu::fileviewer::state::FilerViewMode;
 use std::fs;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -55,6 +56,155 @@ fn make_temp_dir() -> PathBuf {
     let dir = base.join(format!(".test_viewer_{unique}"));
     fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+fn make_test_viewer() -> ViewerApp {
+    let ctx = egui::Context::default();
+    let cc = eframe::CreationContext::_new_kittest(ctx);
+    let mut config = AppConfig::default();
+    config.render.zoom_option = ZoomOption::None;
+    config.viewer.manga_mode = false;
+    let mut app = ViewerApp::new(
+        &cc,
+        PathBuf::from("a.png"),
+        PathBuf::from("a.png"),
+        dummy_loaded_image(4, 4),
+        dummy_loaded_image(4, 4),
+        config,
+        None,
+        None,
+        false,
+        None,
+        false,
+        None,
+    );
+    app.active_request = None;
+    app.pending_navigation_path = None;
+    app
+}
+
+fn filer_test_frame(
+    app: &mut ViewerApp,
+    subfiler: bool,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    let ctx = app.egui_ctx.clone();
+    ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1000.0, 800.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            if subfiler {
+                app.subfiler_ui(ctx);
+            } else {
+                app.filer_ui(ctx);
+            }
+        },
+    )
+}
+
+fn shape_text_position(shape: &egui::Shape, text: &str) -> Option<egui::Pos2> {
+    match shape {
+        egui::Shape::Text(shape) if shape.galley.text() == text => {
+            Some(shape.pos + shape.galley.size() * 0.5)
+        }
+        egui::Shape::Vec(shapes) => shapes
+            .iter()
+            .find_map(|shape| shape_text_position(shape, text)),
+        _ => None,
+    }
+}
+
+#[test]
+fn thumbnail_activation_can_clear_listing_while_visible_tiles_remain() {
+    for subfiler in [false, true] {
+        let root = make_temp_dir();
+        let mut app = make_test_viewer();
+        app.current_navigation_path = root.join("current.png");
+        app.current_path = app.current_navigation_path.clone();
+        app.show_filer = !subfiler;
+        app.show_subfiler = subfiler;
+        app.options.manga_right_to_left = false;
+        app.filer.directory = Some(root.clone());
+        app.filer.view_mode = FilerViewMode::ThumbnailSmall;
+        let mut first = dummy_filer_entry("00_folder");
+        first.path = root.join(if subfiler { "00.png" } else { "00_folder" });
+        first.is_container = !subfiler;
+        let mut second = dummy_filer_entry("01.png");
+        second.path = root.join("01.png");
+        if !subfiler {
+            fs::create_dir(&first.path).unwrap();
+        }
+        app.filer.entries = vec![first, second];
+        app.filer.pending_request_id = subfiler.then_some(77);
+        let _ = filer_test_frame(&mut app, subfiler, vec![]);
+        let output = filer_test_frame(&mut app, subfiler, vec![]);
+        let text = if subfiler { "..." } else { "00_folder" };
+        let mut pos = output
+            .shapes
+            .iter()
+            .find_map(|shape| shape_text_position(&shape.shape, text))
+            .expect("visible tile text");
+        if !subfiler {
+            pos.y -= 40.0;
+        }
+        let _ = filer_test_frame(
+            &mut app,
+            subfiler,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let _ = filer_test_frame(
+            &mut app,
+            subfiler,
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(
+            app.filer.entries.is_empty(),
+            "tile activation should clear the live listing ({subfiler})"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn closing_refreshing_subfiler_allows_a_new_scan_when_reopened() {
+    let root = make_temp_dir();
+    let mut app = make_test_viewer();
+    app.current_navigation_path = root.join("a.png");
+    app.current_path = app.current_navigation_path.clone();
+    app.show_filer = false;
+    app.show_subfiler = true;
+    app.filer.directory = Some(root.clone());
+    app.filer.pending_request_id = Some(77);
+    app.filer.pending_user_request = Some(FilerUserRequest::Refresh {
+        directory: root.clone(),
+        selected: None,
+    });
+    app.set_show_subfiler(false);
+    assert!(app.filer.pending_request_id.is_none());
+    assert!(app.filer.pending_user_request.is_none());
+    app.set_show_subfiler(true);
+    assert!(app.filer.pending_request_id.is_some());
+    assert_ne!(app.filer.pending_request_id, Some(77));
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
