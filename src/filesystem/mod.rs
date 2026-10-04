@@ -849,12 +849,13 @@ fn flat_container_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Ve
 }
 
 fn edge_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Vec<PathBuf>> {
+    // First/Last use canonical order; the viewer swaps these commands for descending controls.
     if let Some(zip_root) = zip_virtual_root(path) {
-        return Some(cache.recursive_children(&zip_root));
+        return Some(cache.supported_entries(&zip_root));
     }
 
     if let Some(lha_root) = lha_virtual_root(path) {
-        return Some(cache.recursive_children(&lha_root));
+        return Some(cache.supported_entries(&lha_root));
     }
 
     if let Some(listed_root) = listed_virtual_root(path) {

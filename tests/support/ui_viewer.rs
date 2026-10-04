@@ -85,6 +85,112 @@ fn make_test_viewer() -> ViewerApp {
     app
 }
 
+fn initialize_test_navigator(app: &mut ViewerApp, path: &Path) {
+    app.current_navigation_path = path.to_path_buf();
+    app.current_path = path.to_path_buf();
+    app.sync_navigation_sort_with_filer_sort();
+    if app.active_fs_request_id.is_none() {
+        app.init_filesystem(path.to_path_buf()).unwrap();
+    }
+    let result = app
+        .fs_rx
+        .as_ref()
+        .unwrap()
+        .recv_timeout(Duration::from_secs(3))
+        .unwrap();
+    let FilesystemResult::NavigatorReady {
+        navigation_path, ..
+    } = result
+    else {
+        panic!("navigator did not become ready");
+    };
+    assert_eq!(navigation_path.as_deref(), Some(path));
+    app.navigator_ready = true;
+    app.active_fs_request_id = None;
+}
+
+fn receive_test_navigation(app: &mut ViewerApp) -> PathBuf {
+    let result = app
+        .fs_rx
+        .as_ref()
+        .unwrap()
+        .recv_timeout(Duration::from_secs(3))
+        .unwrap();
+    app.active_fs_request_id = None;
+    app.last_navigation_at = None;
+    match result {
+        FilesystemResult::PathResolved {
+            navigation_path, ..
+        } => navigation_path,
+        FilesystemResult::CurrentSet => panic!("received CurrentSet instead of navigation"),
+        FilesystemResult::NavigatorReady {
+            navigation_path, ..
+        } => panic!("received NavigatorReady: {navigation_path:?}"),
+        FilesystemResult::NoPath { request_id } => {
+            panic!("navigation request {request_id} returned NoPath")
+        }
+    }
+}
+
+#[test]
+fn additional_review_descending_archive_edges_match_hidden_filer_controls() {
+    use std::io::Write;
+    for extension in ["zip", "lha"] {
+        let root = make_temp_dir();
+        let archive = root.join(format!("pages.{extension}"));
+        let file = fs::File::create(&archive).unwrap();
+        if extension == "zip" {
+            let mut writer = zip::ZipWriter::new(file);
+            for name in ["c.png", "a.png", "b.png"] {
+                writer
+                    .start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                writer.write_all(b"image fixture").unwrap();
+            }
+            writer.finish().unwrap();
+        } else {
+            let mut writer = oxiarc_archive::LzhWriter::new(file);
+            for name in ["c.png", "a.png", "b.png"] {
+                writer.add_file(name, b"image fixture").unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        let entries =
+            crate::filesystem::list_openable_entries(&archive, NavigationSortOption::OsName);
+        let mut app = make_test_viewer();
+        app.show_filer = false;
+        app.filer.ascending = false;
+        initialize_test_navigator(&mut app, &entries[1]);
+        app.first_image().unwrap();
+        assert_eq!(
+            receive_test_navigation(&mut app),
+            entries[2],
+            "{extension}: first"
+        );
+        app.last_image().unwrap();
+        assert_eq!(
+            receive_test_navigation(&mut app),
+            entries[0],
+            "{extension}: last"
+        );
+        app.pending_viewer_navigation = Some(PendingViewerNavigation::First);
+        app.flush_pending_viewer_navigation();
+        assert_eq!(
+            receive_test_navigation(&mut app),
+            entries[2],
+            "{extension}: queued first"
+        );
+        app.pending_viewer_navigation = Some(PendingViewerNavigation::Last);
+        app.flush_pending_viewer_navigation();
+        assert_eq!(
+            receive_test_navigation(&mut app),
+            entries[0],
+            "{extension}: queued last"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
 fn filer_test_frame(
     app: &mut ViewerApp,
     subfiler: bool,
