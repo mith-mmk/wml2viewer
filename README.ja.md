@@ -1,4 +1,4 @@
-# wml2viewer 0.0.21
+# wml2viewer 0.0.22
 
 - `egui` と `wml2` を使った軽量ネイティブ画像ビューアです。
 
@@ -38,7 +38,7 @@ wml2viewer
 
 ### Android 10以降
 
-Android 0.0.21はJetpack Composeで全面再実装したモバイル専用アプリです。Storage Access Frameworkで選択ツリーを直接参照し、SMB2/3、3×3位置タッチ、スマホ/タブレット別UIに対応します。デスクトップUIと`config.toml`は変更しません。SMBパスワードはAndroid Keystore鍵で暗号化し、Rustへ渡しません。
+Android 0.0.22はJetpack Composeで全面再実装したモバイル専用アプリです。Storage Access Frameworkで選択ツリーを直接参照し、SMB2/3、3×3位置タッチ、スマホ/タブレット別UIに対応します。デスクトップUIと`config.toml`は変更しません。SMBパスワードはAndroid Keystore鍵で暗号化し、Rustへ渡しません。
 
 必要環境はJDK 17、Android SDK 36、NDK r27c（`27.2.12479018`）、RustのAndroidターゲット、`cargo-ndk`です。Gradle 9.1.0 WrapperとAGP 9.0.1を使用します。
 
@@ -103,3 +103,4 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 2026-07-18: 0.0.18 公開、macOSビルドとAndroidビルドを追加
 - 2026-08-11: 0.0.19準備、ComposeによるAndroid全面再実装、SAF/SMB、資格情報保護、モバイルUI/設定、OS codec routingを追加
 - 2026-08-30: 0.0.21 公開、オプトインのネイティブAVIFデコードとCI Action更新
+- 2026-10-04: 0.0.22 公開、デスクトップUI更新、ファイラー・ナビゲーション同期、画像切り替え効果、再帰見開き送り、先読み・アニメーションの不具合修正
