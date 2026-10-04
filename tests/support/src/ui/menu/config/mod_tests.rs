@@ -1,10 +1,9 @@
 use super::{
-    INPUT_ACTION_FIELD_WIDTH, INPUT_KEY_FIELD_WIDTH, SETTINGS_INPUT_DEFAULT_WIDTH,
-    SETTINGS_INPUT_MIN_WIDTH, SETTINGS_MIN_WIDTH, can_encode_with_default_overlay,
-    capture_pressed_key_name, centered_cell_rect, duplicate_binding_row_indices,
-    input_bindings_table_width, input_settings_content_width, is_reserved_binding,
-    keymap_from_rows, overlay_keymap_from_effective, settings_dialog_default_size,
-    settings_dialog_min_width,
+    INPUT_ACTION_FIELD_WIDTH, INPUT_KEY_FIELD_WIDTH, SETTINGS_MIN_WIDTH, SettingsLayoutMode,
+    can_encode_with_default_overlay, capture_pressed_key_name, centered_cell_rect,
+    duplicate_binding_row_indices, input_bindings_layout_uses_cards, input_bindings_table_width,
+    is_reserved_binding, keymap_from_rows, overlay_keymap_from_effective,
+    settings_dialog_default_size, settings_dialog_min_width, settings_layout_mode,
 };
 use crate::options::{KeyBinding, ViewerAction};
 use crate::ui::viewer::{KeyMappingRowDraft, SettingsTab};
@@ -108,28 +107,24 @@ fn capture_pressed_key_name_returns_none_without_events() {
 }
 
 #[test]
-fn input_settings_dialog_starts_wider_than_regular_tabs() {
+fn settings_dialog_adapts_without_forcing_input_width() {
     let content = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1280.0, 720.0));
 
     assert_eq!(
         settings_dialog_min_width(content, SettingsTab::Input),
-        SETTINGS_INPUT_MIN_WIDTH
-    );
-    assert_eq!(
-        settings_dialog_min_width(content, SettingsTab::Viewer),
         SETTINGS_MIN_WIDTH
     );
     assert_eq!(
         settings_dialog_default_size(content, SettingsTab::Input).x,
-        SETTINGS_INPUT_DEFAULT_WIDTH
-    );
-    assert!(
-        settings_dialog_default_size(content, SettingsTab::Input).x
-            > settings_dialog_default_size(content, SettingsTab::Viewer).x
+        settings_dialog_default_size(content, SettingsTab::Viewer).x
     );
     assert!(INPUT_KEY_FIELD_WIDTH >= 180.0);
     assert!(input_bindings_table_width() >= INPUT_ACTION_FIELD_WIDTH + INPUT_KEY_FIELD_WIDTH);
-    assert!(input_settings_content_width() >= input_bindings_table_width());
+    assert_eq!(settings_layout_mode(900.0), SettingsLayoutMode::Sidebar);
+    assert_eq!(settings_layout_mode(899.0), SettingsLayoutMode::Selector);
+    assert_eq!(settings_layout_mode(639.0), SettingsLayoutMode::Maximized);
+    assert!(!input_bindings_layout_uses_cards(780.0));
+    assert!(input_bindings_layout_uses_cards(779.0));
 }
 
 #[test]

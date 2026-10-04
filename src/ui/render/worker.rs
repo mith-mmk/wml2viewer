@@ -4,13 +4,14 @@ use crate::drawers::image::{
     LoadedImage, load_canvas_from_bytes_with_hint, load_canvas_from_file, resize_loaded_image,
 };
 use crate::filesystem::{load_virtual_image_bytes, resolve_start_path};
+use crate::ui::render::{canvas_to_color_image, downscale_for_texture_limit};
 use crate::ui::viewer::options::RenderScaleMode;
 use std::error::Error;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
@@ -22,12 +23,15 @@ pub(crate) enum RenderCommand {
         zoom: f32,
         method: InterpolationAlgorithm,
         scale_mode: RenderScaleMode,
+        max_texture_side: usize,
     },
     ResizeCurrent {
         request_id: u64,
+        source: LoadedImage,
         zoom: f32,
         method: InterpolationAlgorithm,
         scale_mode: RenderScaleMode,
+        max_texture_side: usize,
     },
     Shutdown,
 }
@@ -40,6 +44,7 @@ pub(crate) enum RenderResult {
         rendered: LoadedImage,
         companion: Option<LoadedRenderPage>,
         metrics: RenderLoadMetrics,
+        prepared_texture: Option<PreparedTexture>,
     },
     Failed {
         request_id: u64,
@@ -66,6 +71,36 @@ pub(crate) struct LoadedRenderPage {
     pub(crate) source: LoadedImage,
     pub(crate) rendered: LoadedImage,
     pub(crate) metrics: RenderLoadMetrics,
+    pub(crate) prepared_texture: Option<PreparedTexture>,
+}
+
+#[derive(Clone)]
+pub(crate) struct PreparedTexture {
+    pub(crate) image: Arc<eframe::egui::ColorImage>,
+    pub(crate) display_scale: f32,
+    pub(crate) max_texture_side: usize,
+    pub(crate) method: InterpolationAlgorithm,
+    pub(crate) downscale_ms: f64,
+    pub(crate) color_conversion_ms: f64,
+}
+
+fn prepare_texture(
+    canvas: &Canvas,
+    max_texture_side: usize,
+    method: InterpolationAlgorithm,
+) -> PreparedTexture {
+    let started = Instant::now();
+    let (canvas, display_scale) = downscale_for_texture_limit(canvas, max_texture_side, method);
+    let downscale_done = Instant::now();
+    let image = canvas_to_color_image(&canvas);
+    PreparedTexture {
+        image: Arc::new(image),
+        display_scale,
+        max_texture_side,
+        method,
+        downscale_ms: downscale_done.duration_since(started).as_secs_f64() * 1000.0,
+        color_conversion_ms: downscale_done.elapsed().as_secs_f64() * 1000.0,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,16 +109,8 @@ pub(crate) enum ActiveRenderRequest {
     Resize(u64),
 }
 
-fn blank_loaded_image() -> LoadedImage {
-    LoadedImage {
-        canvas: Canvas::new(1, 1),
-        animation: Vec::new(),
-        loop_count: None,
-    }
-}
-
 pub(crate) fn spawn_render_worker(
-    initial_source: LoadedImage,
+    _initial_source: LoadedImage,
 ) -> (
     Sender<RenderCommand>,
     Receiver<RenderResult>,
@@ -91,7 +118,6 @@ pub(crate) fn spawn_render_worker(
 ) {
     let (command_tx, command_rx) = mpsc::channel::<RenderCommand>();
     let (result_tx, result_rx) = mpsc::channel::<RenderResult>();
-    let current_source = Arc::new(Mutex::new(initial_source));
     let latest_load_request_id = Arc::new(AtomicU64::new(0));
 
     let join = thread::spawn(move || {
@@ -104,10 +130,10 @@ pub(crate) fn spawn_render_worker(
                     zoom,
                     method,
                     scale_mode,
+                    max_texture_side,
                 } => {
                     latest_load_request_id.store(request_id, Ordering::Release);
                     let result_tx = result_tx.clone();
-                    let current_source = Arc::clone(&current_source);
                     let latest_load_request_id = Arc::clone(&latest_load_request_id);
                     thread::spawn(move || {
                         let result = catch_unwind(AssertUnwindSafe(|| {
@@ -119,6 +145,7 @@ pub(crate) fn spawn_render_worker(
                                     zoom,
                                     method,
                                     scale_mode,
+                                    max_texture_side,
                                 )? else {
                                     return Ok(None);
                                 };
@@ -131,6 +158,7 @@ pub(crate) fn spawn_render_worker(
                                         zoom,
                                         method,
                                         scale_mode,
+                                        max_texture_side,
                                     )
                                     .ok()
                                     .flatten()
@@ -149,10 +177,8 @@ pub(crate) fn spawn_render_worker(
 
                         match result {
                             Ok(Some((primary, companion))) => {
-                                if latest_load_request_id.load(Ordering::Acquire) == request_id {
-                                    if let Ok(mut current) = current_source.lock() {
-                                        *current = primary.source.clone();
-                                    }
+                                if latest_load_request_id.load(Ordering::Acquire) != request_id {
+                                    return;
                                 }
                                 let _ = result_tx.send(RenderResult::Loaded {
                                     request_id,
@@ -161,6 +187,7 @@ pub(crate) fn spawn_render_worker(
                                     rendered: primary.rendered,
                                     companion,
                                     metrics: primary.metrics,
+                                    prepared_texture: primary.prepared_texture,
                                 });
                             }
                             Ok(None) => {}
@@ -177,17 +204,15 @@ pub(crate) fn spawn_render_worker(
                 }
                 RenderCommand::ResizeCurrent {
                     request_id,
+                    source,
                     zoom,
                     method,
                     scale_mode,
+                    max_texture_side,
                 } => {
                     let result_tx = result_tx.clone();
-                    let current_source = Arc::clone(&current_source);
                     thread::spawn(move || {
-                        let source_snapshot = current_source
-                            .lock()
-                            .map(|current| current.clone())
-                            .unwrap_or_else(|_| blank_loaded_image());
+                        let source_snapshot = source;
                         match catch_unwind(AssertUnwindSafe(|| match scale_mode {
                             RenderScaleMode::FastGpu => Ok(source_snapshot.clone()),
                             RenderScaleMode::PreciseCpu => {
@@ -200,6 +225,11 @@ pub(crate) fn spawn_render_worker(
                             )))
                         }) {
                             Ok(rendered) => {
+                                let prepared_texture = Some(prepare_texture(
+                                    rendered.frame_canvas(0),
+                                    max_texture_side,
+                                    method,
+                                ));
                                 let _ = result_tx.send(RenderResult::Loaded {
                                     request_id,
                                     path: None,
@@ -207,6 +237,7 @@ pub(crate) fn spawn_render_worker(
                                     rendered,
                                     companion: None,
                                     metrics: RenderLoadMetrics::default(),
+                                    prepared_texture,
                                 });
                             }
                             Err(err) => {
@@ -235,6 +266,7 @@ fn load_render_page(
     zoom: f32,
     method: InterpolationAlgorithm,
     scale_mode: RenderScaleMode,
+    max_texture_side: usize,
 ) -> Result<Option<LoadedRenderPage>, Box<dyn Error>> {
     let mut metrics = RenderLoadMetrics::default();
     if latest_load_request_id.load(Ordering::Acquire) != request_id {
@@ -275,11 +307,24 @@ fn load_render_page(
     };
     metrics.resize_ms = resize_started.elapsed().as_millis();
 
+    if latest_load_request_id.load(Ordering::Acquire) != request_id {
+        return Ok(None);
+    }
+    let prepared_texture = Some(prepare_texture(
+        rendered.frame_canvas(0),
+        max_texture_side,
+        method,
+    ));
+    if latest_load_request_id.load(Ordering::Acquire) != request_id {
+        return Ok(None);
+    }
+
     Ok(Some(LoadedRenderPage {
         path: load_path,
         source,
         rendered,
         metrics,
+        prepared_texture,
     }))
 }
 

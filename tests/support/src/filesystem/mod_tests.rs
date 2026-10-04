@@ -3,6 +3,7 @@ use crate::dependent::plugins::{
     PluginCapabilityConfig, PluginConfig, PluginExtensionConfig, PluginModuleConfig,
     PluginProviderConfig, set_runtime_plugin_config,
 };
+use filetime::{FileTime, set_file_mtime};
 use oxiarc_archive::LzhWriter;
 use std::io::Write;
 use std::sync::{Mutex, OnceLock};
@@ -42,6 +43,361 @@ fn make_lha_with_entries(path: &Path, entries: &[(&str, &[u8])]) {
         lha.add_file(name, bytes).unwrap();
     }
     lha.finish().unwrap();
+}
+
+#[test]
+fn recursive_navigation_continues_after_current_file_is_removed() {
+    for forward in [true, false] {
+        let root = make_temp_dir();
+        let pages = [root.join("a.png"), root.join("b.png"), root.join("c.png")];
+        for page in &pages {
+            fs::write(page, TINY_PNG).unwrap();
+        }
+        let mut cache = FilesystemCache::default();
+        let mut nav = FileNavigator::from_current_path(pages[1].clone(), &mut cache);
+        fs::remove_file(&pages[1]).unwrap();
+        let NavigationOutcome::Resolved(target) = nav.recursive_step(&mut cache, forward) else {
+            panic!("navigation stopped at a removed file");
+        };
+        assert_eq!(target.navigation_path, pages[if forward { 2 } else { 0 }]);
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn recursive_spreads_keep_even_and_odd_folder_boundaries_in_both_orders() {
+    for count in [4, 5] {
+        for ascending in [true, false] {
+            let root = make_temp_dir();
+            let current_dir = root.join(if ascending { "001" } else { "002" });
+            let adjacent_dir = root.join(if ascending { "002" } else { "001" });
+            fs::create_dir_all(&current_dir).unwrap();
+            fs::create_dir_all(&adjacent_dir).unwrap();
+            let mut pages = (1..=count)
+                .map(|page| current_dir.join(format!("{page:03}.png")))
+                .collect::<Vec<_>>();
+            let mut adjacent = (1..=2)
+                .map(|page| adjacent_dir.join(format!("{page:03}.png")))
+                .collect::<Vec<_>>();
+            for page in pages.iter().chain(&adjacent) {
+                fs::write(page, TINY_PNG).unwrap();
+            }
+            if !ascending {
+                pages.reverse();
+                adjacent.reverse();
+            }
+            let mut cache = FilesystemCache::default();
+            cache.recursive_order.ascending = ascending;
+            let mut nav = FileNavigator::from_current_path(pages[0].clone(), &mut cache);
+            let NavigationOutcome::Resolved(target) = nav.recursive_spread_step(&mut cache, true)
+            else {
+                panic!("second spread missing");
+            };
+            assert_eq!(target.navigation_path, pages[2]);
+            if count == 5 {
+                let NavigationOutcome::Resolved(target) =
+                    nav.recursive_spread_step(&mut cache, true)
+                else {
+                    panic!("odd trailing page missing");
+                };
+                assert_eq!(target.navigation_path, pages[4]);
+            }
+            let NavigationOutcome::Resolved(target) = nav.recursive_spread_step(&mut cache, true)
+            else {
+                panic!("adjacent folder missing");
+            };
+            assert_eq!(target.navigation_path, adjacent[0]);
+            let NavigationOutcome::Resolved(target) = nav.recursive_spread_step(&mut cache, false)
+            else {
+                panic!("previous branch edge missing");
+            };
+            assert_eq!(target.navigation_path, *pages.last().unwrap());
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+}
+
+#[test]
+fn recursive_spread_at_end_does_not_commit_the_already_displayed_companion() {
+    // A cached archive stream followed by an unavailable container makes the end deterministic.
+    let archive = PathBuf::from("unavailable-spread-test.zip");
+    let pages = vec![
+        zip_virtual_child_path(&archive, 0, "a.png"),
+        zip_virtual_child_path(&archive, 1, "b.png"),
+    ];
+    let mut cache = FilesystemCache::default();
+    cache.listings_by_dir.insert(
+        archive.clone(),
+        DirectoryListing {
+            files: pages.clone(),
+            file_entries: pages.clone(),
+            files_expanded: true,
+            first_file: Some(pages[0].clone()),
+            last_file: Some(pages[1].clone()),
+            dirs: Vec::new(),
+        },
+    );
+    cache
+        .recursive_children_by_dir
+        .insert(archive, pages.clone());
+    let mut nav = FileNavigator::from_current_path(pages[0].clone(), &mut cache);
+    for _ in 0..2 {
+        assert!(matches!(
+            nav.recursive_spread_step(&mut cache, true),
+            NavigationOutcome::NoPath
+        ));
+        assert_eq!(nav.current(), pages[0]);
+    }
+}
+
+#[test]
+fn opening_unsorted_zip_agrees_with_recursive_navigation_and_edges() {
+    let root = make_temp_dir();
+    let archive = root.join("pages.zip");
+    make_zip_with_entries(&archive, &["c.png", "a.png", "b.png"]);
+    let start = resolve_start_path(&archive).unwrap();
+    assert_eq!(browser_entry_display_name(&start), "a.png");
+    let mut cache = FilesystemCache::default();
+    let mut nav = FileNavigator::from_current_path(start.clone(), &mut cache);
+    for name in ["b.png", "c.png"] {
+        let NavigationOutcome::Resolved(target) = nav.recursive_step(&mut cache, true) else {
+            panic!("ZIP page was skipped");
+        };
+        assert_eq!(browser_entry_display_name(&target.navigation_path), name);
+    }
+    assert_eq!(nav.first(&mut cache), Some(start));
+    assert_eq!(
+        browser_entry_display_name(&nav.last(&mut cache).unwrap()),
+        "c.png"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn recursive_listed_navigation_resolves_archives_and_rebases_edited_rows() {
+    let root = make_temp_dir();
+    let listed = root.join("pages.wmltxt");
+    let first = root.join("a.png");
+    let archive = root.join("book.zip");
+    let last = root.join("c.png");
+    fs::write(&first, TINY_PNG).unwrap();
+    fs::write(&last, TINY_PNG).unwrap();
+    make_zip_with_entries(&archive, &["page.png"]);
+    fs::write(
+        &listed,
+        format!(
+            "#!WMLViewer2 ListedFile 1.0\n{}\n{}\n{}\n",
+            first.display(),
+            archive.display(),
+            last.display()
+        ),
+    )
+    .unwrap();
+    let mut cache = FilesystemCache::default();
+    let start = resolve_navigation_path(&listed, &mut cache).unwrap();
+    let mut nav = FileNavigator::from_current_path(start, &mut cache);
+    let NavigationOutcome::Resolved(target) = nav.recursive_step(&mut cache, true) else {
+        panic!("listed archive was skipped");
+    };
+    assert!(is_virtual_listed_child(&target.navigation_path));
+    assert!(is_virtual_zip_child(&target.load_path));
+
+    // Shift the current row, keeping the same referenced archive.
+    fs::write(
+        &listed,
+        format!(
+            "#!WMLViewer2 ListedFile 1.0\n{}\n{}\n",
+            archive.display(),
+            last.display()
+        ),
+    )
+    .unwrap();
+    let NavigationOutcome::Resolved(target) = nav.recursive_step(&mut cache, true) else {
+        panic!("edited list lost its current position");
+    };
+    assert_eq!(target.load_path, last);
+    let NavigationOutcome::Resolved(target) = nav.recursive_step(&mut cache, false) else {
+        panic!("reverse navigation skipped the archive");
+    };
+    assert!(is_virtual_zip_child(&target.load_path));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn recursive_listed_navigation_keeps_row_identity_after_insert_and_delete() {
+    let root = make_temp_dir();
+    let listed = root.join("pages.wmltxt");
+    let pages = [root.join("z.png"), root.join("a.png"), root.join("b.png")];
+    let inserted = root.join("inserted.png");
+    fs::write(&inserted, TINY_PNG).unwrap();
+    for page in &pages {
+        fs::write(page, TINY_PNG).unwrap();
+    }
+    let write_list = |rows: &[&PathBuf]| {
+        let mut content = String::from("#!WMLViewer2 ListedFile 1.0\n");
+        for row in rows {
+            content.push_str(&format!("{}\n", row.display()));
+        }
+        fs::write(&listed, content).unwrap();
+    };
+    write_list(&[&pages[0], &pages[1], &pages[2]]);
+    let mut cache = FilesystemCache::default();
+    let current = cache.supported_entries(&listed)[1].clone();
+    let mut nav = FileNavigator::from_current_path(current, &mut cache);
+    write_list(&[&inserted, &pages[0], &pages[1], &pages[2]]);
+    let NavigationOutcome::Resolved(target) = nav.recursive_step(&mut cache, true) else {
+        panic!("inserted row lost current identity");
+    };
+    assert_eq!(target.load_path, pages[2]);
+    let NavigationOutcome::Resolved(target) = nav.recursive_step(&mut cache, false) else {
+        panic!("expected original current row");
+    };
+    assert_eq!(target.load_path, pages[1]);
+    write_list(&[&pages[0], &pages[1], &pages[2]]);
+    let NavigationOutcome::Resolved(target) = nav.recursive_step(&mut cache, false) else {
+        panic!("deleted row lost current identity");
+    };
+    assert_eq!(target.load_path, pages[0]);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn recursive_navigation_uses_one_sorted_tree_and_prev_reverses_next() {
+    let root = make_temp_dir();
+    let first = root.join("10.png");
+    let archive = root.join("20.zip");
+    let empty_archive = root.join("25-empty.zip");
+    let folder = root.join("30_sub");
+    let empty_folder = root.join("35_empty");
+    let last = root.join("40.png");
+    fs::write(&first, TINY_PNG).unwrap();
+    make_zip_with_entries(&archive, &["z.png", "a.png", "A.png"]);
+    make_zip_with_entries(&empty_archive, &[]);
+    fs::create_dir_all(&folder).unwrap();
+    fs::create_dir_all(&empty_folder).unwrap();
+    let child_a = folder.join("05.png");
+    let child_b = folder.join("15.png");
+    fs::write(&child_a, TINY_PNG).unwrap();
+    fs::write(&child_b, TINY_PNG).unwrap();
+    fs::write(&last, vec![0; 200]).unwrap();
+    for (path, seconds) in [
+        (&last, 100),
+        (&archive, 200),
+        (&first, 300),
+        (&empty_archive, 400),
+        (&folder, 500),
+        (&empty_folder, 600),
+    ] {
+        set_file_mtime(path, FileTime::from_unix_time(seconds, 0)).unwrap();
+    }
+    let zip_children = build_zip_virtual_children(&archive);
+    let zip_child = |name: &str| {
+        zip_children
+            .iter()
+            .find(|path| browser_entry_display_name(path) == name)
+            .unwrap()
+            .clone()
+    };
+    let name_sequence = vec![
+        first.clone(),
+        zip_child("A.png"),
+        zip_child("a.png"),
+        zip_child("z.png"),
+        child_a.clone(),
+        child_b.clone(),
+        last.clone(),
+    ];
+
+    for sort in [
+        NavigationSortOption::OsName,
+        NavigationSortOption::NameCaseSensitive,
+        NavigationSortOption::NameCaseInsensitive,
+        NavigationSortOption::Date,
+        NavigationSortOption::Size,
+    ] {
+        for ascending in [true, false] {
+            for separate_dirs in [true, false] {
+                for archive_as_container_in_sort in [true, false] {
+                    let mut cache = FilesystemCache {
+                        listings_by_dir: HashMap::new(),
+                        recursive_children_by_dir: HashMap::new(),
+                        sort,
+                        recursive_order: RecursiveOrder {
+                            sort,
+                            ascending,
+                            separate_dirs,
+                            archive_as_container_in_sort,
+                        },
+                    };
+                    let root_children = cache.recursive_children(&root);
+                    let archive_children = cache.recursive_children(&archive);
+                    let expected_archive_children = if ascending {
+                        vec![zip_child("A.png"), zip_child("a.png"), zip_child("z.png")]
+                    } else {
+                        vec![zip_child("z.png"), zip_child("a.png"), zip_child("A.png")]
+                    };
+                    assert_eq!(
+                        archive_children, expected_archive_children,
+                        "{sort:?} {ascending}"
+                    );
+                    if sort == NavigationSortOption::OsName && !separate_dirs {
+                        let expected = if ascending {
+                            vec![
+                                first.clone(),
+                                archive.clone(),
+                                empty_archive.clone(),
+                                folder.clone(),
+                                empty_folder.clone(),
+                                last.clone(),
+                            ]
+                        } else {
+                            vec![
+                                last.clone(),
+                                empty_folder.clone(),
+                                folder.clone(),
+                                empty_archive.clone(),
+                                archive.clone(),
+                                first.clone(),
+                            ]
+                        };
+                        assert_eq!(root_children, expected);
+                    }
+                    let expected_leaves = root_children
+                        .iter()
+                        .filter_map(|item| recursive_edge_leaf(&mut cache, item, true))
+                        .collect::<Vec<_>>();
+                    assert_eq!(expected_leaves.len(), 4);
+                    let mut nav =
+                        FileNavigator::from_current_path(expected_leaves[0].clone(), &mut cache);
+                    let mut observed = vec![expected_leaves[0].clone()];
+                    for _ in 1..7 {
+                        let NavigationOutcome::Resolved(target) =
+                            nav.next_with_policy(EndOfFolderOption::Recursive, &mut cache)
+                        else {
+                            panic!(
+                                "recursive next ended early: {sort:?} {ascending} {separate_dirs}"
+                            );
+                        };
+                        observed.push(target.navigation_path);
+                    }
+                    let unique = observed.iter().collect::<std::collections::HashSet<_>>();
+                    assert_eq!(unique.len(), 7, "ZIP or folder was visited twice");
+                    if sort == NavigationSortOption::OsName && !separate_dirs && ascending {
+                        assert_eq!(observed, name_sequence);
+                    }
+                    for expected in observed.iter().rev().skip(1) {
+                        let NavigationOutcome::Resolved(target) =
+                            nav.prev_with_policy(EndOfFolderOption::Recursive, &mut cache)
+                        else {
+                            panic!("recursive prev ended early");
+                        };
+                        assert_eq!(&target.navigation_path, expected);
+                    }
+                }
+            }
+        }
+    }
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -422,9 +778,9 @@ fn zip_virtual_listing_respects_requested_os_sort() {
     assert_eq!(entries.len(), 2);
     assert_eq!(
         resolve_virtual_zip_child(&entries[0]),
-        Some((archive.clone(), 0))
+        Some((archive.clone(), 1))
     );
-    assert_eq!(resolve_virtual_zip_child(&entries[1]), Some((archive, 1)));
+    assert_eq!(resolve_virtual_zip_child(&entries[1]), Some((archive, 0)));
 
     let _ = fs::remove_dir_all(root);
 }

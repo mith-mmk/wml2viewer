@@ -13,6 +13,10 @@ impl ViewerApp {
             );
             self.filer.pending_user_request = None;
             self.filer.committed_browse_directory = None;
+            self.filer.pending_request_id = None;
+            if let Some(directory) = self.current_directory() {
+                self.request_filer_directory(directory, Some(self.current_navigation_path.clone()));
+            }
             return;
         }
         if !should_handoff_filer_control_to_viewer_navigation(
@@ -36,6 +40,7 @@ impl ViewerApp {
             return Ok(());
         }
         if self.navigation_blocked_by_active_load() {
+            self.handoff_filer_control_to_viewer_navigation();
             self.queue_viewer_navigation(PendingViewerNavigation::Next);
             return Ok(());
         }
@@ -48,17 +53,7 @@ impl ViewerApp {
             self.last_navigation_at = Some(Instant::now());
             return Ok(());
         }
-        let command = if self.filer.ascending {
-            FilesystemCommand::Next {
-                request_id: 0,
-                policy: self.end_of_folder,
-            }
-        } else {
-            FilesystemCommand::Prev {
-                request_id: 0,
-                policy: self.end_of_folder,
-            }
-        };
+        let command = self.page_navigation_command(true);
         self.request_navigation(command, Some(ImageTransitionDirection::Forward))?;
         self.last_navigation_at = Some(Instant::now());
         Ok(())
@@ -70,6 +65,7 @@ impl ViewerApp {
             return Ok(());
         }
         if self.navigation_blocked_by_active_load() {
+            self.handoff_filer_control_to_viewer_navigation();
             self.queue_viewer_navigation(PendingViewerNavigation::Prev);
             return Ok(());
         }
@@ -82,17 +78,7 @@ impl ViewerApp {
             self.last_navigation_at = Some(Instant::now());
             return Ok(());
         }
-        let command = if self.filer.ascending {
-            FilesystemCommand::Prev {
-                request_id: 0,
-                policy: self.end_of_folder,
-            }
-        } else {
-            FilesystemCommand::Next {
-                request_id: 0,
-                policy: self.end_of_folder,
-            }
-        };
+        let command = self.page_navigation_command(false);
         self.request_navigation(command, Some(ImageTransitionDirection::Backward))?;
         self.last_navigation_at = Some(Instant::now());
         Ok(())
@@ -104,6 +90,7 @@ impl ViewerApp {
             return Ok(());
         }
         if self.navigation_blocked_by_active_load() {
+            self.handoff_filer_control_to_viewer_navigation();
             self.queue_viewer_navigation(PendingViewerNavigation::First);
             return Ok(());
         }
@@ -161,6 +148,7 @@ impl ViewerApp {
             return Ok(());
         }
         if self.navigation_blocked_by_active_load() {
+            self.handoff_filer_control_to_viewer_navigation();
             self.queue_viewer_navigation(PendingViewerNavigation::Last);
             return Ok(());
         }
@@ -258,6 +246,13 @@ impl ViewerApp {
         self.show_filer = show;
         if show {
             self.filer.committed_browse_directory = None;
+            if matches!(
+                self.filesystem_options.folder_refresh,
+                FolderRefreshMode::Auto
+            ) {
+                self.filer.entries.clear();
+                self.last_filer_snapshot_signature = None;
+            }
             self.pending_filer_focus_path = Some(self.current_navigation_path.clone());
             self.sync_filer_directory_with_current_path();
             return;
@@ -265,6 +260,9 @@ impl ViewerApp {
 
         self.pending_filer_focus_path = None;
         self.filer.committed_browse_directory = None;
+        if !self.show_subfiler {
+            self.cancel_filer_scan();
+        }
         if should_clear_filer_request_on_hide(self.filer.pending_user_request.as_ref()) {
             self.log_bench_state(
                 "viewer.filer.pending_request_cleared_on_hide",
@@ -273,6 +271,7 @@ impl ViewerApp {
                 }),
             );
             self.filer.pending_user_request = None;
+            self.filer.pending_request_id = None;
         }
     }
 
@@ -280,17 +279,28 @@ impl ViewerApp {
         self.show_subfiler = show;
         if show {
             self.pending_subfiler_focus_path = Some(self.current_navigation_path.clone());
+            self.sync_filer_directory_with_current_path();
         } else {
             self.pending_subfiler_focus_path = None;
+            if !self.show_filer {
+                self.cancel_filer_scan();
+            }
         }
     }
 
     pub(crate) fn sync_navigation_sort_with_filer_sort(&mut self) {
         let desired = navigation_sort_for_filer(self.filer.sort_field, self.filer.name_sort_mode);
-        if self.navigation_sort == desired {
+        let recursive_order = RecursiveOrder {
+            sort: desired,
+            ascending: self.filer.ascending,
+            separate_dirs: self.filer.separate_dirs,
+            archive_as_container_in_sort: self.filer.archive_as_container_in_sort,
+        };
+        if self.navigation_sort == desired && self.recursive_order == recursive_order {
             return;
         }
         self.navigation_sort = desired;
+        self.recursive_order = recursive_order;
         self.log_bench_state(
             "viewer.navigation_sort.synced_from_filer",
             serde_json::json!({

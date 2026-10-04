@@ -89,15 +89,78 @@ fn request_is_stale_only_for_non_latest_request() {
 
 #[test]
 fn os_sort_orders_zip_names_naturally() {
-    let mut paths = vec![
-        PathBuf::from("pack10.zip"),
-        PathBuf::from("pack2.zip"),
-        PathBuf::from("pack1.zip"),
-    ];
-    sort_paths_for_navigation(&mut paths, NavigationSortOption::OsName);
-    let labels = paths
+    let mut entries = ["pack10.zip", "pack2.zip", "pack1.zip"]
+        .into_iter()
+        .map(|label| FilerEntry {
+            path: PathBuf::from(label),
+            label: label.to_string(),
+            is_container: true,
+            sort_as_container: true,
+            metadata: FilerMetadata::default(),
+        })
+        .collect::<Vec<_>>();
+    sort_entries(
+        &mut entries,
+        FilerSortField::Name,
+        true,
+        true,
+        NameSortMode::Os,
+    );
+    let labels = entries
         .iter()
-        .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+        .map(|entry| entry.label.as_str())
         .collect::<Vec<_>>();
     assert_eq!(labels, vec!["pack1.zip", "pack2.zip", "pack10.zip"]);
+}
+
+#[test]
+fn real_directory_preview_and_snapshot_keep_entries_and_metadata() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("wml2viewer-filer-{unique}"));
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::write(dir.join("z.png"), [1_u8, 2, 3]).unwrap();
+    std::fs::write(dir.join("a.png"), [4_u8]).unwrap();
+    std::fs::create_dir(dir.join("folder")).unwrap();
+
+    let (tx, rx) = mpsc::channel();
+    let latest = AtomicU64::new(7);
+    let entries = scan_real_directory_request(
+        &tx,
+        &latest,
+        7,
+        &dir,
+        FilerSortField::Name,
+        true,
+        true,
+        false,
+        "",
+        "",
+        NameSortMode::Os,
+    );
+    let preview = rx
+        .try_iter()
+        .flat_map(|result| match result {
+            FilerResult::Append { entries, .. } => entries,
+            _ => Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["folder", "a.png", "z.png"]
+    );
+    let mut preview_names = preview
+        .iter()
+        .map(|entry| entry.label.as_str())
+        .collect::<Vec<_>>();
+    preview_names.sort_unstable();
+    assert_eq!(preview_names, vec!["a.png", "folder", "z.png"]);
+    assert_eq!(entries[1].metadata.size, Some(1));
+    assert_eq!(entries[2].metadata.size, Some(3));
+    std::fs::remove_dir_all(&dir).unwrap();
 }

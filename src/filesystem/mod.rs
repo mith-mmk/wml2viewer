@@ -48,14 +48,37 @@ struct NavigationTarget {
 
 struct FilesystemCache {
     listings_by_dir: HashMap<PathBuf, DirectoryListing>,
+    recursive_children_by_dir: HashMap<PathBuf, Vec<PathBuf>>,
     sort: NavigationSortOption,
+    recursive_order: RecursiveOrder,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecursiveOrder {
+    pub sort: NavigationSortOption,
+    pub ascending: bool,
+    pub separate_dirs: bool,
+    pub archive_as_container_in_sort: bool,
+}
+
+impl Default for RecursiveOrder {
+    fn default() -> Self {
+        Self {
+            sort: NavigationSortOption::OsName,
+            ascending: true,
+            separate_dirs: true,
+            archive_as_container_in_sort: false,
+        }
+    }
 }
 
 impl Default for FilesystemCache {
     fn default() -> Self {
         Self {
             listings_by_dir: HashMap::new(),
+            recursive_children_by_dir: HashMap::new(),
             sort: NavigationSortOption::OsName,
+            recursive_order: RecursiveOrder::default(),
         }
     }
 }
@@ -94,6 +117,10 @@ pub enum FilesystemCommand {
         request_id: u64,
         policy: EndOfFolderOption,
     },
+    RecursiveSpread {
+        request_id: u64,
+        forward: bool,
+    },
     First {
         request_id: u64,
     },
@@ -122,6 +149,10 @@ pub enum FilesystemResult {
 impl FileNavigator {
     fn from_current_path(path: PathBuf, cache: &mut FilesystemCache) -> Self {
         let files = flat_container_entries(&path, cache).unwrap_or_else(|| vec![path.clone()]);
+        if let Some(parent) = flat_container_dir(&path) {
+            // Retain the current position even if the displayed file is subsequently removed.
+            let _ = cache.recursive_children(&parent);
+        }
         let current = files
             .iter()
             .position(|candidate| candidate == &path)
@@ -240,6 +271,9 @@ impl FileNavigator {
         policy: EndOfFolderOption,
         cache: &mut FilesystemCache,
     ) -> NavigationOutcome {
+        if policy == EndOfFolderOption::Recursive {
+            return self.recursive_step(cache, true);
+        }
         if self.next(cache).is_some() {
             return self.current_target();
         }
@@ -256,14 +290,7 @@ impl FileNavigator {
             EndOfFolderOption::Next => self
                 .jump_to_adjacent_directory(true, cache)
                 .unwrap_or(NavigationOutcome::NoPath),
-            EndOfFolderOption::Recursive => find_recursive_next_path(cache, self.current())
-                .map(|path| {
-                    self.current_path = path;
-                    self.files = None;
-                    self.current = 0;
-                    self.current_target()
-                })
-                .unwrap_or(NavigationOutcome::NoPath),
+            EndOfFolderOption::Recursive => unreachable!(),
         }
     }
 
@@ -272,6 +299,9 @@ impl FileNavigator {
         policy: EndOfFolderOption,
         cache: &mut FilesystemCache,
     ) -> NavigationOutcome {
+        if policy == EndOfFolderOption::Recursive {
+            return self.recursive_step(cache, false);
+        }
         if self.prev(cache).is_some() {
             return self.current_target();
         }
@@ -288,14 +318,58 @@ impl FileNavigator {
             EndOfFolderOption::Next => self
                 .jump_to_adjacent_directory(false, cache)
                 .unwrap_or(NavigationOutcome::NoPath),
-            EndOfFolderOption::Recursive => find_recursive_prev_path(cache, self.current())
-                .map(|path| {
-                    self.current_path = path;
-                    self.files = None;
-                    self.current = 0;
-                    self.current_target()
-                })
-                .unwrap_or(NavigationOutcome::NoPath),
+            EndOfFolderOption::Recursive => unreachable!(),
+        }
+    }
+
+    fn recursive_step(&mut self, cache: &mut FilesystemCache, forward: bool) -> NavigationOutcome {
+        self.normalize_current_path(cache);
+        let next = find_recursive_adjacent_path(cache, self.current(), forward);
+        next.map(|path| {
+            self.current_path = path;
+            self.files = None;
+            self.current = 0;
+            self.current_target()
+        })
+        .unwrap_or(NavigationOutcome::NoPath)
+    }
+
+    fn recursive_spread_step(
+        &mut self,
+        cache: &mut FilesystemCache,
+        forward: bool,
+    ) -> NavigationOutcome {
+        let original = self.clone();
+        let first = self.recursive_step(cache, forward);
+        let NavigationOutcome::Resolved(first_target) = &first else {
+            return first;
+        };
+        if navigation_branch_path(&original.current_path)
+            != navigation_branch_path(&first_target.navigation_path)
+        {
+            // Crossing directly into another branch starts at its edge, without skipping a page.
+            return first;
+        }
+        let after_first = self.clone();
+        let second = self.recursive_step(cache, forward);
+        match &second {
+            NavigationOutcome::Resolved(target)
+                if forward
+                    || navigation_branch_path(&target.navigation_path)
+                        == navigation_branch_path(&original.current_path) =>
+            {
+                second
+            }
+            _ if !forward => {
+                *self = after_first;
+                first
+            }
+            _ => {
+                // The first step was the already displayed companion. Keep the current spread
+                // when no unread page follows it, including on repeated navigation requests.
+                *self = original;
+                NavigationOutcome::NoPath
+            }
         }
     }
 
@@ -462,7 +536,12 @@ pub fn virtual_image_size(path: &Path) -> Option<u64> {
 pub fn list_openable_entries(dir: &Path, sort: NavigationSortOption) -> Vec<PathBuf> {
     let mut cache = FilesystemCache {
         listings_by_dir: HashMap::new(),
+        recursive_children_by_dir: HashMap::new(),
         sort,
+        recursive_order: RecursiveOrder {
+            sort,
+            ..RecursiveOrder::default()
+        },
     };
     cache.supported_entries(dir)
 }
@@ -510,6 +589,25 @@ pub fn is_browser_container(path: &Path) -> bool {
     path.is_dir() || is_zip_file_path(path) || is_lha_file_path(path) || is_listed_file_path(path)
 }
 
+pub fn browser_entry_display_name(path: &Path) -> String {
+    if is_virtual_listed_child(path) {
+        if let Some(name) = listed_virtual_name_from_virtual_path(path) {
+            return name;
+        }
+    }
+    if is_virtual_zip_child(path) || is_virtual_lha_child(path) {
+        if let Some((_, name)) = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .split_once("__")
+        {
+            return name.to_string();
+        }
+    }
+    file_name_sort_key(path)
+}
+
 pub fn navigation_branch_path(path: &Path) -> Option<PathBuf> {
     recursive_branch_dir(path)
 }
@@ -517,7 +615,12 @@ pub fn navigation_branch_path(path: &Path) -> Option<PathBuf> {
 pub fn adjacent_entry(path: &Path, sort: NavigationSortOption, step: isize) -> Option<PathBuf> {
     let mut cache = FilesystemCache {
         listings_by_dir: HashMap::new(),
+        recursive_children_by_dir: HashMap::new(),
         sort,
+        recursive_order: RecursiveOrder {
+            sort,
+            ..RecursiveOrder::default()
+        },
     };
     let start_path = resolve_navigation_path(path, &mut cache)?;
     let mut navigator = FileNavigator::from_current_path(start_path, &mut cache);
@@ -546,6 +649,7 @@ pub fn resolve_navigation_entry_path(path: &Path) -> Option<PathBuf> {
 
 pub fn spawn_filesystem_worker(
     sort: NavigationSortOption,
+    recursive_order: RecursiveOrder,
 ) -> (Sender<FilesystemCommand>, Receiver<FilesystemResult>) {
     let (command_tx, command_rx) = mpsc::channel::<FilesystemCommand>();
     let (result_tx, result_rx) = mpsc::channel::<FilesystemResult>();
@@ -554,7 +658,9 @@ pub fn spawn_filesystem_worker(
         let mut navigator: Option<FileNavigator> = None;
         let mut cache = FilesystemCache {
             listings_by_dir: HashMap::new(),
+            recursive_children_by_dir: HashMap::new(),
             sort,
+            recursive_order,
         };
 
         while let Ok(command) = command_rx.recv() {
@@ -624,6 +730,7 @@ pub fn spawn_filesystem_worker(
                         request_id,
                         policy,
                         PendingDirection::Next,
+                        false,
                     );
                 }
                 FilesystemCommand::Prev { request_id, policy } => {
@@ -634,6 +741,25 @@ pub fn spawn_filesystem_worker(
                         request_id,
                         policy,
                         PendingDirection::Prev,
+                        false,
+                    );
+                }
+                FilesystemCommand::RecursiveSpread {
+                    request_id,
+                    forward,
+                } => {
+                    handle_navigation_request(
+                        &result_tx,
+                        navigator.as_mut(),
+                        &mut cache,
+                        request_id,
+                        EndOfFolderOption::Recursive,
+                        if forward {
+                            PendingDirection::Next
+                        } else {
+                            PendingDirection::Prev
+                        },
+                        true,
                     );
                 }
                 FilesystemCommand::First { request_id } => {
@@ -687,12 +813,16 @@ fn handle_navigation_request(
     request_id: u64,
     policy: EndOfFolderOption,
     direction: PendingDirection,
+    spread: bool,
 ) {
     let started_at = Instant::now();
     let current_path = navigator
         .as_ref()
         .map(|nav| nav.current().display().to_string());
     let outcome = match navigator {
+        Some(nav) if spread => {
+            nav.recursive_spread_step(cache, matches!(direction, PendingDirection::Next))
+        }
         Some(nav) => match direction {
             PendingDirection::Next => nav.next_with_policy(policy, cache),
             PendingDirection::Prev => nav.prev_with_policy(policy, cache),
@@ -709,6 +839,7 @@ fn handle_navigation_request(
                 PendingDirection::Prev => "prev",
             },
             "policy": format!("{policy:?}"),
+            "spread": spread,
             "current_path": current_path,
             "navigation_path": target.as_ref().map(|target| target.navigation_path.display().to_string()),
             "load_path": target.as_ref().map(|target| target.load_path.display().to_string()),
@@ -786,6 +917,7 @@ fn flat_container_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Ve
 }
 
 fn edge_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Vec<PathBuf>> {
+    // First/Last use canonical order; the viewer swaps these commands for descending controls.
     if let Some(zip_root) = zip_virtual_root(path) {
         return Some(cache.supported_entries(&zip_root));
     }
@@ -888,69 +1020,163 @@ fn recursive_branch_dir(path: &Path) -> Option<PathBuf> {
     path.parent().map(Path::to_path_buf)
 }
 
-fn find_recursive_next_path(cache: &mut FilesystemCache, current_path: &Path) -> Option<PathBuf> {
-    let mut branch_dir = recursive_branch_dir(current_path)?;
-
+fn find_recursive_adjacent_path(
+    cache: &mut FilesystemCache,
+    current_path: &Path,
+    forward: bool,
+) -> Option<PathBuf> {
+    let mut item = current_path.to_path_buf();
+    let mut parent = flat_container_dir(current_path)?;
     loop {
-        let parent_dir = branch_dir.parent()?.to_path_buf();
-        let directories = cache.child_directories(&parent_dir);
-        let current_index = directories.iter().position(|dir| dir == &branch_dir)?;
-
-        for sibling_dir in directories.iter().skip(current_index + 1) {
-            if let Some(path) = first_path_in_subtree(cache, sibling_dir) {
-                return Some(path);
+        // Reuse the sorted snapshot within a folder; refresh only before leaving its edge.
+        for refresh in [false, true] {
+            if refresh {
+                cache.refresh_listing(&parent);
+            }
+            let mut children = cache.recursive_children(&parent);
+            if !children.contains(&item) && parent.is_dir() && !item.exists() {
+                // A worker initialized after deletion has no old snapshot. Keep a name anchor.
+                children.push(item.clone());
+                sort_recursive_children(&mut children, cache.recursive_order);
+            }
+            let Some(index) = children.iter().position(|child| child == &item) else {
+                continue;
+            };
+            if forward {
+                for sibling in children.iter().skip(index + 1) {
+                    if let Some(path) = recursive_edge_leaf(cache, sibling, true) {
+                        return Some(path);
+                    }
+                }
+            } else {
+                for sibling in children[..index].iter().rev() {
+                    if let Some(path) = recursive_edge_leaf(cache, sibling, false) {
+                        return Some(path);
+                    }
+                }
             }
         }
-
-        branch_dir = parent_dir;
+        item = parent;
+        parent = flat_container_dir(&item)?;
     }
 }
 
-fn find_recursive_prev_path(cache: &mut FilesystemCache, current_path: &Path) -> Option<PathBuf> {
-    let mut branch_dir = recursive_branch_dir(current_path)?;
+fn recursive_edge_leaf(cache: &mut FilesystemCache, item: &Path, forward: bool) -> Option<PathBuf> {
+    // A listed row is a navigation identity, even when its target is an archive.
+    if is_virtual_listed_child(item) {
+        return resolve_start_path(item).map(|_| item.to_path_buf());
+    }
+    if !is_browser_container(item) {
+        return (is_virtual_zip_child(item) || is_virtual_lha_child(item) || item.is_file())
+            .then(|| resolve_start_path(item).map(|_| item.to_path_buf()))
+            .flatten();
+    }
+    let children = cache.recursive_children(item);
+    if forward {
+        children
+            .iter()
+            .find_map(|child| recursive_edge_leaf(cache, child, true))
+    } else {
+        children
+            .iter()
+            .rev()
+            .find_map(|child| recursive_edge_leaf(cache, child, false))
+    }
+}
 
-    loop {
-        let parent_dir = branch_dir.parent()?.to_path_buf();
-        let directories = cache.child_directories(&parent_dir);
-        let current_index = directories.iter().position(|dir| dir == &branch_dir)?;
-
-        for sibling_dir in directories[..current_index].iter().rev() {
-            if let Some(path) = last_path_in_subtree(cache, sibling_dir) {
-                return Some(path);
+fn sort_recursive_children(children: &mut [PathBuf], order: RecursiveOrder) {
+    struct SortEntry {
+        path: PathBuf,
+        name: String,
+        group: bool,
+        modified: Option<SystemTime>,
+        size: Option<u64>,
+    }
+    let need_metadata = order.separate_dirs
+        || matches!(
+            order.sort,
+            NavigationSortOption::Date | NavigationSortOption::Size
+        );
+    let mut entries = children
+        .iter()
+        .map(|path| {
+            let metadata = need_metadata.then(|| fs::metadata(path).ok()).flatten();
+            SortEntry {
+                path: path.clone(),
+                name: browser_entry_display_name(path),
+                group: metadata.as_ref().is_some_and(|metadata| metadata.is_dir())
+                    || is_listed_file_path(path)
+                    || (order.archive_as_container_in_sort
+                        && (is_zip_file_path(path) || is_lha_file_path(path))),
+                modified: metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.modified().ok()),
+                size: metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.is_file().then_some(metadata.len())),
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        if order.separate_dirs {
+            let group = right.group.cmp(&left.group);
+            if group != std::cmp::Ordering::Equal {
+                return group;
             }
         }
-
-        branch_dir = parent_dir;
-    }
-}
-
-fn first_path_in_subtree(cache: &mut FilesystemCache, dir: &Path) -> Option<PathBuf> {
-    if let Some(path) = cache.first_supported_file(dir) {
-        return Some(path);
-    }
-
-    for child_dir in cache.child_directories(dir) {
-        if let Some(path) = first_path_in_subtree(cache, &child_dir) {
-            return Some(path);
+        let name_order = || match order.sort {
+            NavigationSortOption::OsName => compare_os_str(&left.name, &right.name),
+            NavigationSortOption::NameCaseSensitive => {
+                compare_natural_str(&left.name, &right.name, true)
+            }
+            _ => compare_natural_str(&left.name, &right.name, false),
+        };
+        let primary = match order.sort {
+            NavigationSortOption::Date => left.modified.cmp(&right.modified),
+            NavigationSortOption::Size => left.size.cmp(&right.size),
+            _ => name_order(),
+        };
+        let compared = if primary == std::cmp::Ordering::Equal {
+            name_order()
+        } else {
+            primary
+        };
+        let compared = compared
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.path.cmp(&right.path));
+        if order.ascending {
+            compared
+        } else {
+            compared.reverse()
         }
+    });
+    for (destination, entry) in children.iter_mut().zip(entries) {
+        *destination = entry.path;
     }
-
-    None
-}
-
-fn last_path_in_subtree(cache: &mut FilesystemCache, dir: &Path) -> Option<PathBuf> {
-    let child_dirs = cache.child_directories(dir);
-    for child_dir in child_dirs.iter().rev() {
-        if let Some(path) = last_path_in_subtree(cache, child_dir) {
-            return Some(path);
-        }
-    }
-
-    cache.last_supported_file(dir)
 }
 
 impl FilesystemCache {
+    fn recursive_children(&mut self, container: &Path) -> Vec<PathBuf> {
+        // Listed rows can shift while browsing, and must retain their explicit row order.
+        if is_listed_file_path(container) {
+            return self.listing(container).file_entries.clone();
+        }
+        if let Some(children) = self.recursive_children_by_dir.get(container) {
+            return children.clone();
+        }
+        let listing = self.listing(container);
+        let mut children = listing.file_entries.clone();
+        children.extend(listing.dirs.iter().cloned());
+        children.sort();
+        children.dedup();
+        sort_recursive_children(&mut children, self.recursive_order);
+        self.recursive_children_by_dir
+            .insert(container.to_path_buf(), children.clone());
+        children
+    }
+
     fn refresh_listing(&mut self, dir: &Path) {
+        self.recursive_children_by_dir.remove(dir);
         let listing = scan_directory_listing(dir, self.sort);
         self.listings_by_dir.insert(dir.to_path_buf(), listing);
     }
@@ -1002,10 +1228,16 @@ impl FilesystemCache {
     }
 
     fn first_supported_file(&mut self, dir: &Path) -> Option<PathBuf> {
+        if is_zip_file_path(dir) || is_lha_file_path(dir) {
+            return self.recursive_children(dir).first().cloned();
+        }
         self.listing(dir).first_file.clone()
     }
 
     fn last_supported_file(&mut self, dir: &Path) -> Option<PathBuf> {
+        if is_zip_file_path(dir) || is_lha_file_path(dir) {
+            return self.recursive_children(dir).last().cloned();
+        }
         self.listing(dir).last_file.clone()
     }
 }
@@ -1094,7 +1326,13 @@ fn scan_zip_virtual_directory(zip_file: &Path, sort: NavigationSortOption) -> Di
         .iter()
         .map(|entry| zip_virtual_child_path(zip_file, entry.index, &entry.name))
         .collect::<Vec<_>>();
-    sort_paths(&mut files, sort);
+    sort_recursive_children(
+        &mut files,
+        RecursiveOrder {
+            sort,
+            ..RecursiveOrder::default()
+        },
+    );
 
     DirectoryListing {
         file_entries: files.clone(),
@@ -1112,7 +1350,13 @@ fn scan_lha_virtual_directory(lha_file: &Path, sort: NavigationSortOption) -> Di
         .iter()
         .map(|entry| lha_virtual_child_path(lha_file, entry.index, &entry.name))
         .collect::<Vec<_>>();
-    sort_paths(&mut files, sort);
+    sort_recursive_children(
+        &mut files,
+        RecursiveOrder {
+            sort,
+            ..RecursiveOrder::default()
+        },
+    );
 
     DirectoryListing {
         file_entries: files.clone(),

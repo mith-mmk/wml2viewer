@@ -11,6 +11,7 @@ use crate::ui::menu::fileviewer::icons::{SvgIcon, paint_svg_icon};
 use crate::ui::menu::fileviewer::state::{
     FilerEntry, FilerSortField, FilerUserRequest, FilerViewMode, NameSortMode,
 };
+use crate::ui::menu::style;
 use crate::ui::viewer::ViewerApp;
 use crate::ui::viewer::options::PaneSide;
 use chrono::{DateTime, Local};
@@ -29,8 +30,64 @@ const FILER_REGULAR_MAX_WIDTH: f32 = 420.0;
 const SUBFILER_REGULAR_MIN_HEIGHT: f32 = 88.0;
 const SUBFILER_COMPACT_MIN_HEIGHT: f32 = 72.0;
 const SUBFILER_DEFAULT_HEIGHT: f32 = 110.0;
-const POPUP_MENU_WIDTH: f32 = 280.0;
-const POPUP_MENU_ESTIMATED_HEIGHT: f32 = 360.0;
+const CASCADE_MENU_WIDTH: f32 = 240.0;
+const CASCADE_MENU_GAP: f32 = 4.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CascadeMenuSection {
+    File,
+    SaveImage,
+    View,
+    Zoom,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CascadeMenuState {
+    pub(crate) levels: Vec<CascadeMenuSection>,
+    pub(crate) focused_item: usize,
+}
+
+impl CascadeMenuState {
+    pub(crate) fn close(&mut self) {
+        self.levels.clear();
+        self.focused_item = 0;
+    }
+
+    fn is_open(&self, section: CascadeMenuSection) -> bool {
+        self.levels.contains(&section)
+    }
+
+    fn open_root(&mut self, section: CascadeMenuSection) {
+        self.levels.clear();
+        self.levels.push(section);
+        self.focused_item = 0;
+    }
+
+    fn toggle_zoom(&mut self) {
+        if self.levels.as_slice() == [CascadeMenuSection::View, CascadeMenuSection::Zoom] {
+            self.levels.pop();
+        } else {
+            self.levels = vec![CascadeMenuSection::View, CascadeMenuSection::Zoom];
+        }
+        self.focused_item = 0;
+    }
+
+    fn move_focus(&mut self, row_count: usize, forward: bool) {
+        if forward {
+            self.focused_item = (self.focused_item + 1) % row_count;
+        } else {
+            self.focused_item = (self.focused_item + row_count - 1) % row_count;
+        }
+    }
+
+    fn close_current_level(&mut self) -> bool {
+        let closed = self.levels.pop().is_some();
+        if closed {
+            self.focused_item = 0;
+        }
+        closed
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PanelSizeRange {
@@ -40,6 +97,142 @@ struct PanelSizeRange {
 }
 
 impl ViewerApp {
+    pub(crate) fn dismiss_cascade_menu(&mut self) {
+        self.cascade_menu.close();
+        self.show_left_menu = false;
+        self.suppress_next_pointer_intent = true;
+    }
+
+    pub(crate) fn handle_cascade_menu_keyboard(&mut self, ctx: &egui::Context) {
+        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.dismiss_cascade_menu();
+            return;
+        }
+
+        let row_count = self.cascade_menu_row_count();
+        if ctx.input(|input| input.key_pressed(egui::Key::ArrowUp)) {
+            self.cascade_menu.move_focus(row_count, false);
+            return;
+        }
+        if ctx.input(|input| input.key_pressed(egui::Key::ArrowDown)) {
+            self.cascade_menu.move_focus(row_count, true);
+            return;
+        }
+        if ctx.input(|input| input.key_pressed(egui::Key::ArrowLeft)) {
+            if !self.cascade_menu.close_current_level() {
+                self.dismiss_cascade_menu();
+            }
+            return;
+        }
+        if ctx.input(|input| input.key_pressed(egui::Key::ArrowRight)) {
+            match self.cascade_menu.levels.as_slice() {
+                [] => match self.cascade_menu.focused_item {
+                    0 => self.cascade_menu.open_root(CascadeMenuSection::File),
+                    1 => self.cascade_menu.open_root(CascadeMenuSection::SaveImage),
+                    2 => self.cascade_menu.open_root(CascadeMenuSection::View),
+                    _ => {}
+                },
+                [CascadeMenuSection::View] if self.cascade_menu.focused_item == 0 => {
+                    self.cascade_menu.toggle_zoom();
+                }
+                _ => {}
+            }
+            return;
+        }
+        if !ctx.input(|input| input.key_pressed(egui::Key::Enter)) {
+            return;
+        }
+
+        match self.cascade_menu.levels.as_slice() {
+            [] => match self.cascade_menu.focused_item {
+                0 => self.cascade_menu.open_root(CascadeMenuSection::File),
+                1 => self.cascade_menu.open_root(CascadeMenuSection::SaveImage),
+                2 => self.cascade_menu.open_root(CascadeMenuSection::View),
+                3 => {
+                    self.open_dialog_with_title_key(
+                        UiTextKey::MenuInfoSection,
+                        self.current_image_info_text(),
+                    );
+                    self.dismiss_cascade_menu();
+                }
+                4 => {
+                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleSettings);
+                    self.dismiss_cascade_menu();
+                }
+                5 => {
+                    self.open_dialog_with_title_key(UiTextKey::MenuAboutSection, self.about_text());
+                    self.dismiss_cascade_menu();
+                }
+                _ => {}
+            },
+            [CascadeMenuSection::File] => {
+                match self.cascade_menu.focused_item {
+                    0 => {
+                        let _ = self.reload_current();
+                    }
+                    1 => self.apply_viewer_action(ctx, crate::options::ViewerAction::MoveFile),
+                    2 => self.apply_viewer_action(ctx, crate::options::ViewerAction::CopyFile),
+                    3 => self.apply_viewer_action(ctx, crate::options::ViewerAction::RenameFile),
+                    4 => self.apply_viewer_action(ctx, crate::options::ViewerAction::DeleteFile),
+                    _ => return,
+                }
+                self.dismiss_cascade_menu();
+            }
+            [CascadeMenuSection::SaveImage] => {
+                if let Some(format) = SaveFormat::all()
+                    .get(self.cascade_menu.focused_item)
+                    .cloned()
+                {
+                    self.save_dialog.format = format;
+                    self.open_save_dialog();
+                    self.dismiss_cascade_menu();
+                }
+            }
+            [CascadeMenuSection::View] => match self.cascade_menu.focused_item {
+                0 => self.cascade_menu.toggle_zoom(),
+                1 => {
+                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleMangaMode);
+                    self.dismiss_cascade_menu();
+                }
+                _ => {}
+            },
+            [CascadeMenuSection::View, CascadeMenuSection::Zoom] => {
+                match self.cascade_menu.focused_item {
+                    0 => self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomIn),
+                    1 => self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomOut),
+                    2 => self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomReset),
+                    preset => {
+                        if let Some(scale) = [50_u32, 75, 100, 125, 150, 200].get(preset - 3) {
+                            let _ = self.set_zoom(*scale as f32 / 100.0);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn cascade_menu_row_count(&self) -> usize {
+        match self.cascade_menu.levels.as_slice() {
+            [] => 6,
+            [CascadeMenuSection::File] => 5,
+            [CascadeMenuSection::SaveImage] => SaveFormat::all().len(),
+            [CascadeMenuSection::View] => 2,
+            [CascadeMenuSection::View, CascadeMenuSection::Zoom] => 9,
+            _ => 1,
+        }
+    }
+
+    fn cascade_menu_item_focused(&self, section: Option<CascadeMenuSection>, index: usize) -> bool {
+        match section {
+            Some(section) => {
+                self.cascade_menu.levels.last() == Some(&section)
+                    && self.cascade_menu.focused_item == index
+            }
+            None => self.cascade_menu.levels.is_empty() && self.cascade_menu.focused_item == index,
+        }
+    }
+
     pub(crate) fn left_click_menu_ui(&mut self, ctx: &egui::Context) {
         if !self.show_left_menu {
             return;
@@ -47,148 +240,340 @@ impl ViewerApp {
         self.cancel_pending_single_click_navigation();
 
         let content_rect = ctx.content_rect();
-        let popup_pos = clamp_popup_position(
-            self.left_menu_pos,
-            content_rect,
-            egui::vec2(POPUP_MENU_WIDTH, POPUP_MENU_ESTIMATED_HEIGHT),
-        );
-        let popup_max_width = (content_rect.width() - 16.0)
-            .max(260.0)
-            .min(POPUP_MENU_WIDTH + 80.0);
-        let mut open = self.show_left_menu;
+        let root_pos = clamp_popup_position(self.left_menu_pos, content_rect, cascade_menu_size(6));
         let mut close_requested = false;
-        let window_response = egui::Window::new(self.text(UiTextKey::Menu))
-            .title_bar(false)
-            .resizable(false)
-            .collapsible(false)
-            .fixed_pos(popup_pos)
-            .default_size(egui::vec2(POPUP_MENU_WIDTH, 240.0))
-            .open(&mut open)
+        let mut menu_rects = Vec::new();
+        let root = egui::Area::new("context_menu_root".into())
+            .order(egui::Order::Foreground)
+            .fixed_pos(root_pos)
             .show(ctx, |ui| {
-                ui.set_min_width(260.0);
-                ui.set_max_width(popup_max_width);
-                ui.menu_button(self.text(UiTextKey::MenuFileSection), |ui| {
-                    if ui.button(self.text(UiTextKey::ReloadCurrent)).clicked() {
-                        let _ = self.reload_current();
-                        close_requested = true;
-                        ui.close();
-                    }
-                    if ui.button(self.text(UiTextKey::MoveItem)).clicked() {
-                        self.apply_viewer_action(ctx, crate::options::ViewerAction::MoveFile);
-                        close_requested = true;
-                        ui.close();
-                    }
-                    if ui.button(self.text(UiTextKey::CopyItem)).clicked() {
-                        self.apply_viewer_action(ctx, crate::options::ViewerAction::CopyFile);
-                        close_requested = true;
-                        ui.close();
-                    }
-                    if ui.button(self.text(UiTextKey::DeleteItem)).clicked() {
-                        self.apply_viewer_action(ctx, crate::options::ViewerAction::DeleteFile);
-                        close_requested = true;
-                        ui.close();
-                    }
-                    if ui.button(self.text(UiTextKey::RenameItem)).clicked() {
-                        self.apply_viewer_action(ctx, crate::options::ViewerAction::RenameFile);
-                        close_requested = true;
-                        ui.close();
-                    }
-                });
-
-                ui.menu_button(self.text(UiTextKey::MenuImageSection), |ui| {
-                    for format in SaveFormat::all() {
-                        if ui
-                            .selectable_label(self.save_dialog.format == format, format.to_string())
-                            .clicked()
-                        {
-                            self.save_dialog.format = format;
-                            self.open_save_dialog();
-                            close_requested = true;
-                            ui.close();
-                        }
-                    }
-                });
-
-                ui.menu_button(self.text(UiTextKey::MenuViewSection), |ui| {
-                    if ui.button(self.text(UiTextKey::ZoomInAction)).clicked() {
-                        self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomIn);
-                        close_requested = true;
-                        ui.close();
-                    }
-                    if ui.button(self.text(UiTextKey::ZoomOutAction)).clicked() {
-                        self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomOut);
-                        close_requested = true;
-                        ui.close();
-                    }
-                    if ui.button(self.text(UiTextKey::ZoomResetAction)).clicked() {
-                        self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomReset);
-                        close_requested = true;
-                        ui.close();
-                    }
-                    ui.separator();
-                    ui.menu_button(self.text(UiTextKey::ZoomPresetAction), |ui| {
-                        for scale in [50_u32, 75, 100, 125, 150, 200] {
-                            if ui.button(format!("{scale}%")).clicked() {
-                                let _ = self.set_zoom(scale as f32 / 100.0);
-                                close_requested = true;
-                                ui.close();
-                            }
-                        }
-                    });
-                    if ui
-                        .button(self.text(UiTextKey::OriginalSizeAction))
-                        .clicked()
+                style::menu_frame(ctx).show(ui, |ui| {
+                    ui.set_width(CASCADE_MENU_WIDTH);
+                    if style::menu_row(
+                        ui,
+                        self.text(UiTextKey::MenuFileSection),
+                        Some("›"),
+                        self.cascade_menu.is_open(CascadeMenuSection::File)
+                            || self.cascade_menu_item_focused(None, 0),
+                    )
+                    .clicked()
                     {
-                        let _ = self.set_zoom(1.0);
-                        close_requested = true;
-                        ui.close();
+                        self.cascade_menu.open_root(CascadeMenuSection::File);
                     }
-                    if ui.button(self.text(UiTextKey::ToggleManga)).clicked() {
-                        self.apply_viewer_action(
-                            ctx,
-                            crate::options::ViewerAction::ToggleMangaMode,
+                    if style::menu_row(
+                        ui,
+                        self.text(UiTextKey::MenuImageSection),
+                        Some("›"),
+                        self.cascade_menu.is_open(CascadeMenuSection::SaveImage)
+                            || self.cascade_menu_item_focused(None, 1),
+                    )
+                    .clicked()
+                    {
+                        self.cascade_menu.open_root(CascadeMenuSection::SaveImage);
+                    }
+                    if style::menu_row(
+                        ui,
+                        self.text(UiTextKey::MenuViewSection),
+                        Some("›"),
+                        self.cascade_menu.is_open(CascadeMenuSection::View)
+                            || self.cascade_menu_item_focused(None, 2),
+                    )
+                    .clicked()
+                    {
+                        self.cascade_menu.open_root(CascadeMenuSection::View);
+                    }
+                    if style::menu_row(
+                        ui,
+                        self.text(UiTextKey::ImageInformation),
+                        None,
+                        self.cascade_menu_item_focused(None, 3),
+                    )
+                    .clicked()
+                    {
+                        self.open_dialog_with_title_key(
+                            UiTextKey::MenuInfoSection,
+                            self.current_image_info_text(),
                         );
                         close_requested = true;
-                        ui.close();
                     }
-                });
-
-                if ui.button(self.text(UiTextKey::ImageInformation)).clicked() {
-                    self.open_dialog_with_title_key(
-                        UiTextKey::MenuInfoSection,
-                        self.current_image_info_text(),
-                    );
-                    close_requested = true;
-                }
-
-                if ui.button(self.text(UiTextKey::ToggleSettings)).clicked() {
-                    self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleSettings);
-                    close_requested = true;
-                }
-
-                if ui.button(self.text(UiTextKey::MenuAboutSection)).clicked() {
-                    self.open_dialog_with_title_key(UiTextKey::MenuAboutSection, self.about_text());
-                    close_requested = true;
-                }
-            });
-        if let Some(window_response) = window_response {
-            let pointer_clicked_outside = ctx.input(|i| {
-                i.pointer.any_click()
-                    && !window_response.response.rect.contains(
-                        i.pointer
-                            .interact_pos()
-                            .unwrap_or(egui::Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY)),
+                    if style::menu_row(
+                        ui,
+                        self.text(UiTextKey::ToggleSettings),
+                        None,
+                        self.cascade_menu_item_focused(None, 4),
                     )
+                    .clicked()
+                    {
+                        self.apply_viewer_action(ctx, crate::options::ViewerAction::ToggleSettings);
+                        close_requested = true;
+                    }
+                    if style::menu_row(
+                        ui,
+                        self.text(UiTextKey::MenuAboutSection),
+                        None,
+                        self.cascade_menu_item_focused(None, 5),
+                    )
+                    .clicked()
+                    {
+                        self.open_dialog_with_title_key(
+                            UiTextKey::MenuAboutSection,
+                            self.about_text(),
+                        );
+                        close_requested = true;
+                    }
+                })
             });
-            if pointer_clicked_outside {
-                close_requested = true;
+        menu_rects.push(root.response.rect);
+
+        let mut child_rect = None;
+        match self.cascade_menu.levels.first().copied() {
+            Some(CascadeMenuSection::File) => {
+                let area = egui::Area::new("context_menu_file".into())
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(cascade_child_position(root.response.rect, content_rect, 5))
+                    .show(ctx, |ui| {
+                        style::menu_frame(ctx).show(ui, |ui| {
+                            ui.set_width(CASCADE_MENU_WIDTH);
+                            if style::menu_row(
+                                ui,
+                                self.text(UiTextKey::ReloadCurrent),
+                                None,
+                                self.cascade_menu_item_focused(Some(CascadeMenuSection::File), 0),
+                            )
+                            .clicked()
+                            {
+                                let _ = self.reload_current();
+                                close_requested = true;
+                            }
+                            if style::menu_row(
+                                ui,
+                                self.text(UiTextKey::MoveItem),
+                                None,
+                                self.cascade_menu_item_focused(Some(CascadeMenuSection::File), 1),
+                            )
+                            .clicked()
+                            {
+                                self.apply_viewer_action(
+                                    ctx,
+                                    crate::options::ViewerAction::MoveFile,
+                                );
+                                close_requested = true;
+                            }
+                            if style::menu_row(
+                                ui,
+                                self.text(UiTextKey::CopyItem),
+                                None,
+                                self.cascade_menu_item_focused(Some(CascadeMenuSection::File), 2),
+                            )
+                            .clicked()
+                            {
+                                self.apply_viewer_action(
+                                    ctx,
+                                    crate::options::ViewerAction::CopyFile,
+                                );
+                                close_requested = true;
+                            }
+                            if style::menu_row(
+                                ui,
+                                self.text(UiTextKey::RenameItem),
+                                None,
+                                self.cascade_menu_item_focused(Some(CascadeMenuSection::File), 3),
+                            )
+                            .clicked()
+                            {
+                                self.apply_viewer_action(
+                                    ctx,
+                                    crate::options::ViewerAction::RenameFile,
+                                );
+                                close_requested = true;
+                            }
+                            if style::menu_row(
+                                ui,
+                                self.text(UiTextKey::DeleteItem),
+                                None,
+                                self.cascade_menu_item_focused(Some(CascadeMenuSection::File), 4),
+                            )
+                            .clicked()
+                            {
+                                self.apply_viewer_action(
+                                    ctx,
+                                    crate::options::ViewerAction::DeleteFile,
+                                );
+                                close_requested = true;
+                            }
+                        })
+                    });
+                child_rect = Some(area.response.rect);
+            }
+            Some(CascadeMenuSection::SaveImage) => {
+                let formats = SaveFormat::all();
+                let area = egui::Area::new("context_menu_save".into())
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(cascade_child_position(
+                        root.response.rect,
+                        content_rect,
+                        formats.len(),
+                    ))
+                    .show(ctx, |ui| {
+                        style::menu_frame(ctx).show(ui, |ui| {
+                            ui.set_width(CASCADE_MENU_WIDTH);
+                            for (index, format) in formats.into_iter().enumerate() {
+                                if style::menu_row(
+                                    ui,
+                                    &format.to_string(),
+                                    None,
+                                    self.cascade_menu_item_focused(
+                                        Some(CascadeMenuSection::SaveImage),
+                                        index,
+                                    ),
+                                )
+                                .clicked()
+                                {
+                                    self.save_dialog.format = format;
+                                    self.open_save_dialog();
+                                    close_requested = true;
+                                }
+                            }
+                        })
+                    });
+                child_rect = Some(area.response.rect);
+            }
+            Some(CascadeMenuSection::View) => {
+                let area = egui::Area::new("context_menu_view".into())
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(cascade_child_position(root.response.rect, content_rect, 2))
+                    .show(ctx, |ui| {
+                        style::menu_frame(ctx).show(ui, |ui| {
+                            ui.set_width(CASCADE_MENU_WIDTH);
+                            if style::menu_row(
+                                ui,
+                                self.text(UiTextKey::ZoomPresetAction),
+                                Some("›"),
+                                self.cascade_menu.is_open(CascadeMenuSection::Zoom)
+                                    || self.cascade_menu_item_focused(
+                                        Some(CascadeMenuSection::View),
+                                        0,
+                                    ),
+                            )
+                            .clicked()
+                            {
+                                self.cascade_menu.toggle_zoom();
+                            }
+                            if style::menu_row(
+                                ui,
+                                self.text(UiTextKey::ToggleManga),
+                                None,
+                                self.options.manga_mode
+                                    || self.cascade_menu_item_focused(
+                                        Some(CascadeMenuSection::View),
+                                        1,
+                                    ),
+                            )
+                            .clicked()
+                            {
+                                self.apply_viewer_action(
+                                    ctx,
+                                    crate::options::ViewerAction::ToggleMangaMode,
+                                );
+                                close_requested = true;
+                            }
+                        })
+                    });
+                child_rect = Some(area.response.rect);
+            }
+            _ => {}
+        }
+        if let Some(rect) = child_rect {
+            menu_rects.push(rect);
+        }
+
+        if self.cascade_menu.levels.as_slice()
+            == [CascadeMenuSection::View, CascadeMenuSection::Zoom]
+        {
+            if let Some(parent) = child_rect {
+                let area = egui::Area::new("context_menu_zoom".into())
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(cascade_child_position(parent, content_rect, 9))
+                    .show(ctx, |ui| {
+                        style::menu_frame(ctx).show(ui, |ui| {
+                            ui.set_width(CASCADE_MENU_WIDTH);
+                            if style::menu_row(
+                                ui,
+                                self.text(UiTextKey::ZoomInAction),
+                                None,
+                                self.cascade_menu_item_focused(Some(CascadeMenuSection::Zoom), 0),
+                            )
+                            .clicked()
+                            {
+                                self.apply_viewer_action(ctx, crate::options::ViewerAction::ZoomIn);
+                            }
+                            if style::menu_row(
+                                ui,
+                                self.text(UiTextKey::ZoomOutAction),
+                                None,
+                                self.cascade_menu_item_focused(Some(CascadeMenuSection::Zoom), 1),
+                            )
+                            .clicked()
+                            {
+                                self.apply_viewer_action(
+                                    ctx,
+                                    crate::options::ViewerAction::ZoomOut,
+                                );
+                            }
+                            if style::menu_row(
+                                ui,
+                                self.text(UiTextKey::ZoomResetAction),
+                                None,
+                                (self.zoom - 1.0).abs() < f32::EPSILON
+                                    || self.cascade_menu_item_focused(
+                                        Some(CascadeMenuSection::Zoom),
+                                        2,
+                                    ),
+                            )
+                            .clicked()
+                            {
+                                self.apply_viewer_action(
+                                    ctx,
+                                    crate::options::ViewerAction::ZoomReset,
+                                );
+                            }
+                            for (index, scale) in
+                                [50_u32, 75, 100, 125, 150, 200].into_iter().enumerate()
+                            {
+                                let zoom = scale as f32 / 100.0;
+                                let current = (self.zoom - zoom).abs() < 0.01;
+                                let selected = current
+                                    || self.cascade_menu_item_focused(
+                                        Some(CascadeMenuSection::Zoom),
+                                        index + 3,
+                                    );
+                                if style::menu_row(
+                                    ui,
+                                    &format!("{scale}%"),
+                                    current.then_some("✓"),
+                                    selected,
+                                )
+                                .clicked()
+                                {
+                                    let _ = self.set_zoom(zoom);
+                                }
+                            }
+                        })
+                    });
+                menu_rects.push(area.response.rect);
             }
         }
+
+        let pointer_clicked_outside = ctx.input(|i| {
+            i.pointer.any_click()
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|pos| !menu_rects.iter().any(|rect| rect.contains(pos)))
+        });
+        close_requested |= pointer_clicked_outside;
         if close_requested {
-            open = false;
-            self.suppress_next_pointer_intent = true;
+            self.dismiss_cascade_menu();
         }
-        self.show_left_menu = open;
     }
 
     fn current_image_info_text(&self) -> String {
@@ -510,42 +895,100 @@ impl ViewerApp {
                     self.sync_navigation_sort_with_filer_sort();
                     self.refresh_current_filer_directory();
                 }
+                if self.filer.pending_request_id.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(self.text(UiTextKey::Loading));
+                    });
+                }
                 let panel_width = ui.available_width();
-                let focus_target = self.pending_filer_focus_path.clone();
+                let focus_target = self
+                    .filer
+                    .pending_request_id
+                    .is_none()
+                    .then(|| self.pending_filer_focus_path.clone())
+                    .flatten();
                 let mut focus_consumed = false;
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
+                if matches!(
+                    self.filer.view_mode,
+                    FilerViewMode::List | FilerViewMode::Detail
+                ) {
+                    let row_height = ui.spacing().interact_size.y;
+                    let row_stride = row_height + ui.spacing().item_spacing.y;
+                    let focus_index = focus_target.as_ref().and_then(|path| {
+                        self.filer
+                            .entries
+                            .iter()
+                            .position(|entry| &entry.path == path)
+                    });
+                    let mut scroll = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                    if let Some(index) = focus_index {
+                        scroll = scroll.vertical_scroll_offset(index as f32 * row_stride);
+                    }
+                    scroll.show_rows(ui, row_height, self.filer.entries.len(), |ui, range| {
                         ui.set_min_width(panel_width.max(160.0));
-                        let entries = self.filer.entries.clone();
-                        match self.filer.view_mode {
-                            FilerViewMode::List | FilerViewMode::Detail => {
-                                for entry in entries {
-                                    self.filer_entry_row(
-                                        ui,
-                                        entry,
-                                        focus_target.as_ref(),
-                                        &mut focus_consumed,
-                                    );
-                                }
-                            }
-                            _ => {
-                                let item_width = match self.filer.view_mode {
-                                    FilerViewMode::ThumbnailSmall => 72.0,
-                                    FilerViewMode::ThumbnailMedium => 112.0,
-                                    FilerViewMode::ThumbnailLarge => 160.0,
-                                    _ => 96.0,
-                                } * self.filer.thumbnail_scale;
-                                self.filer_thumbnail_grid(
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                        let visible_entries = self.filer.entries[range].to_vec();
+                        for entry in visible_entries {
+                            ui.push_id(entry.path.clone(), |ui| {
+                                self.filer_entry_row(
                                     ui,
-                                    entries,
-                                    item_width,
+                                    entry,
                                     focus_target.as_ref(),
                                     &mut focus_consumed,
                                 );
-                            }
+                            });
                         }
                     });
+                } else {
+                    let item_width = match self.filer.view_mode {
+                        FilerViewMode::ThumbnailSmall => 72.0,
+                        FilerViewMode::ThumbnailMedium => 112.0,
+                        FilerViewMode::ThumbnailLarge => 160.0,
+                        _ => 96.0,
+                    } * self.filer.thumbnail_scale;
+                    let spacing = ui.spacing().item_spacing;
+                    let columns = ((panel_width.max(item_width) + spacing.x)
+                        / (item_width.max(1.0) + spacing.x))
+                        .floor()
+                        .max(1.0) as usize;
+                    let row_height = item_width + 56.0;
+                    let row_count = self.filer.entries.len().div_ceil(columns);
+                    let focus_index = focus_target.as_ref().and_then(|path| {
+                        self.filer
+                            .entries
+                            .iter()
+                            .position(|entry| &entry.path == path)
+                    });
+                    let mut scroll = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                    if let Some(index) = focus_index {
+                        scroll = scroll.vertical_scroll_offset(
+                            (index / columns) as f32 * (row_height + spacing.y),
+                        );
+                    }
+                    scroll.show_rows(ui, row_height, row_count, |ui, rows| {
+                        ui.set_min_width(panel_width.max(160.0));
+                        // Activation can clear the live listing. Snapshot only the visible tiles.
+                        let start = (rows.start * columns).min(self.filer.entries.len());
+                        let end = (rows.end * columns).min(self.filer.entries.len());
+                        let visible_entries = self.filer.entries[start..end].to_vec();
+                        for row in visible_entries.chunks(columns) {
+                            ui.horizontal(|ui| {
+                                for entry in row.iter().cloned() {
+                                    ui.push_id(entry.path.clone(), |ui| {
+                                        self.filer_thumbnail_tile(
+                                            ui,
+                                            entry,
+                                            item_width,
+                                            focus_target.as_ref(),
+                                            &mut focus_consumed,
+                                        );
+                                    });
+                                }
+                            });
+                        }
+                    });
+                }
                 if focus_consumed {
                     self.pending_filer_focus_path = None;
                 }
@@ -600,32 +1043,6 @@ impl ViewerApp {
         if response.clicked() {
             self.activate_filer_entry(entry);
         }
-    }
-
-    fn filer_thumbnail_grid(
-        &mut self,
-        ui: &mut egui::Ui,
-        entries: Vec<FilerEntry>,
-        item_width: f32,
-        focus_target: Option<&std::path::PathBuf>,
-        focus_consumed: &mut bool,
-    ) {
-        let available = ui.available_width().max(item_width);
-        let spacing = 8.0;
-        let columns = ((available + spacing) / (item_width.max(1.0) + spacing))
-            .floor()
-            .max(1.0) as usize;
-        egui::Grid::new("filer_thumbnail_grid")
-            .num_columns(columns)
-            .spacing(egui::vec2(spacing, spacing))
-            .show(ui, |ui| {
-                for (index, entry) in entries.into_iter().enumerate() {
-                    self.filer_thumbnail_tile(ui, entry, item_width, focus_target, focus_consumed);
-                    if (index + 1) % columns == 0 {
-                        ui.end_row();
-                    }
-                }
-            });
     }
 
     fn filer_thumbnail_tile(
@@ -745,7 +1162,12 @@ impl ViewerApp {
             .max_height(height_range.max)
             .show(ctx, |ui| {
                 let mut close_requested = false;
-                let focus_target = self.pending_subfiler_focus_path.clone();
+                let focus_target = self
+                    .filer
+                    .pending_request_id
+                    .is_none()
+                    .then(|| self.pending_subfiler_focus_path.clone())
+                    .flatten();
                 let mut focus_consumed = false;
                 ui.horizontal(|ui| {
                     ui.label(self.text(UiTextKey::Subfiler));
@@ -758,60 +1180,91 @@ impl ViewerApp {
                         close_requested = true;
                     }
                 });
-                egui::ScrollArea::horizontal().show(ui, |ui| {
+                let mut file_indices = self
+                    .filer
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, entry)| (!entry.is_container).then_some(index))
+                    .collect::<Vec<_>>();
+                if self.options.manga_right_to_left {
+                    file_indices.reverse();
+                }
+                let tile_width = 112.0;
+                let stride = tile_width + ui.spacing().item_spacing.x;
+                let focus_index = focus_target.as_ref().and_then(|path| {
+                    file_indices
+                        .iter()
+                        .position(|&index| &self.filer.entries[index].path == path)
+                });
+                let mut scroll = egui::ScrollArea::horizontal();
+                if let Some(index) = focus_index {
+                    let offset = index as f32 * stride;
+                    scroll = scroll.horizontal_scroll_offset(if self.options.manga_right_to_left {
+                        (offset - ui.available_width() + stride).max(0.0)
+                    } else {
+                        offset
+                    });
+                }
+                scroll.show_viewport(ui, |ui, viewport| {
+                    ui.set_min_width(file_indices.len() as f32 * stride);
+                    let start = ((viewport.min.x / stride).floor() as usize)
+                        .saturating_sub(1)
+                        .min(file_indices.len());
+                    let end = ((viewport.max.x / stride).ceil() as usize + 1)
+                        .min(file_indices.len())
+                        .max(start);
+                    let visible_entries = file_indices[start..end]
+                        .iter()
+                        .map(|&index| self.filer.entries[index].clone())
+                        .collect::<Vec<_>>();
                     ui.horizontal(|ui| {
-                        let mut entries = self.filer.entries.clone();
-                        if self.options.manga_right_to_left {
-                            entries.reverse();
+                        if start > 0 {
+                            ui.add_space(start as f32 * stride - ui.spacing().item_spacing.x);
                         }
-                        for entry in entries {
-                            if entry.is_container {
-                                continue;
-                            }
+                        for entry in visible_entries {
                             self.ensure_thumbnail(&entry.path, 72);
                             let selected = self.current_navigation_path == entry.path;
-                            let mut frame = egui::Frame::group(ui.style());
-                            if selected {
-                                frame.stroke =
-                                    egui::Stroke::new(2.0, ui.visuals().selection.stroke.color);
-                            }
-                            frame.show(ui, |ui| {
-                                if let Some(texture) = self.thumbnail_cache.get(&entry.path) {
-                                    let response = ui.add(egui::Button::image(
-                                        egui::Image::from_texture(texture)
-                                            .fit_to_exact_size(egui::vec2(72.0, 72.0)),
-                                    ));
-                                    if focus_target.as_ref() == Some(&entry.path) {
-                                        ui.scroll_to_rect(
-                                            response.rect,
-                                            Some(if self.options.manga_right_to_left {
-                                                egui::Align::Max
+                            ui.push_id(&entry.path, |ui| {
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(tile_width, 96.0),
+                                    egui::Layout::top_down(egui::Align::Center),
+                                    |ui| {
+                                        let mut frame = egui::Frame::group(ui.style());
+                                        if selected {
+                                            frame.stroke = egui::Stroke::new(
+                                                2.0,
+                                                ui.visuals().selection.stroke.color,
+                                            );
+                                        }
+                                        frame.show(ui, |ui| {
+                                            let response = if let Some(texture) =
+                                                self.thumbnail_cache.get(&entry.path)
+                                            {
+                                                ui.add(egui::Button::image(
+                                                    egui::Image::from_texture(texture)
+                                                        .fit_to_exact_size(egui::vec2(72.0, 72.0)),
+                                                ))
                                             } else {
-                                                egui::Align::Min
-                                            }),
-                                        );
-                                        focus_consumed = true;
-                                    }
-                                    if response.clicked() {
-                                        self.activate_filer_entry(entry.clone());
-                                    }
-                                } else {
-                                    let response = ui.button("...");
-                                    if focus_target.as_ref() == Some(&entry.path) {
-                                        ui.scroll_to_rect(
-                                            response.rect,
-                                            Some(if self.options.manga_right_to_left {
-                                                egui::Align::Max
-                                            } else {
-                                                egui::Align::Min
-                                            }),
-                                        );
-                                        focus_consumed = true;
-                                    }
-                                    if response.clicked() {
-                                        self.activate_filer_entry(entry.clone());
-                                    }
-                                }
+                                                ui.button("...")
+                                            };
+                                            if focus_target.as_ref() == Some(&entry.path) {
+                                                ui.scroll_to_rect(
+                                                    response.rect,
+                                                    Some(if self.options.manga_right_to_left {
+                                                        egui::Align::Max
+                                                    } else {
+                                                        egui::Align::Min
+                                                    }),
+                                                );
+                                                focus_consumed = true;
+                                            }
+                                            if response.clicked() {
+                                                self.activate_filer_entry(entry.clone());
+                                            }
+                                        });
+                                    },
+                                );
                             });
                         }
                     });
@@ -850,6 +1303,7 @@ impl ViewerApp {
         self.filer.pending_user_request = Some(FilerUserRequest::SelectFile {
             navigation_path: navigation_path.clone(),
         });
+        self.accept_filer_selection(&navigation_path);
         self.filer.committed_browse_directory = None;
         self.filer.selected = Some(navigation_path.clone());
         self.empty_mode = false;
@@ -935,6 +1389,33 @@ fn clamp_popup_position(
         position.y.clamp(content.top(), max_y)
     };
     egui::pos2(x, y)
+}
+
+fn cascade_menu_size(rows: usize) -> egui::Vec2 {
+    let frame_padding = f32::from(style::MENU_FRAME_MARGIN) * 2.0 + 2.0;
+    egui::vec2(
+        CASCADE_MENU_WIDTH + frame_padding,
+        rows as f32 * style::MENU_ROW_HEIGHT + frame_padding,
+    )
+}
+
+fn cascade_child_position(parent: egui::Rect, content: egui::Rect, rows: usize) -> egui::Pos2 {
+    let size = cascade_menu_size(rows);
+    let right = parent.right() + CASCADE_MENU_GAP;
+    let left = parent.left() - size.x - CASCADE_MENU_GAP;
+    let x = if right + size.x <= content.right() || left < content.left() {
+        right
+    } else {
+        left
+    };
+    let max_y = (content.bottom() - size.y).max(content.top());
+    egui::pos2(
+        x.clamp(
+            content.left(),
+            (content.right() - size.x).max(content.left()),
+        ),
+        parent.top().clamp(content.top(), max_y),
+    )
 }
 
 fn icon_toolbar_button(

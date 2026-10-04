@@ -52,7 +52,7 @@ fn run_platform(
         .unwrap_or(load_startup_path(config_path.as_deref()).unwrap_or(std::env::current_dir()?));
     let path_exists = image_path.exists();
     let is_container = is_browser_container(&image_path);
-    let can_load_directly = resolve_start_path(&image_path).is_some();
+    let can_load_directly = is_container || resolve_start_path(&image_path).is_some();
     let (navigation_path, start_path, startup_load_path, show_filer_on_start) =
         determine_startup_paths(&image_path, path_exists, is_container, can_load_directly);
     let bench_logger = if bench_enabled || log_enabled {
@@ -104,7 +104,6 @@ fn run_platform(
         "wml2viewer",
         native_options,
         Box::new(move |cc| {
-            apply_window_theme(&cc.egui_ctx, config.window.ui_theme);
             let _ = apply_resources(&cc.egui_ctx, &config.resources);
             let screen = cc.egui_ctx.input(|i| {
                 i.viewport()
@@ -206,14 +205,6 @@ fn configured_window_size(size: &WindowSize, screen: egui::Vec2) -> egui::Vec2 {
             .y
             .clamp(MIN_WINDOW_SIZE.y, screen.y.max(MIN_WINDOW_SIZE.y)),
     )
-}
-
-fn apply_window_theme(ctx: &egui::Context, theme: WindowUiTheme) {
-    match theme {
-        WindowUiTheme::System => {}
-        WindowUiTheme::Light => ctx.set_visuals(egui::Visuals::light()),
-        WindowUiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
-    }
 }
 
 fn blank_image() -> LoadedImage {

@@ -1,19 +1,23 @@
 use super::*;
+use crate::ui::menu::style::{self, ButtonKind};
 
 impl ViewerApp {
     pub(super) fn color_image_from_canvas(&self, canvas: &Canvas) -> egui::ColorImage {
         let mut image = canvas_to_color_image(canvas);
         if self.options.grayscale {
-            for pixel in &mut image.pixels {
-                let luma = (0.299 * pixel.r() as f32
-                    + 0.587 * pixel.g() as f32
-                    + 0.114 * pixel.b() as f32)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-                *pixel = egui::Color32::from_rgba_unmultiplied(luma, luma, luma, pixel.a());
-            }
+            Self::apply_grayscale_to_color_image(&mut image);
         }
         image
+    }
+
+    pub(super) fn apply_grayscale_to_color_image(image: &mut egui::ColorImage) {
+        for pixel in &mut image.pixels {
+            let luma =
+                (0.299 * pixel.r() as f32 + 0.587 * pixel.g() as f32 + 0.114 * pixel.b() as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            *pixel = egui::Color32::from_rgba_unmultiplied(luma, luma, luma, pixel.a());
+        }
     }
 
     pub(crate) fn open_save_dialog(&mut self) {
@@ -55,6 +59,7 @@ impl ViewerApp {
         egui::Window::new(self.text(UiTextKey::Save))
             .open(&mut open)
             .resizable(false)
+            .frame(style::dialog_frame(ctx))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(self.text(UiTextKey::Directory));
@@ -66,7 +71,13 @@ impl ViewerApp {
                             .unwrap_or_else(|| self.text(UiTextKey::NotSelected).to_string()),
                     );
                 });
-                if ui.button(self.text(UiTextKey::ChooseFolder)).clicked() {
+                if style::button(
+                    ui,
+                    ButtonKind::Secondary,
+                    self.text(UiTextKey::ChooseFolder),
+                )
+                .clicked()
+                {
                     self.save_dialog.output_dir =
                         pick_save_directory().or_else(default_download_dir);
                     if self.storage.path_record {
@@ -105,15 +116,17 @@ impl ViewerApp {
                 }
                 ui.horizontal(|ui| {
                     if ui
-                        .add_enabled(
-                            !self.save_dialog.in_progress,
-                            egui::Button::new(self.text(UiTextKey::Save)),
-                        )
+                        .add_enabled_ui(!self.save_dialog.in_progress, |ui| {
+                            style::button(ui, ButtonKind::Primary, self.text(UiTextKey::Save))
+                        })
+                        .inner
                         .clicked()
                     {
                         self.save_current_as(self.save_dialog.format);
                     }
-                    if ui.button(self.text(UiTextKey::Cancel)).clicked() {
+                    if style::button(ui, ButtonKind::Secondary, self.text(UiTextKey::Cancel))
+                        .clicked()
+                    {
                         close_requested = true;
                     }
                 });
@@ -265,6 +278,7 @@ impl ViewerApp {
             .resizable(false)
             .collapsible(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .frame(style::dialog_frame(ctx))
             .show(ctx, |ui| {
                 ui.label(format!(
                     "{}: {}",
@@ -279,7 +293,13 @@ impl ViewerApp {
                             ui.text_edit_singleline(
                                 &mut self.file_action_dialog.destination_path_input,
                             );
-                            if ui.button(self.text(UiTextKey::Browse)).clicked() {
+                            if style::button(
+                                ui,
+                                ButtonKind::Secondary,
+                                self.text(UiTextKey::Browse),
+                            )
+                            .clicked()
+                            {
                                 if let Some(path) = pick_save_directory() {
                                     self.file_action_dialog.destination_path_input =
                                         path.to_string_lossy().into_owned();
@@ -306,10 +326,22 @@ impl ViewerApp {
                 }
                 ui.separator();
                 ui.horizontal(|ui| {
-                    if ui.button(self.text(UiTextKey::Apply)).clicked() {
+                    let apply_label = if matches!(mode, FileActionDialogMode::Delete) {
+                        self.text(UiTextKey::DeleteItem)
+                    } else {
+                        self.text(UiTextKey::Apply)
+                    };
+                    let apply_kind = if matches!(mode, FileActionDialogMode::Delete) {
+                        ButtonKind::Danger
+                    } else {
+                        ButtonKind::Primary
+                    };
+                    if style::button(ui, apply_kind, apply_label).clicked() {
                         apply_requested = true;
                     }
-                    if ui.button(self.text(UiTextKey::Cancel)).clicked() {
+                    if style::button(ui, ButtonKind::Secondary, self.text(UiTextKey::Cancel))
+                        .clicked()
+                    {
                         close_requested = true;
                     }
                 });
@@ -334,10 +366,12 @@ impl ViewerApp {
             .resizable(false)
             .exact_height(24.0)
             .show(ctx, |ui| {
-                let text = ellipsize_end(message, 160);
-                ui.horizontal(|ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(egui::RichText::new(text).small());
+                style::panel_frame(ui).show(ui, |ui| {
+                    let text = ellipsize_end(message, 160);
+                    ui.horizontal(|ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(egui::RichText::new(text).small());
+                    });
                 });
             });
     }
@@ -350,22 +384,21 @@ impl ViewerApp {
             .resizable(false)
             .exact_height(24.0)
             .show(ctx, |ui| {
-                let text = ellipsize_end(message, 160);
-                ui.horizontal(|ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(egui::RichText::new(text).small());
+                style::panel_frame(ui).show(ui, |ui| {
+                    let text = ellipsize_end(message, 160);
+                    ui.horizontal(|ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(egui::RichText::new(text).small());
+                    });
                 });
             });
     }
 
     pub(super) fn loading_card_ui(&self, ctx: &egui::Context) {
-        if !self.current_texture_is_default {
-            return;
-        }
-        if self.empty_mode {
-            return;
-        }
-        if self.active_request.is_none() && self.active_fs_request_id.is_none() {
+        if !waiting_card_should_show(
+            self.active_request.is_some(),
+            self.active_fs_request_id.is_some(),
+        ) {
             return;
         }
         let Some(loading_started_at) = self.overlay.loading_started_at else {
@@ -381,21 +414,19 @@ impl ViewerApp {
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .interactable(false)
             .show(ctx, |ui| {
-                egui::Frame::window(ui.style())
-                    .corner_radius(12.0)
-                    .show(ui, |ui| {
-                        ui.set_min_width(220.0);
-                        ui.vertical_centered(|ui| {
-                            ui.add(egui::Spinner::new().size(22.0));
-                            ui.add_space(8.0);
-                            ui.label(
-                                egui::RichText::new(loading_card_message(
-                                    self.overlay.loading_message.as_deref(),
-                                ))
-                                .strong(),
-                            );
-                        });
+                style::dialog_frame(ctx).show(ui, |ui| {
+                    ui.set_min_width(220.0);
+                    ui.vertical_centered(|ui| {
+                        ui.add(egui::Spinner::new().size(22.0));
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new(loading_card_message(
+                                self.overlay.loading_message.as_deref(),
+                            ))
+                            .strong(),
+                        );
                     });
+                });
             });
     }
 
@@ -411,9 +442,10 @@ impl ViewerApp {
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .open(&mut open)
+            .frame(style::dialog_frame(ctx))
             .show(ctx, |ui| {
                 ui.label(dialog.message);
-                if ui.button(self.text(UiTextKey::Close)).clicked() {
+                if style::button(ui, ButtonKind::Primary, self.text(UiTextKey::Close)).clicked() {
                     close_requested = true;
                 }
             });
