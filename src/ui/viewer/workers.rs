@@ -61,7 +61,8 @@ impl ViewerApp {
             display: DisplayedPageState {
                 source: self.source.clone(),
                 rendered: self.rendered.clone(),
-                texture: (!self.current_texture_is_default).then(|| self.current_texture.clone()),
+                texture: (!self.current_texture_is_default && !self.rendered.is_animated())
+                    .then(|| self.current_texture.clone()),
                 texture_display_scale: self.texture_display_scale,
                 prepared_texture: None,
             },
@@ -326,6 +327,7 @@ impl ViewerApp {
         if previous_navigation_path != self.current_navigation_path {
             self.zoom_factor = 1.0;
             self.zoom = 1.0;
+            self.current_frame = 0;
         }
         let loaded_path = path.clone();
         if let Some(path) = path {
@@ -422,7 +424,7 @@ impl ViewerApp {
             let _ = self.request_resize_current();
         } else {
             if let Some((texture, display_scale)) =
-                cached_texture.filter(|_| self.current_frame == 0)
+                cached_texture.filter(|_| self.current_frame == 0 && !self.rendered.is_animated())
             {
                 self.current_texture = texture;
                 self.texture_display_scale = display_scale;

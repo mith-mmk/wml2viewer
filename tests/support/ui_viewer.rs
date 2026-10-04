@@ -227,6 +227,59 @@ fn additional_review_descending_archive_edges_match_hidden_filer_controls() {
     }
 }
 
+#[test]
+fn additional_review_animation_cache_return_uploads_frame_zero() {
+    use crate::drawers::image::AnimationFrame;
+    let red = Canvas::from_rgba(1, 1, vec![255, 0, 0, 255]).unwrap();
+    let blue = Canvas::from_rgba(1, 1, vec![0, 0, 255, 255]).unwrap();
+    let animated = LoadedImage {
+        canvas: red.clone(),
+        animation: vec![
+            AnimationFrame {
+                canvas: red.clone(),
+                delay_ms: 100,
+            },
+            AnimationFrame {
+                canvas: blue,
+                delay_ms: 100,
+            },
+        ],
+        loop_count: None,
+    };
+    let mut app = make_test_viewer();
+    app.source = animated.clone();
+    app.rendered = animated;
+    app.current_texture = app.egui_ctx.load_texture(
+        "animation-a",
+        canvas_to_color_image(&red),
+        egui::TextureOptions::LINEAR,
+    );
+    app.current_texture_is_default = false;
+    app.remember_loaded_page_in_cache(Path::new("a.png"), Some(Path::new("a.png")));
+    app.current_frame = 1;
+    app.upload_current_frame();
+    app.pending_navigation_path = Some(PathBuf::from("b.png"));
+    app.apply_loaded_result(
+        Some(PathBuf::from("b.png")),
+        dummy_loaded_image(4, 4),
+        dummy_loaded_image(4, 4),
+        None,
+        None,
+        None,
+    );
+    let _ = app.egui_ctx.tex_manager().write().take_delta();
+    assert!(app.try_take_preloaded(Path::new("a.png")));
+    assert_eq!(app.current_frame, 0);
+    let delta = app.egui_ctx.tex_manager().write().take_delta();
+    let (_, update) = delta
+        .set
+        .iter()
+        .find(|(id, _)| *id == app.current_texture.id())
+        .expect("frame zero must be uploaded on animation cache return");
+    let egui::ImageData::Color(image) = &update.image;
+    assert_eq!(image.pixels[0], egui::Color32::RED);
+}
+
 fn filer_test_frame(
     app: &mut ViewerApp,
     subfiler: bool,
