@@ -48,6 +48,7 @@ struct NavigationTarget {
 
 struct FilesystemCache {
     listings_by_dir: HashMap<PathBuf, DirectoryListing>,
+    recursive_children_by_dir: HashMap<PathBuf, Vec<PathBuf>>,
     sort: NavigationSortOption,
     recursive_order: RecursiveOrder,
 }
@@ -75,6 +76,7 @@ impl Default for FilesystemCache {
     fn default() -> Self {
         Self {
             listings_by_dir: HashMap::new(),
+            recursive_children_by_dir: HashMap::new(),
             sort: NavigationSortOption::OsName,
             recursive_order: RecursiveOrder::default(),
         }
@@ -143,6 +145,10 @@ pub enum FilesystemResult {
 impl FileNavigator {
     fn from_current_path(path: PathBuf, cache: &mut FilesystemCache) -> Self {
         let files = flat_container_entries(&path, cache).unwrap_or_else(|| vec![path.clone()]);
+        if let Some(parent) = flat_container_dir(&path) {
+            // Retain the current position even if the displayed file is subsequently removed.
+            let _ = cache.recursive_children(&parent);
+        }
         let current = files
             .iter()
             .position(|candidate| candidate == &path)
@@ -313,6 +319,7 @@ impl FileNavigator {
     }
 
     fn recursive_step(&mut self, cache: &mut FilesystemCache, forward: bool) -> NavigationOutcome {
+        self.normalize_current_path(cache);
         let next = find_recursive_adjacent_path(cache, self.current(), forward);
         next.map(|path| {
             self.current_path = path;
@@ -486,6 +493,7 @@ pub fn virtual_image_size(path: &Path) -> Option<u64> {
 pub fn list_openable_entries(dir: &Path, sort: NavigationSortOption) -> Vec<PathBuf> {
     let mut cache = FilesystemCache {
         listings_by_dir: HashMap::new(),
+        recursive_children_by_dir: HashMap::new(),
         sort,
         recursive_order: RecursiveOrder {
             sort,
@@ -564,6 +572,7 @@ pub fn navigation_branch_path(path: &Path) -> Option<PathBuf> {
 pub fn adjacent_entry(path: &Path, sort: NavigationSortOption, step: isize) -> Option<PathBuf> {
     let mut cache = FilesystemCache {
         listings_by_dir: HashMap::new(),
+        recursive_children_by_dir: HashMap::new(),
         sort,
         recursive_order: RecursiveOrder {
             sort,
@@ -606,6 +615,7 @@ pub fn spawn_filesystem_worker(
         let mut navigator: Option<FileNavigator> = None;
         let mut cache = FilesystemCache {
             listings_by_dir: HashMap::new(),
+            recursive_children_by_dir: HashMap::new(),
             sort,
             recursive_order,
         };
@@ -840,11 +850,11 @@ fn flat_container_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Ve
 
 fn edge_entries(path: &Path, cache: &mut FilesystemCache) -> Option<Vec<PathBuf>> {
     if let Some(zip_root) = zip_virtual_root(path) {
-        return Some(cache.supported_entries(&zip_root));
+        return Some(cache.recursive_children(&zip_root));
     }
 
     if let Some(lha_root) = lha_virtual_root(path) {
-        return Some(cache.supported_entries(&lha_root));
+        return Some(cache.recursive_children(&lha_root));
     }
 
     if let Some(listed_root) = listed_virtual_root(path) {
@@ -949,18 +959,31 @@ fn find_recursive_adjacent_path(
     let mut item = current_path.to_path_buf();
     let mut parent = flat_container_dir(current_path)?;
     loop {
-        let children = cache.recursive_children(&parent);
-        let index = children.iter().position(|child| child == &item)?;
-        if forward {
-            for sibling in children.iter().skip(index + 1) {
-                if let Some(path) = recursive_edge_leaf(cache, sibling, true) {
-                    return Some(path);
-                }
+        // Reuse the sorted snapshot within a folder; refresh only before leaving its edge.
+        for refresh in [false, true] {
+            if refresh {
+                cache.refresh_listing(&parent);
             }
-        } else {
-            for sibling in children[..index].iter().rev() {
-                if let Some(path) = recursive_edge_leaf(cache, sibling, false) {
-                    return Some(path);
+            let mut children = cache.recursive_children(&parent);
+            if !children.contains(&item) && parent.is_dir() && !item.exists() {
+                // A worker initialized after deletion has no old snapshot. Keep a name anchor.
+                children.push(item.clone());
+                sort_recursive_children(&mut children, cache.recursive_order);
+            }
+            let Some(index) = children.iter().position(|child| child == &item) else {
+                continue;
+            };
+            if forward {
+                for sibling in children.iter().skip(index + 1) {
+                    if let Some(path) = recursive_edge_leaf(cache, sibling, true) {
+                        return Some(path);
+                    }
+                }
+            } else {
+                for sibling in children[..index].iter().rev() {
+                    if let Some(path) = recursive_edge_leaf(cache, sibling, false) {
+                        return Some(path);
+                    }
                 }
             }
         }
@@ -970,8 +993,14 @@ fn find_recursive_adjacent_path(
 }
 
 fn recursive_edge_leaf(cache: &mut FilesystemCache, item: &Path, forward: bool) -> Option<PathBuf> {
-    if !is_browser_container(item) {
+    // A listed row is a navigation identity, even when its target is an archive.
+    if is_virtual_listed_child(item) {
         return resolve_start_path(item).map(|_| item.to_path_buf());
+    }
+    if !is_browser_container(item) {
+        return (is_virtual_zip_child(item) || is_virtual_lha_child(item) || item.is_file())
+            .then(|| resolve_start_path(item).map(|_| item.to_path_buf()))
+            .flatten();
     }
     let children = cache.recursive_children(item);
     if forward {
@@ -1059,21 +1088,26 @@ fn sort_recursive_children(children: &mut [PathBuf], order: RecursiveOrder) {
 
 impl FilesystemCache {
     fn recursive_children(&mut self, container: &Path) -> Vec<PathBuf> {
-        let mut children = if container.is_dir() {
-            fs::read_dir(container)
-                .ok()
-                .into_iter()
-                .flat_map(|entries| entries.filter_map(Result::ok))
-                .filter_map(|entry| browser_entry_path_from_dir_entry(&entry))
-                .collect::<Vec<_>>()
-        } else {
-            self.listing(container).file_entries.clone()
-        };
+        // Listed rows can shift while browsing, and must retain their explicit row order.
+        if is_listed_file_path(container) {
+            return self.listing(container).file_entries.clone();
+        }
+        if let Some(children) = self.recursive_children_by_dir.get(container) {
+            return children.clone();
+        }
+        let listing = self.listing(container);
+        let mut children = listing.file_entries.clone();
+        children.extend(listing.dirs.iter().cloned());
+        children.sort();
+        children.dedup();
         sort_recursive_children(&mut children, self.recursive_order);
+        self.recursive_children_by_dir
+            .insert(container.to_path_buf(), children.clone());
         children
     }
 
     fn refresh_listing(&mut self, dir: &Path) {
+        self.recursive_children_by_dir.remove(dir);
         let listing = scan_directory_listing(dir, self.sort);
         self.listings_by_dir.insert(dir.to_path_buf(), listing);
     }
@@ -1125,10 +1159,16 @@ impl FilesystemCache {
     }
 
     fn first_supported_file(&mut self, dir: &Path) -> Option<PathBuf> {
+        if is_zip_file_path(dir) || is_lha_file_path(dir) {
+            return self.recursive_children(dir).first().cloned();
+        }
         self.listing(dir).first_file.clone()
     }
 
     fn last_supported_file(&mut self, dir: &Path) -> Option<PathBuf> {
+        if is_zip_file_path(dir) || is_lha_file_path(dir) {
+            return self.recursive_children(dir).last().cloned();
+        }
         self.listing(dir).last_file.clone()
     }
 }
@@ -1217,7 +1257,13 @@ fn scan_zip_virtual_directory(zip_file: &Path, sort: NavigationSortOption) -> Di
         .iter()
         .map(|entry| zip_virtual_child_path(zip_file, entry.index, &entry.name))
         .collect::<Vec<_>>();
-    sort_paths(&mut files, sort);
+    sort_recursive_children(
+        &mut files,
+        RecursiveOrder {
+            sort,
+            ..RecursiveOrder::default()
+        },
+    );
 
     DirectoryListing {
         file_entries: files.clone(),
@@ -1235,7 +1281,13 @@ fn scan_lha_virtual_directory(lha_file: &Path, sort: NavigationSortOption) -> Di
         .iter()
         .map(|entry| lha_virtual_child_path(lha_file, entry.index, &entry.name))
         .collect::<Vec<_>>();
-    sort_paths(&mut files, sort);
+    sort_recursive_children(
+        &mut files,
+        RecursiveOrder {
+            sort,
+            ..RecursiveOrder::default()
+        },
+    );
 
     DirectoryListing {
         file_entries: files.clone(),
