@@ -42,6 +42,10 @@ impl ViewerApp {
         self.preload_cache
             .iter()
             .find(|entry| entry.navigation_path == path)
+            .filter(|entry| {
+                !matches!(self.render_options.scale_mode, RenderScaleMode::PreciseCpu)
+                    || (entry.zoom - self.zoom).abs() <= f32::EPSILON
+            })
             .cloned()
     }
 

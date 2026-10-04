@@ -458,6 +458,75 @@ fn cpu_preloads_match_navigation_zoom_and_reject_old_zoomed_pages() {
 }
 
 #[test]
+fn cpu_companion_reloads_preloads_at_the_current_zoom() {
+    let mut app = make_test_viewer();
+    app.render_options.scale_mode = RenderScaleMode::PreciseCpu;
+    app.zoom = 2.0;
+    let path = PathBuf::from("companion.png");
+    app.preload_cache
+        .push_back(dummy_preloaded_entry("companion.png"));
+    let (tx, rx) = mpsc::channel();
+    app.companion_tx = tx;
+    app.request_companion_load(path.clone()).unwrap();
+    let RenderCommand::LoadPath {
+        zoom,
+        path: requested,
+        ..
+    } = rx.recv_timeout(Duration::from_secs(2)).unwrap()
+    else {
+        panic!("expected companion reload");
+    };
+    assert_eq!(requested, path);
+    assert_eq!(zoom, 2.0);
+    assert!(app.companion_display.is_none());
+
+    app.preload_cache.front_mut().unwrap().zoom = 2.0;
+    app.preload_cache.front_mut().unwrap().display.rendered = dummy_loaded_image(8, 8);
+    app.request_companion_load(path).unwrap();
+    assert_eq!(
+        app.companion_display
+            .as_ref()
+            .unwrap()
+            .rendered
+            .canvas
+            .width(),
+        8
+    );
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn cpu_companion_sync_reloads_a_mismatched_preload() {
+    let root = make_temp_dir();
+    let first = root.join("001.png");
+    let second = root.join("002.png");
+    fs::write(&first, []).unwrap();
+    fs::write(&second, []).unwrap();
+    let mut app = make_test_viewer();
+    app.options.manga_mode = true;
+    app.render_options.scale_mode = RenderScaleMode::PreciseCpu;
+    app.zoom = 2.0;
+    app.source = dummy_loaded_image(4, 8);
+    initialize_test_navigator(&mut app, &first);
+    let mut entry = dummy_preloaded_entry("companion.png");
+    entry.navigation_path = second.clone();
+    app.preload_cache.push_back(entry);
+    let (tx, rx) = mpsc::channel();
+    app.companion_tx = tx;
+    let ctx = app.egui_ctx.clone();
+    app.sync_manga_companion(&ctx);
+    let RenderCommand::LoadPath { zoom, path, .. } =
+        rx.recv_timeout(Duration::from_secs(2)).unwrap()
+    else {
+        panic!("expected companion reload");
+    };
+    assert_eq!(path, second);
+    assert_eq!(zoom, 2.0);
+    assert!(app.companion_display.is_none());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn system_theme_tracks_the_current_os_theme_after_explicit_theme_selection() {
     let ctx = egui::Context::default();
     let _ = ctx.run(
