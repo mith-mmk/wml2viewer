@@ -127,6 +127,7 @@ impl ViewerApp {
             }
             ViewerAction::ToggleGrayscale => {
                 self.options.grayscale = !self.options.grayscale;
+                self.invalidate_preload();
                 self.upload_current_frame();
                 self.pending_fit_recalc = true;
             }

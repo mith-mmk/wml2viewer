@@ -26,7 +26,7 @@ impl ViewerApp {
         self.next_preload_request_id
     }
 
-    pub(super) fn invalidate_preload(&mut self) {
+    pub(crate) fn invalidate_preload(&mut self) {
         self.active_preload_request_id = None;
         self.pending_preload_navigation_path = None;
         self.preload_cache.clear();
@@ -57,6 +57,7 @@ impl ViewerApp {
         let entry = PreloadedEntry {
             navigation_path: navigation_path.to_path_buf(),
             load_path: load_path.map(Path::to_path_buf),
+            zoom: self.zoom,
             display: DisplayedPageState {
                 source: self.source.clone(),
                 rendered: self.rendered.clone(),
@@ -566,7 +567,7 @@ impl ViewerApp {
             request_id,
             path,
             companion_path: None,
-            zoom: self.zoom,
+            zoom: 1.0,
             method: self.render_options.zoom_method,
             scale_mode: self.render_options.scale_mode,
             max_texture_side: self.max_texture_side,
@@ -577,6 +578,16 @@ impl ViewerApp {
         let Some(entry) = self.take_preloaded_entry(path) else {
             return false;
         };
+        let target_zoom = if self.current_navigation_path == path {
+            self.zoom
+        } else {
+            1.0
+        };
+        if matches!(self.render_options.scale_mode, RenderScaleMode::PreciseCpu)
+            && (entry.zoom - target_zoom).abs() > f32::EPSILON
+        {
+            return false;
+        }
 
         self.log_bench_state(
             "viewer.try_take_preloaded.hit",
@@ -853,6 +864,7 @@ impl ViewerApp {
                     self.remember_preloaded_entry(PreloadedEntry {
                         navigation_path,
                         load_path: path,
+                        zoom: 1.0,
                         display: DisplayedPageState {
                             source,
                             rendered,
@@ -985,6 +997,7 @@ impl ViewerApp {
                             self.remember_preloaded_entry(PreloadedEntry {
                                 navigation_path,
                                 load_path: path,
+                                zoom: self.zoom,
                                 display,
                             });
                         }

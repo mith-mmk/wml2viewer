@@ -16,6 +16,7 @@ fn dummy_preloaded_entry(path: &str) -> PreloadedEntry {
     PreloadedEntry {
         navigation_path: PathBuf::from(path),
         load_path: Some(PathBuf::from(path)),
+        zoom: 1.0,
         display: DisplayedPageState {
             source: dummy_loaded_image(4, 4),
             rendered: dummy_loaded_image(4, 4),
@@ -204,6 +205,59 @@ fn closing_refreshing_subfiler_allows_a_new_scan_when_reopened() {
     app.set_show_subfiler(true);
     assert!(app.filer.pending_request_id.is_some());
     assert_ne!(app.filer.pending_request_id, Some(77));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn grayscale_toggle_invalidates_cached_and_inflight_preloads() {
+    let mut app = make_test_viewer();
+    app.preload_cache.push_back(dummy_preloaded_entry("b.png"));
+    app.active_preload_request_id = Some(77);
+    app.pending_preload_navigation_path = Some(PathBuf::from("c.png"));
+    let ctx = app.egui_ctx.clone();
+    app.apply_viewer_action(&ctx, ViewerAction::ToggleGrayscale);
+    assert!(app.options.grayscale);
+    assert!(app.preload_cache.is_empty());
+    assert!(app.active_preload_request_id.is_none());
+    assert!(app.pending_preload_navigation_path.is_none());
+    assert!(!app.try_take_preloaded(Path::new("b.png")));
+}
+
+#[test]
+fn cpu_preloads_match_navigation_zoom_and_reject_old_zoomed_pages() {
+    let root = make_temp_dir();
+    let first = root.join("a.png");
+    let second = root.join("b.png");
+    fs::write(&first, []).unwrap();
+    fs::write(&second, []).unwrap();
+    let mut app = make_test_viewer();
+    app.current_navigation_path = first;
+    app.navigator_ready = true;
+    app.render_options.scale_mode = RenderScaleMode::PreciseCpu;
+    app.zoom = 2.0;
+    let (tx, rx) = mpsc::channel();
+    app.preload_tx = tx;
+    app.schedule_preload();
+    let RenderCommand::LoadPath { zoom, path, .. } =
+        rx.recv_timeout(Duration::from_secs(2)).unwrap()
+    else {
+        panic!("expected preload");
+    };
+    assert_eq!(path, second);
+    assert_eq!(zoom, 1.0);
+
+    let mut cached = dummy_preloaded_entry("b.png");
+    cached.navigation_path = second.clone();
+    cached.zoom = zoom;
+    app.preload_cache.push_back(cached);
+    assert!(app.try_take_preloaded(&second));
+    assert_eq!(app.zoom, 1.0);
+    assert_eq!(app.rendered.canvas.width(), app.source.canvas.width());
+    let mut stale = dummy_preloaded_entry("c.png");
+    stale.zoom = 2.0;
+    stale.display.rendered = dummy_loaded_image(8, 8);
+    app.preload_cache.push_back(stale);
+    assert!(!app.try_take_preloaded(Path::new("c.png")));
     fs::remove_dir_all(root).unwrap();
 }
 

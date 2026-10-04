@@ -502,6 +502,7 @@ struct DisplayedPageState {
 struct PreloadedEntry {
     navigation_path: PathBuf,
     load_path: Option<PathBuf>,
+    zoom: f32,
     display: DisplayedPageState,
 }
 

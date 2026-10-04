@@ -1322,6 +1322,7 @@ impl ViewerApp {
             let _ = self.request_resize_current();
         }
         if self.options.grayscale != previous.viewer.grayscale {
+            self.invalidate_preload();
             self.upload_current_frame();
         }
         if self.resources.locale != previous.resources.locale
