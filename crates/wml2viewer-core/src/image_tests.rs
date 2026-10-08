@@ -132,6 +132,29 @@ fn bounded_decode_maps_wml2_pixel_rejection_to_core_limit() {
 }
 
 #[test]
+fn bounded_decode_checks_cancellation_at_wml2_callbacks() {
+    let original = sample();
+    let png = encode(EncodeRequest {
+        image: &original,
+        format: EncodeFormat::Png,
+    })
+    .unwrap();
+    let calls = AtomicUsize::new(0);
+    let probe = || calls.fetch_add(1, Ordering::Relaxed) >= 1;
+    let error = decode_with_limits(
+        DecodeRequest {
+            bytes: &png,
+            format_hint: Some("image/png"),
+        },
+        DecodeLimits::UNLIMITED,
+        Some(&probe),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), CoreErrorKind::Cancelled);
+    assert!(calls.load(Ordering::Relaxed) >= 2);
+}
+
+#[test]
 fn cancellation_is_checked_again_before_animation_composition() {
     let mut image = ImageBuffer::from_buffer(1, 1, vec![0, 0, 0, 255]);
     image.animation = Some(vec![AnimationLayer {

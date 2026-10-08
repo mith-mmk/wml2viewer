@@ -4,7 +4,8 @@ use std::sync::OnceLock;
 
 pub fn decoder_extensions() -> &'static BTreeSet<String> {
     static DECODER_EXTENSIONS: OnceLock<BTreeSet<String>> = OnceLock::new();
-    DECODER_EXTENSIONS.get_or_init(|| normalize_extensions(wml2::get_decoder_extentions()))
+    DECODER_EXTENSIONS
+        .get_or_init(|| normalize_extensions(wml2viewer_core::internal_decoder_extensions()))
 }
 
 pub fn encoder_extensions() -> &'static BTreeSet<String> {
