@@ -11,8 +11,9 @@ default = []
 avif = ["wml2/avif"]
 
 [dependencies]
+bin-rs = { version = "0.0.10", features = ["util"] }
 oxiarc-archive = "=0.3.6"
-wml2 = { path = "../wml2", features = ["multithread"] }
+wml2 = { version = "=0.0.33", features = ["multithread"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]

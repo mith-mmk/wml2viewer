@@ -16,6 +16,9 @@ pub use error::{CoreError, CoreErrorKind, CoreResult};
 /// allowlist.
 pub fn internal_decoder_extensions() -> Vec<String> {
     let mut extensions = wml2::get_decoder_extentions();
+    // wml2 0.0.33 still enables the PCD and VSP decoders by default, but its
+    // extension helper omits both names. Preserve the Viewer-visible formats.
+    extensions.extend(["pcd".to_string(), "vsp".to_string()]);
     if extensions.iter().any(|extension| extension == "bmp") {
         extensions.push("dib".to_string());
     }
