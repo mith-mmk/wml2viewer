@@ -192,7 +192,7 @@ impl Wml2Codec {
         let _warnings = image;
         let image = target.into_inner();
         check_cancelled(cancel_probe)?;
-        decoded_from_wml2_with_cancel(image, cancel_probe)
+        decoded_from_wml2_with_limits_and_cancel(image, limits, cancel_probe)
     }
 }
 
@@ -357,7 +357,15 @@ fn decoded_from_wml2(image: ImageBuffer) -> CoreResult<DecodedImage> {
 }
 
 fn decoded_from_wml2_with_cancel(
+    image: ImageBuffer,
+    cancel_probe: Option<DecodeCancelProbe<'_>>,
+) -> CoreResult<DecodedImage> {
+    decoded_from_wml2_with_limits_and_cancel(image, DecodeLimits::UNLIMITED, cancel_probe)
+}
+
+fn decoded_from_wml2_with_limits_and_cancel(
     mut image: ImageBuffer,
+    limits: DecodeLimits,
     cancel_probe: Option<DecodeCancelProbe<'_>>,
 ) -> CoreResult<DecodedImage> {
     check_cancelled(cancel_probe)?;
@@ -371,6 +379,7 @@ fn decoded_from_wml2_with_cancel(
     let base = RgbaImage::new(image.width as u32, image.height as u32, rgba)
         .map_err(|error| CoreError::decode(error.to_string()))?;
     let layers = image.animation.take().unwrap_or_default();
+    check_composited_animation_budget(&base, layers.len(), limits.maximum_rgba_bytes)?;
     let (base, animation) =
         compose_animation_frames(base, layers, image.background_color.as_ref(), cancel_probe)?;
     let poster = if let Some(frame) = animation.first() {
@@ -386,12 +395,42 @@ fn decoded_from_wml2_with_cancel(
     })
 }
 
+fn check_composited_animation_budget(
+    base: &RgbaImage,
+    frame_count: usize,
+    maximum_rgba_bytes: usize,
+) -> CoreResult<()> {
+    let retained_canvases = frame_count
+        .checked_add(1)
+        .ok_or_else(|| CoreError::limit("composited animation frame count overflow"))?;
+    let required_rgba_bytes = base
+        .pixels()
+        .len()
+        .checked_mul(retained_canvases)
+        .ok_or_else(|| CoreError::limit("composited animation byte count overflow"))?;
+    if required_rgba_bytes > maximum_rgba_bytes {
+        return Err(CoreError::limit(format!(
+            "composited animation requires {required_rgba_bytes} RGBA bytes, limit is {maximum_rgba_bytes}"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) fn decoded_from_wml2_for_test(
     image: ImageBuffer,
     cancel_probe: Option<DecodeCancelProbe<'_>>,
 ) -> CoreResult<DecodedImage> {
     decoded_from_wml2_with_cancel(image, cancel_probe)
+}
+
+#[cfg(test)]
+pub(crate) fn decoded_from_wml2_with_limits_for_test(
+    image: ImageBuffer,
+    limits: DecodeLimits,
+    cancel_probe: Option<DecodeCancelProbe<'_>>,
+) -> CoreResult<DecodedImage> {
+    decoded_from_wml2_with_limits_and_cancel(image, limits, cancel_probe)
 }
 
 fn decoded_to_wml2(image: &DecodedImage) -> ImageBuffer {

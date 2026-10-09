@@ -1,7 +1,8 @@
 use crate::CoreErrorKind;
 use crate::image::{
     AnimationFrame, DecodeLimits, DecodeRequest, DecodedImage, EncodeFormat, EncodeRequest,
-    RgbaImage, decode, decode_with_limits, decoded_from_wml2_for_test, encode,
+    RgbaImage, decode, decode_with_limits, decoded_from_wml2_for_test,
+    decoded_from_wml2_with_limits_for_test, encode,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 use wml2::draw::{AnimationLayer, ImageBuffer, NextOptions};
@@ -152,6 +153,44 @@ fn bounded_decode_checks_cancellation_at_wml2_callbacks() {
     .unwrap_err();
     assert_eq!(error.kind(), CoreErrorKind::Cancelled);
     assert!(calls.load(Ordering::Relaxed) >= 2);
+}
+
+#[test]
+fn bounded_animation_composition_counts_full_canvas_frames() {
+    let mut image = ImageBuffer::from_buffer(2, 2, vec![0, 0, 0, 255].repeat(4));
+    image.animation = Some(vec![
+        AnimationLayer {
+            width: 1,
+            height: 1,
+            start_x: 0,
+            start_y: 0,
+            buffer: vec![255, 0, 0, 255],
+            control: NextOptions::wait(10),
+        },
+        AnimationLayer {
+            width: 1,
+            height: 1,
+            start_x: 1,
+            start_y: 1,
+            buffer: vec![0, 255, 0, 255],
+            control: NextOptions::wait(10),
+        },
+    ]);
+
+    // WML2 stores the 16-byte canvas plus two 4-byte layer rectangles, but
+    // Viewer composition retains three full 16-byte canvases.
+    let error = decoded_from_wml2_with_limits_for_test(
+        image,
+        DecodeLimits {
+            maximum_frame_pixels: 4,
+            maximum_frames: 2,
+            maximum_rgba_bytes: 40,
+        },
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), CoreErrorKind::Limit);
+    assert!(error.to_string().contains("requires 48 RGBA bytes"));
 }
 
 #[test]
