@@ -107,7 +107,7 @@ struct SettingsView: View {
                     Stepper("\(String(localized: "Cache limit", locale: store.config.locale)): \(Int((store.config.cacheLimitBytes ?? 134_217_728) / 1_048_576)) MiB", value: Binding(get: { Int((store.config.cacheLimitBytes ?? 134_217_728) / 1_048_576) }, set: { var c = store.config; c.cacheLimitBytes = UInt64(max(64, min($0, 2048))) * 1_048_576; store.update(c) }), in: 64...2048, step: 64)
                 }
                 Section(String(localized: "About", locale: store.config.locale)) {
-                    LabeledContent("wml2viewer", value: "0.0.22")
+                    LabeledContent("wml2viewer", value: "0.0.23")
                 }
             }
             .navigationTitle(String(localized: "Settings", locale: store.config.locale))

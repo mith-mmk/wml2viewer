@@ -10,7 +10,7 @@ resolver = "2"
 
 [package]
 name = "wml2viewer"
-version = "0.0.22"
+version = "0.0.23"
 edition = "2024"
 
 license = "MIT"
