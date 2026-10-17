@@ -10,7 +10,9 @@ use wml2::draw::{
     TerminateOptions, VerboseOptions, image_decoder_with_limits, image_from_with_limits, image_to,
 };
 use wml2::limits::DecodeLimits as WmlDecodeLimits;
-use wml2::metadata::DataMap;
+use wml2::metadata::exif::parse_exif;
+use wml2::metadata::{DataMap, Metadata};
+use wml2::tiff::header::{DataPack, TiffHeaders};
 
 pub type DecodeCancelProbe<'a> = &'a (dyn Fn() -> bool + Send + Sync);
 
@@ -88,7 +90,9 @@ pub struct AnimationFrame {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecodedImage {
+    /// Display-oriented pixels; EXIF rotation/reflection has already been applied.
     pub poster: RgbaImage,
+    /// Composited frames in the same display orientation as the poster.
     pub animation: Vec<AnimationFrame>,
     pub loop_count: Option<u32>,
 }
@@ -372,6 +376,7 @@ fn decoded_from_wml2_with_limits_and_cancel(
     if image.width == 0 || image.height == 0 {
         return Err(CoreError::decode("decoded image has invalid dimensions"));
     }
+    let orientation = exif_orientation(image.metadata.as_ref()).unwrap_or(1);
     let rgba = image
         .buffer
         .take()
@@ -380,12 +385,19 @@ fn decoded_from_wml2_with_limits_and_cancel(
         .map_err(|error| CoreError::decode(error.to_string()))?;
     let layers = image.animation.take().unwrap_or_default();
     check_composited_animation_budget(&base, layers.len(), limits.maximum_rgba_bytes)?;
-    let (base, animation) =
+    let (mut base, mut animation) =
         compose_animation_frames(base, layers, image.background_color.as_ref(), cancel_probe)?;
-    let poster = if let Some(frame) = animation.first() {
-        frame.image.try_clone()?
-    } else {
+    // Layer rectangles use encoded coordinates. Orient only complete canvases,
+    // before resizing, caching, or handing pixels to any platform frontend.
+    let poster = if animation.is_empty() {
+        apply_orientation(&mut base, orientation, cancel_probe)?;
         base
+    } else {
+        drop(base);
+        for frame in &mut animation {
+            apply_orientation(&mut frame.image, orientation, cancel_probe)?;
+        }
+        animation[0].image.try_clone()?
     };
     check_cancelled(cancel_probe)?;
     Ok(DecodedImage {
@@ -393,6 +405,86 @@ fn decoded_from_wml2_with_limits_and_cancel(
         animation,
         loop_count: image.loop_count,
     })
+}
+
+fn exif_orientation(metadata: Option<&Metadata>) -> Option<u16> {
+    let metadata = metadata?;
+    ["EXIF", "Tiff headers", "EXIF Raw"]
+        .into_iter()
+        .find_map(|key| match metadata.get(key)? {
+            DataMap::Exif(headers) => orientation_tag(headers),
+            DataMap::Raw(bytes) => {
+                let bytes = bytes.strip_prefix(b"Exif\0\0").unwrap_or(bytes);
+                // Invalid optional metadata must not prevent image display.
+                let headers = catch_unwind(AssertUnwindSafe(|| parse_exif(bytes)))
+                    .ok()?
+                    .ok()?;
+                orientation_tag(&headers)
+            }
+            _ => None,
+        })
+}
+
+fn orientation_tag(headers: &TiffHeaders) -> Option<u16> {
+    // Only IFD0 describes the displayed image; EXIF sub-IFDs and thumbnails
+    // can contain unrelated tags. Orientation is a single SHORT (tag 274).
+    let tag = headers.headers.iter().find(|tag| tag.tagid == 0x0112)?;
+    match &tag.data {
+        DataPack::Short(values) if tag.length == 1 && values.len() == 1 => {
+            Some(values[0]).filter(|value| (1..=8).contains(value))
+        }
+        _ => None,
+    }
+}
+
+fn apply_orientation(
+    image: &mut RgbaImage,
+    orientation: u16,
+    cancel_probe: Option<DecodeCancelProbe<'_>>,
+) -> CoreResult<()> {
+    if !(2..=8).contains(&orientation) {
+        return Ok(());
+    }
+    check_cancelled(cancel_probe)?;
+    let (width, height) = (image.width as usize, image.height as usize);
+    let (out_width, out_height) = if orientation >= 5 {
+        (image.height, image.width)
+    } else {
+        (image.width, image.height)
+    };
+    let stride = out_width
+        .checked_mul(4)
+        .ok_or_else(|| CoreError::limit("oriented RGBA stride overflow"))?;
+    let mut pixels = Vec::new();
+    pixels
+        .try_reserve_exact(image.pixels.len())
+        .map_err(|error| CoreError::limit(format!("orientation allocation failed: {error}")))?;
+    pixels.resize(image.pixels.len(), 0);
+    for y in 0..height {
+        if y % 64 == 0 {
+            check_cancelled(cancel_probe)?;
+        }
+        for x in 0..width {
+            let (dx, dy) = match orientation {
+                2 => (width - 1 - x, y),
+                3 => (width - 1 - x, height - 1 - y),
+                4 => (x, height - 1 - y),
+                5 => (y, x),
+                6 => (height - 1 - y, x),
+                7 => (height - 1 - y, width - 1 - x),
+                8 => (y, width - 1 - x),
+                _ => unreachable!(),
+            };
+            let source = (y * width + x) * 4;
+            let destination = dy * stride as usize + dx * 4;
+            pixels[destination..destination + 4].copy_from_slice(&image.pixels[source..source + 4]);
+        }
+    }
+    image.width = out_width;
+    image.height = out_height;
+    image.stride = stride;
+    image.pixels = pixels;
+    Ok(())
 }
 
 fn check_composited_animation_budget(

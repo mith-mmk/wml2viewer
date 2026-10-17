@@ -11,6 +11,7 @@
 - JPEG/Webp/BMP/Tiff/PNG/GIF/mag/maki/pi/picのネイティブ対応
 - AVIFは`avif` Cargo featureを有効にした場合だけ内蔵デコーダで対応
 - アニメーションGIF/PNG/webpのネイティブ対応
+- 内蔵デコーダでEXIF Orientationに応じた回転・反転を表示とサムネイルに反映
 - マルチプラットフォーム対応
 - zipファイルの直接閲覧
 - プラグイン機能 susie64 plugin(Windows)/os デコーダ(Windows)/ffmpegに対応

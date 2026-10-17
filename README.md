@@ -11,6 +11,7 @@ A lightweight native image viewer built with `egui` and `wml2`.
 - Native support for jpeg/webp/bmp/tiff/png/gif/mag/maki/pi/pic
 - Optional native AVIF support with the `avif` Cargo feature
 - Native support for Animation GIF/PNG/Webp
+- EXIF Orientation rotation and reflection for images and thumbnails using the native decoder
 - Direct browsing of zip files
 - Plugin support: susie64 plugin(windows) / OS decoders(windows) / ffmpeg
 - Browsing via listed files (.wmltxt)

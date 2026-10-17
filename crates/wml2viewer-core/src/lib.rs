@@ -30,6 +30,8 @@ pub fn internal_decoder_extensions() -> Vec<String> {
 #[cfg(test)]
 mod archive_tests;
 #[cfg(test)]
+mod image_orientation_tests;
+#[cfg(test)]
 mod image_tests;
 #[cfg(test)]
 #[path = "reading_model_tests.rs"]
