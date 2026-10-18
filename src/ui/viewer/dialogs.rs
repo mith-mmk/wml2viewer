@@ -398,6 +398,8 @@ impl ViewerApp {
         if !waiting_card_should_show(
             self.active_request.is_some(),
             self.active_fs_request_id.is_some(),
+            self.navigator_ready,
+            !self.current_texture_is_default,
         ) {
             return;
         }

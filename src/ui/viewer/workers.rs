@@ -274,6 +274,9 @@ impl ViewerApp {
         self.active_fs_request_id = Some(request_id);
         self.active_navigation_transition_direction = transition_direction;
         command = match command {
+            FilesystemCommand::RefreshNeighbors { path } => {
+                FilesystemCommand::RefreshNeighbors { path }
+            }
             FilesystemCommand::Init { path, .. } => FilesystemCommand::Init { request_id, path },
             FilesystemCommand::SetCurrent { path, .. } => {
                 FilesystemCommand::SetCurrent { request_id, path }
@@ -445,7 +448,7 @@ impl ViewerApp {
                 );
             }
             self.start_image_transition();
-            if self.active_fs_request_id.is_none() {
+            if self.active_fs_request_id.is_none() || !self.navigator_ready {
                 self.overlay.clear_loading_message();
             }
         }
@@ -511,7 +514,7 @@ impl ViewerApp {
         }
         let step =
             if self.manga_spread_active() { 2 } else { 1 } * self.navigation_direction_sign();
-        adjacent_entry(&self.current_navigation_path, self.navigation_sort, step)
+        self.cached_adjacent_entry(&self.current_navigation_path, step)
     }
 
     pub(super) fn schedule_preload(&mut self) {
@@ -656,6 +659,7 @@ impl ViewerApp {
     }
 
     pub(crate) fn respawn_filesystem_worker(&mut self) {
+        self.navigation_neighbors = None;
         let (tx, rx) = spawn_filesystem_worker(self.navigation_sort, self.recursive_order);
         self.fs_tx = Some(tx);
         self.fs_rx = Some(rx);
@@ -1063,6 +1067,10 @@ impl ViewerApp {
                 None => return,
             };
             match result {
+                Ok(FilesystemResult::NeighborsReady(neighbors)) => {
+                    self.navigation_neighbors = Some(neighbors);
+                    self.schedule_preload();
+                }
                 Ok(FilesystemResult::NavigatorReady {
                     request_id,
                     navigation_path,
@@ -1285,7 +1293,6 @@ impl ViewerApp {
                     self.filer.pending_request_id = None;
                     self.filer.directory = Some(directory);
                     self.filer.entries = entries;
-                    self.manga_companion_lookup = None;
                     let snapshot_signature = filer_entries_signature(&self.filer.entries);
                     let snapshot_changed_in_same_directory =
                         filer_snapshot_changed_in_same_directory(
@@ -1295,6 +1302,11 @@ impl ViewerApp {
                             self.filer.directory.as_deref().unwrap(),
                             snapshot_signature,
                         );
+                    if snapshot_changed_in_same_directory
+                        && self.filer.directory == self.current_directory()
+                    {
+                        self.refresh_navigation_neighbors();
+                    }
                     self.last_filer_snapshot_signature = Some((
                         self.filer.directory.as_deref().unwrap().to_path_buf(),
                         snapshot_signature,

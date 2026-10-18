@@ -107,28 +107,44 @@ fn initialize_test_navigator(app: &mut ViewerApp, path: &Path) {
     assert_eq!(navigation_path.as_deref(), Some(path));
     app.navigator_ready = true;
     app.active_fs_request_id = None;
-}
-
-fn receive_test_navigation(app: &mut ViewerApp) -> PathBuf {
-    let result = app
+    let FilesystemResult::NeighborsReady(neighbors) = app
         .fs_rx
         .as_ref()
         .unwrap()
         .recv_timeout(Duration::from_secs(3))
-        .unwrap();
-    app.active_fs_request_id = None;
-    app.last_navigation_at = None;
-    match result {
-        FilesystemResult::PathResolved {
-            navigation_path, ..
-        } => navigation_path,
-        FilesystemResult::CurrentSet => panic!("received CurrentSet instead of navigation"),
-        FilesystemResult::NavigatorReady {
-            navigation_path, ..
-        } => panic!("received NavigatorReady: {navigation_path:?}"),
-        FilesystemResult::NoPath { request_id } => {
-            panic!("navigation request {request_id} returned NoPath")
-        }
+        .unwrap()
+    else {
+        panic!("navigator did not publish neighbors");
+    };
+    app.navigation_neighbors = Some(neighbors);
+}
+
+fn receive_test_navigation(app: &mut ViewerApp) -> PathBuf {
+    loop {
+        let result = app
+            .fs_rx
+            .as_ref()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap();
+        app.active_fs_request_id = None;
+        app.last_navigation_at = None;
+        return match result {
+            FilesystemResult::NeighborsReady(neighbors) => {
+                app.navigation_neighbors = Some(neighbors);
+                continue;
+            }
+            FilesystemResult::PathResolved {
+                navigation_path, ..
+            } => navigation_path,
+            FilesystemResult::CurrentSet => panic!("received CurrentSet instead of navigation"),
+            FilesystemResult::NavigatorReady {
+                navigation_path, ..
+            } => panic!("received NavigatorReady: {navigation_path:?}"),
+            FilesystemResult::NoPath { request_id } => {
+                panic!("navigation request {request_id} returned NoPath")
+            }
+        };
     }
 }
 
@@ -427,8 +443,7 @@ fn cpu_preloads_match_navigation_zoom_and_reject_old_zoomed_pages() {
     fs::write(&first, []).unwrap();
     fs::write(&second, []).unwrap();
     let mut app = make_test_viewer();
-    app.current_navigation_path = first;
-    app.navigator_ready = true;
+    initialize_test_navigator(&mut app, &first);
     app.render_options.scale_mode = RenderScaleMode::PreciseCpu;
     app.zoom = 2.0;
     let (tx, rx) = mpsc::channel();
@@ -810,9 +825,12 @@ fn outgoing_slide_keeps_original_image_dimensions_when_next_image_is_smaller() {
 
 #[test]
 fn scanning_a_folder_shows_waiting_card_before_first_image() {
-    assert!(waiting_card_should_show(false, true));
-    assert!(waiting_card_should_show(true, false));
-    assert!(!waiting_card_should_show(false, false));
+    assert!(waiting_card_should_show(false, true, false, false));
+    assert!(waiting_card_should_show(true, false, false, false));
+    assert!(!waiting_card_should_show(false, false, true, true));
+    // Initial navigation scanning must not obscure an already decoded image.
+    assert!(!waiting_card_should_show(false, true, false, true));
+    assert!(waiting_card_should_show(false, true, true, true));
 }
 
 #[test]
@@ -1393,61 +1411,33 @@ fn reinit_snapshot_only_when_current_is_missing_or_misaligned() {
 }
 
 #[test]
-fn spread_companion_path_for_navigation_uses_same_branch_neighbor() {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("wml2viewer-spread-{unique}"));
+fn preload_and_companion_use_worker_listing_after_directory_disappears() {
+    let root = make_temp_dir();
     let first = root.join("001.png");
     let second = root.join("002.png");
-    fs::create_dir_all(&root).unwrap();
     fs::write(&first, []).unwrap();
     fs::write(&second, []).unwrap();
-
-    let companion =
-        spread_companion_path_for_navigation(&first, NavigationSortOption::Name, 1, true);
-
-    assert_eq!(companion.as_deref(), Some(second.as_path()));
-
-    let _ = fs::remove_dir_all(root);
+    let mut app = make_test_viewer();
+    initialize_test_navigator(&mut app, &first);
+    fs::remove_dir_all(root).unwrap();
+    assert_eq!(app.next_preload_candidate(), Some(second.clone()));
+    app.options.manga_mode = true;
+    assert_eq!(app.desired_manga_companion_path(), Some(second));
+    assert!(app.navigation_edge_reached(PendingViewerNavigation::First));
+    app.navigation_sort = NavigationSortOption::Size;
+    assert_eq!(app.next_preload_candidate(), None);
 }
 
 #[test]
-fn companion_lookup_reuses_result_until_key_changes() {
-    let mut cache = None;
-    let key = MangaCompanionLookupKey {
-        navigation_path: PathBuf::from("001.png"),
-        sort: NavigationSortOption::Name,
-        direction: 1,
-        branch_path: Some(PathBuf::from("pages")),
-        branch_modified: None,
-        branch_len: Some(2),
-    };
-    let lookups = std::cell::Cell::new(0);
-    let resolve = || {
-        lookups.set(lookups.get() + 1);
-        Some(PathBuf::from("002.png"))
-    };
-    assert_eq!(
-        cached_spread_companion_path(&mut cache, key.clone(), resolve),
-        Some(PathBuf::from("002.png"))
-    );
-    assert_eq!(
-        cached_spread_companion_path(&mut cache, key.clone(), resolve),
-        Some(PathBuf::from("002.png"))
-    );
-    assert_eq!(lookups.get(), 1);
-
-    let changed = MangaCompanionLookupKey {
-        branch_len: Some(3),
-        ..key
-    };
-    assert_eq!(
-        cached_spread_companion_path(&mut cache, changed, resolve),
-        Some(PathBuf::from("002.png"))
-    );
-    assert_eq!(lookups.get(), 2);
+fn ordinary_filer_paths_compare_without_requiring_files_to_exist() {
+    assert!(is_same_navigation_target(
+        Path::new("pages/001.webp"),
+        Path::new("pages/001.webp")
+    ));
+    assert!(!is_same_navigation_target(
+        Path::new("pages/001.webp"),
+        Path::new("pages/002.webp")
+    ));
 }
 
 #[test]

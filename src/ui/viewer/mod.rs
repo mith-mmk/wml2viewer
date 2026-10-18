@@ -6,9 +6,10 @@ use crate::drawers::canvas::Canvas;
 use crate::drawers::image::{LoadedImage, SaveFormat, save_loaded_image};
 use crate::filesystem::function::{FunctionParams, call_fanction_for_action};
 use crate::filesystem::{
-    FilesystemCommand, FilesystemResult, RecursiveOrder, adjacent_entry, archive_prefers_low_io,
-    is_browser_container, navigation_branch_path, resolve_end_path, resolve_navigation_entry_path,
-    resolve_start_path, set_archive_zip_workaround, spawn_filesystem_worker,
+    FilesystemCommand, FilesystemResult, NavigationNeighbors, RecursiveOrder,
+    archive_prefers_low_io, is_browser_container, navigation_branch_path, resolve_end_path,
+    resolve_navigation_entry_path, resolve_start_path, set_archive_zip_workaround,
+    spawn_filesystem_worker,
 };
 use crate::options::{
     AppConfig, EndOfFolderOption, FileActionOptions, FilesystemOptions, FolderRefreshMode,
@@ -42,7 +43,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 mod dialogs;
 mod navigation;
 pub mod options;
@@ -173,7 +174,7 @@ pub(crate) struct ViewerApp {
     pub(crate) companion_active_request: Option<ActiveRenderRequest>,
     pub(crate) companion_navigation_path: Option<PathBuf>,
     companion_display: Option<DisplayedPageState>,
-    manga_companion_lookup: Option<MangaCompanionLookup>,
+    navigation_neighbors: Option<NavigationNeighbors>,
     pub(crate) preload_tx: Sender<RenderCommand>,
     pub(crate) preload_rx: Receiver<RenderResult>,
     pub(crate) preload_join: Option<JoinHandle<()>>,
@@ -287,21 +288,6 @@ struct TransitionScene {
     viewport: egui::Rect,
     images: Vec<TransitionImageLayer>,
     separator: Option<TransitionSeparatorLayer>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct MangaCompanionLookupKey {
-    navigation_path: PathBuf,
-    sort: NavigationSortOption,
-    direction: isize,
-    branch_path: Option<PathBuf>,
-    branch_modified: Option<SystemTime>,
-    branch_len: Option<u64>,
-}
-
-struct MangaCompanionLookup {
-    key: MangaCompanionLookupKey,
-    path: Option<PathBuf>,
 }
 
 struct AutoRefreshResult {
@@ -719,8 +705,13 @@ fn loading_card_message(message: Option<&str>) -> String {
     }
 }
 
-fn waiting_card_should_show(active_render_request: bool, active_filesystem_request: bool) -> bool {
-    active_render_request || active_filesystem_request
+fn waiting_card_should_show(
+    active_render_request: bool,
+    active_filesystem_request: bool,
+    navigator_ready: bool,
+    has_image: bool,
+) -> bool {
+    active_render_request || (active_filesystem_request && (navigator_ready || !has_image))
 }
 
 fn should_defer_filer_scan(show_filer: bool, show_subfiler: bool) -> bool {
@@ -1028,7 +1019,7 @@ impl ViewerApp {
             companion_active_request: None,
             companion_navigation_path: None,
             companion_display: None,
-            manga_companion_lookup: None,
+            navigation_neighbors: None,
             preload_tx,
             preload_rx,
             preload_join: Some(preload_join),
@@ -1320,12 +1311,6 @@ impl ViewerApp {
             let previous = self
                 .last_auto_refresh_signature
                 .replace((result.directory.clone(), signature));
-            if previous
-                .as_ref()
-                .is_none_or(|(previous_dir, _)| previous_dir != &result.directory)
-            {
-                self.manga_companion_lookup = None;
-            }
             let changed = previous
                 .as_ref()
                 .is_some_and(|(previous_dir, previous_signature)| {
@@ -1334,7 +1319,6 @@ impl ViewerApp {
             if !changed {
                 continue;
             }
-            self.manga_companion_lookup = None;
             self.log_bench_state(
                 "viewer.filer.auto_refresh_detected",
                 serde_json::json!({"directory": result.directory.display().to_string()}),
@@ -1348,6 +1332,7 @@ impl ViewerApp {
             } else {
                 self.filer.entries.clear();
                 self.last_filer_snapshot_signature = None;
+                self.refresh_navigation_neighbors();
             }
         }
         if !auto_enabled {
@@ -1919,6 +1904,13 @@ impl ViewerApp {
     }
 
     pub(crate) fn current_directory(&self) -> Option<PathBuf> {
+        if let Some(neighbors) = self
+            .navigation_neighbors
+            .as_ref()
+            .filter(|neighbors| neighbors.path == self.current_navigation_path)
+        {
+            return neighbors.directory.clone();
+        }
         if self.current_navigation_path.is_dir() {
             return Some(self.current_navigation_path.clone());
         }
@@ -2159,7 +2151,6 @@ impl ViewerApp {
 
     pub(crate) fn refresh_current_filer_directory(&mut self) {
         self.auto_refresh_dirty = None;
-        self.manga_companion_lookup = None;
         if let Some(dir) = self
             .filer
             .directory
@@ -2186,6 +2177,14 @@ impl ViewerApp {
         let request_id = self.alloc_fs_request_id();
         if let Some(fs_tx) = &self.fs_tx {
             let _ = fs_tx.send(FilesystemCommand::SetCurrent { request_id, path });
+        }
+    }
+
+    fn refresh_navigation_neighbors(&self) {
+        if let Some(tx) = &self.fs_tx {
+            let _ = tx.send(FilesystemCommand::RefreshNeighbors {
+                path: self.current_navigation_path.clone(),
+            });
         }
     }
 
@@ -2278,25 +2277,21 @@ impl ViewerApp {
         if !self.options.manga_mode {
             return None;
         }
-        let branch_path = navigation_branch_path(navigation_path);
-        let branch_metadata = branch_path
-            .as_ref()
-            .and_then(|path| std::fs::metadata(path).ok());
-        let sort = self.navigation_sort;
-        let direction = self.navigation_direction_sign();
-        let key = MangaCompanionLookupKey {
-            navigation_path: navigation_path.to_path_buf(),
-            sort,
-            direction,
-            branch_path,
-            branch_modified: branch_metadata
-                .as_ref()
-                .and_then(|metadata| metadata.modified().ok()),
-            branch_len: branch_metadata.as_ref().map(|metadata| metadata.len()),
-        };
-        cached_spread_companion_path(&mut self.manga_companion_lookup, key, || {
-            spread_companion_path_for_navigation(navigation_path, sort, direction, true)
-        })
+        self.navigation_neighbors
+            .as_ref()?
+            .adjacent_in_same_branch(
+                navigation_path,
+                self.navigation_sort,
+                self.navigation_direction_sign(),
+            )
+            .map(Path::to_path_buf)
+    }
+
+    fn cached_adjacent_entry(&self, path: &Path, step: isize) -> Option<PathBuf> {
+        self.navigation_neighbors
+            .as_ref()?
+            .adjacent(path, self.navigation_sort, step)
+            .map(Path::to_path_buf)
     }
 
     fn clear_manga_companion(&mut self) {
@@ -2421,14 +2416,20 @@ impl ViewerApp {
         }
         let direction = self.navigation_direction_sign();
 
-        let boundary_target = adjacent_entry(
+        let boundary_target = self.cached_adjacent_entry(
             &self.current_navigation_path,
-            self.navigation_sort,
             if forward { direction } else { -direction },
         )?;
-        let current_branch = navigation_branch_path(&self.current_navigation_path);
-        let boundary_branch = navigation_branch_path(&boundary_target);
-        if current_branch != boundary_branch {
+        if self
+            .navigation_neighbors
+            .as_ref()?
+            .adjacent_in_same_branch(
+                &self.current_navigation_path,
+                self.navigation_sort,
+                if forward { direction } else { -direction },
+            )
+            .is_none()
+        {
             return Some(boundary_target);
         }
 
@@ -2437,7 +2438,7 @@ impl ViewerApp {
         } else {
             -2 * direction
         };
-        adjacent_entry(&self.current_navigation_path, self.navigation_sort, step)
+        self.cached_adjacent_entry(&self.current_navigation_path, step)
     }
 
     fn navigation_direction_sign(&self) -> isize {
@@ -2714,7 +2715,13 @@ impl ViewerApp {
             PendingViewerNavigation::Last => direction,
             PendingViewerNavigation::Next | PendingViewerNavigation::Prev => return false,
         };
-        adjacent_entry(&self.current_navigation_path, self.navigation_sort, step).is_none()
+        self.navigation_neighbors.as_ref().is_some_and(|neighbors| {
+            neighbors.path == self.current_navigation_path
+                && neighbors.sort == self.navigation_sort
+                && neighbors
+                    .adjacent(&self.current_navigation_path, self.navigation_sort, step)
+                    .is_none()
+        })
     }
 
     fn should_apply_edge_noop(&self, navigation: PendingViewerNavigation) -> bool {
@@ -3529,6 +3536,16 @@ fn is_same_navigation_target(lhs: &Path, rhs: &Path) -> bool {
     if lhs == rhs {
         return true;
     }
+    // Only listed-file rows can change their virtual index. Comparing ordinary
+    // paths must not stat every preceding file in a large network directory.
+    let is_listed_row = |path: &Path| {
+        path.parent()
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == "__wmlv__")
+    };
+    if !is_listed_row(lhs) || !is_listed_row(rhs) || lhs.parent() != rhs.parent() {
+        return false;
+    }
     let lhs_rebased = resolve_navigation_entry_path(lhs);
     let rhs_rebased = resolve_navigation_entry_path(rhs);
     match (lhs_rebased, rhs_rebased) {
@@ -3564,37 +3581,6 @@ fn should_defer_companion_sync_during_primary_load(
     active_request: Option<ActiveRenderRequest>,
 ) -> bool {
     matches!(active_request, Some(ActiveRenderRequest::Load(_)))
-}
-
-fn spread_companion_path_for_navigation(
-    navigation_path: &Path,
-    navigation_sort: NavigationSortOption,
-    navigation_direction_sign: isize,
-    manga_mode: bool,
-) -> Option<PathBuf> {
-    if !manga_mode {
-        return None;
-    }
-    let companion = adjacent_entry(navigation_path, navigation_sort, navigation_direction_sign)?;
-    let current_branch = navigation_branch_path(navigation_path);
-    let companion_branch = navigation_branch_path(&companion);
-    (current_branch == companion_branch).then_some(companion)
-}
-
-fn cached_spread_companion_path(
-    cache: &mut Option<MangaCompanionLookup>,
-    key: MangaCompanionLookupKey,
-    resolve: impl FnOnce() -> Option<PathBuf>,
-) -> Option<PathBuf> {
-    if let Some(cached) = cache.as_ref().filter(|cached| cached.key == key) {
-        return cached.path.clone();
-    }
-    let path = resolve();
-    *cache = Some(MangaCompanionLookup {
-        key,
-        path: path.clone(),
-    });
-    path
 }
 
 fn should_cancel_filesystem_request_for_filer_select(

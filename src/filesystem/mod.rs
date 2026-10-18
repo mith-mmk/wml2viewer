@@ -91,6 +91,14 @@ struct DirectoryListing {
     dirs: Vec<PathBuf>,
     first_file: Option<PathBuf>,
     last_file: Option<PathBuf>,
+    entry_metadata: HashMap<PathBuf, NavigationMetadata>,
+}
+
+#[derive(Clone, Default)]
+struct NavigationMetadata {
+    is_dir: bool,
+    modified: Option<SystemTime>,
+    size: Option<u64>,
 }
 
 #[derive(Clone, Copy)]
@@ -101,6 +109,9 @@ enum PendingDirection {
 
 #[derive(Clone, Debug)]
 pub enum FilesystemCommand {
+    RefreshNeighbors {
+        path: PathBuf,
+    },
     Init {
         request_id: u64,
         path: PathBuf,
@@ -130,6 +141,7 @@ pub enum FilesystemCommand {
 }
 
 pub enum FilesystemResult {
+    NeighborsReady(NavigationNeighbors),
     NavigatorReady {
         request_id: u64,
         navigation_path: Option<PathBuf>,
@@ -144,6 +156,48 @@ pub enum FilesystemResult {
     NoPath {
         request_id: u64,
     },
+}
+
+#[derive(Clone, Debug)]
+pub struct NavigationNeighbors {
+    pub path: PathBuf,
+    pub sort: NavigationSortOption,
+    pub directory: Option<PathBuf>,
+    neighbors: [Option<PathBuf>; 4],
+    same_branch: [bool; 4],
+}
+
+impl NavigationNeighbors {
+    pub fn adjacent_in_same_branch(
+        &self,
+        path: &Path,
+        sort: NavigationSortOption,
+        step: isize,
+    ) -> Option<&Path> {
+        let index = match step {
+            -2 => 0,
+            -1 => 1,
+            1 => 2,
+            2 => 3,
+            _ => return None,
+        };
+        self.adjacent(path, sort, step)
+            .filter(|_| self.same_branch[index])
+    }
+
+    pub fn adjacent(&self, path: &Path, sort: NavigationSortOption, step: isize) -> Option<&Path> {
+        if self.path != path || self.sort != sort {
+            return None;
+        }
+        let index = match step {
+            -2 => 0,
+            -1 => 1,
+            1 => 2,
+            2 => 3,
+            _ => return None,
+        };
+        self.neighbors[index].as_deref()
+    }
 }
 
 impl FileNavigator {
@@ -170,6 +224,9 @@ impl FileNavigator {
     }
 
     fn set_current_input(&mut self, path: PathBuf, cache: &mut FilesystemCache) {
+        if self.current_path == path {
+            return;
+        }
         let Some(navigation_path) = resolve_navigation_path(&path, cache) else {
             return;
         };
@@ -202,6 +259,28 @@ impl FileNavigator {
         }
 
         self.files.as_deref().unwrap_or(&[])
+    }
+
+    fn neighbors(&mut self, cache: &mut FilesystemCache) -> NavigationNeighbors {
+        self.ensure_files(cache);
+        let directory = navigation_branch_path(&self.current_path);
+        let neighbors = [-2_isize, -1, 1, 2].map(|step| {
+            self.current
+                .checked_add_signed(step)
+                .and_then(|index| self.files.as_ref()?.get(index).cloned())
+        });
+        let same_branch = std::array::from_fn(|index| {
+            neighbors[index]
+                .as_ref()
+                .is_some_and(|path| navigation_branch_path(path) == directory)
+        });
+        NavigationNeighbors {
+            path: self.current_path.clone(),
+            sort: cache.sort,
+            directory,
+            neighbors,
+            same_branch,
+        }
     }
 
     fn next(&mut self, cache: &mut FilesystemCache) -> Option<PathBuf> {
@@ -665,7 +744,17 @@ pub fn spawn_filesystem_worker(
 
         while let Ok(command) = command_rx.recv() {
             match command {
+                FilesystemCommand::RefreshNeighbors { path } => {
+                    if let Some(nav) = navigator.as_mut().filter(|nav| nav.current() == path) {
+                        if let Some(dir) = flat_container_dir(&path) {
+                            cache.refresh_listing(&dir);
+                            nav.files = None;
+                        }
+                    }
+                }
                 FilesystemCommand::Init { request_id, path } => {
+                    cache.listings_by_dir.clear();
+                    cache.recursive_children_by_dir.clear();
                     log_global_bench_event(
                         "filesystem.init.begin",
                         serde_json::json!({
@@ -784,6 +873,11 @@ pub fn spawn_filesystem_worker(
                         navigation_outcome_to_target(outcome),
                     );
                 }
+            }
+            // Reuse the navigator's listing; the UI must never rescan a slow share
+            // to plan preloads or a manga companion.
+            if let Some(nav) = navigator.as_mut() {
+                let _ = result_tx.send(FilesystemResult::NeighborsReady(nav.neighbors(&mut cache)));
             }
         }
     });
@@ -1085,6 +1179,25 @@ fn recursive_edge_leaf(cache: &mut FilesystemCache, item: &Path, forward: bool) 
 }
 
 fn sort_recursive_children(children: &mut [PathBuf], order: RecursiveOrder) {
+    sort_recursive_children_with_metadata(children, order, |path| {
+        let metadata = fs::metadata(path).ok();
+        NavigationMetadata {
+            is_dir: metadata.as_ref().is_some_and(fs::Metadata::is_dir),
+            modified: metadata
+                .as_ref()
+                .and_then(|metadata| metadata.modified().ok()),
+            size: metadata
+                .as_ref()
+                .and_then(|metadata| metadata.is_file().then_some(metadata.len())),
+        }
+    });
+}
+
+fn sort_recursive_children_with_metadata(
+    children: &mut [PathBuf],
+    order: RecursiveOrder,
+    mut metadata_for: impl FnMut(&Path) -> NavigationMetadata,
+) {
     struct SortEntry {
         path: PathBuf,
         name: String,
@@ -1100,20 +1213,20 @@ fn sort_recursive_children(children: &mut [PathBuf], order: RecursiveOrder) {
     let mut entries = children
         .iter()
         .map(|path| {
-            let metadata = need_metadata.then(|| fs::metadata(path).ok()).flatten();
+            let metadata = if need_metadata {
+                metadata_for(path)
+            } else {
+                NavigationMetadata::default()
+            };
             SortEntry {
                 path: path.clone(),
                 name: browser_entry_display_name(path),
-                group: metadata.as_ref().is_some_and(|metadata| metadata.is_dir())
+                group: metadata.is_dir
                     || is_listed_file_path(path)
                     || (order.archive_as_container_in_sort
                         && (is_zip_file_path(path) || is_lha_file_path(path))),
-                modified: metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.modified().ok()),
-                size: metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.is_file().then_some(metadata.len())),
+                modified: metadata.modified,
+                size: if metadata.is_dir { None } else { metadata.size },
             }
         })
         .collect::<Vec<_>>();
@@ -1164,12 +1277,19 @@ impl FilesystemCache {
         if let Some(children) = self.recursive_children_by_dir.get(container) {
             return children.clone();
         }
+        let order = self.recursive_order;
         let listing = self.listing(container);
         let mut children = listing.file_entries.clone();
         children.extend(listing.dirs.iter().cloned());
         children.sort();
         children.dedup();
-        sort_recursive_children(&mut children, self.recursive_order);
+        sort_recursive_children_with_metadata(&mut children, order, |path| {
+            listing
+                .entry_metadata
+                .get(path)
+                .cloned()
+                .unwrap_or_default()
+        });
         self.recursive_children_by_dir
             .insert(container.to_path_buf(), children.clone());
         children
@@ -1177,7 +1297,7 @@ impl FilesystemCache {
 
     fn refresh_listing(&mut self, dir: &Path) {
         self.recursive_children_by_dir.remove(dir);
-        let listing = scan_directory_listing(dir, self.sort);
+        let listing = scan_directory_listing(dir, self.sort, self.recursive_order.sort);
         self.listings_by_dir.insert(dir.to_path_buf(), listing);
     }
 
@@ -1190,9 +1310,10 @@ impl FilesystemCache {
                 .expect("listed file listing inserted");
         }
         let sort = self.sort;
+        let recursive_sort = self.recursive_order.sort;
         self.listings_by_dir
             .entry(dir.to_path_buf())
-            .or_insert_with(|| scan_directory_listing(dir, sort))
+            .or_insert_with(|| scan_directory_listing(dir, sort, recursive_sort))
     }
 
     fn supported_entries(&mut self, dir: &Path) -> Vec<PathBuf> {
@@ -1242,7 +1363,11 @@ impl FilesystemCache {
     }
 }
 
-fn scan_directory_listing(dir: &Path, sort: NavigationSortOption) -> DirectoryListing {
+fn scan_directory_listing(
+    dir: &Path,
+    sort: NavigationSortOption,
+    recursive_sort: NavigationSortOption,
+) -> DirectoryListing {
     let started_at = Instant::now();
     if is_zip_file_path(dir) {
         let listing = scan_zip_virtual_directory(dir, sort);
@@ -1289,7 +1414,7 @@ fn scan_directory_listing(dir: &Path, sort: NavigationSortOption) -> DirectoryLi
         return listing;
     }
 
-    let listing = scan_real_directory_listing(dir, sort);
+    let listing = scan_real_directory_listing(dir, sort, recursive_sort);
     log_global_bench_event(
         "filesystem.scan_directory_listing",
         serde_json::json!({
@@ -1317,6 +1442,7 @@ fn scan_listed_virtual_directory(
         last_file: files.last().cloned(),
         files,
         dirs: Vec::new(),
+        entry_metadata: HashMap::new(),
     }
 }
 
@@ -1341,6 +1467,7 @@ fn scan_zip_virtual_directory(zip_file: &Path, sort: NavigationSortOption) -> Di
         last_file: files.last().cloned(),
         files,
         dirs: Vec::new(),
+        entry_metadata: HashMap::new(),
     }
 }
 
@@ -1365,21 +1492,53 @@ fn scan_lha_virtual_directory(lha_file: &Path, sort: NavigationSortOption) -> Di
         last_file: files.last().cloned(),
         files,
         dirs: Vec::new(),
+        entry_metadata: HashMap::new(),
     }
 }
 
-fn scan_real_directory_listing(dir: &Path, sort: NavigationSortOption) -> DirectoryListing {
+fn scan_real_directory_listing(
+    dir: &Path,
+    sort: NavigationSortOption,
+    recursive_sort: NavigationSortOption,
+) -> DirectoryListing {
     let Some(entries) = fs::read_dir(dir).ok() else {
         return DirectoryListing::default();
     };
 
     let mut raw_files = Vec::new();
     let mut raw_dirs = Vec::new();
+    let mut entry_metadata = HashMap::new();
+    let need_metadata = [sort, recursive_sort].iter().any(|sort| {
+        matches!(
+            sort,
+            NavigationSortOption::Date | NavigationSortOption::Size
+        )
+    });
 
     for entry in entries.filter_map(Result::ok) {
         let Some(path) = browser_entry_path_from_dir_entry(&entry) else {
             continue;
         };
+        let is_symlink = entry.file_type().is_ok_and(|kind| kind.is_symlink());
+        let metadata = if is_symlink {
+            fs::metadata(&path).ok()
+        } else {
+            need_metadata.then(|| entry.metadata().ok()).flatten()
+        };
+        let is_dir = metadata
+            .as_ref()
+            .map(fs::Metadata::is_dir)
+            .unwrap_or_else(|| dir_entry_is_directory(&entry));
+        entry_metadata.insert(
+            path.clone(),
+            NavigationMetadata {
+                is_dir,
+                modified: metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.modified().ok()),
+                size: metadata.as_ref().map(fs::Metadata::len),
+            },
+        );
         if dir_entry_is_browser_file(&entry, &path) {
             raw_files.push(path.clone());
         }
@@ -1388,8 +1547,8 @@ fn scan_real_directory_listing(dir: &Path, sort: NavigationSortOption) -> Direct
         }
     }
 
-    sort_paths(&mut raw_files, sort);
-    sort_paths(&mut raw_dirs, sort);
+    sort_real_paths(&mut raw_files, sort, &entry_metadata);
+    sort_real_paths(&mut raw_dirs, sort, &entry_metadata);
     let first_file = raw_files
         .iter()
         .find_map(|path| first_supported_path_for_entry(path, sort));
@@ -1405,6 +1564,35 @@ fn scan_real_directory_listing(dir: &Path, sort: NavigationSortOption) -> Direct
         files: Vec::new(),
         files_expanded: false,
         dirs: raw_dirs,
+        entry_metadata,
+    }
+}
+
+fn sort_real_paths(
+    paths: &mut [PathBuf],
+    sort: NavigationSortOption,
+    metadata: &HashMap<PathBuf, NavigationMetadata>,
+) {
+    match sort {
+        NavigationSortOption::Date => paths.sort_by_cached_key(|path| {
+            (
+                metadata
+                    .get(path)
+                    .and_then(|entry| entry.modified)
+                    .unwrap_or(SystemTime::UNIX_EPOCH),
+                file_name_sort_key(path),
+            )
+        }),
+        NavigationSortOption::Size => paths.sort_by_cached_key(|path| {
+            (
+                metadata
+                    .get(path)
+                    .and_then(|entry| entry.size)
+                    .unwrap_or_default(),
+                file_name_sort_key(path),
+            )
+        }),
+        _ => sort_paths(paths, sort),
     }
 }
 

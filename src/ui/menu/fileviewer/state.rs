@@ -4,6 +4,7 @@ use std::time::SystemTime;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FilerMetadata {
+    pub(crate) is_directory: bool,
     pub(crate) size: Option<u64>,
     pub(crate) modified: Option<SystemTime>,
 }
