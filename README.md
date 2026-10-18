@@ -1,4 +1,4 @@
-# wml2viewer 0.0.23
+# wml2viewer 0.0.24
 
 A lightweight native image viewer built with `egui` and `wml2`.
 
@@ -36,7 +36,7 @@ wml2viewer --clean system Reset configuration
 
 ### Android 10+
 
-Android 0.0.23 is a mobile-first Jetpack Compose application. It accesses selected folders directly through the Storage Access Framework, supports SMB2/3 sources, uses a dedicated 3×3 touch map and phone/tablet layouts, and keeps the desktop UI and `config.toml` unchanged. Passwords are encrypted with an Android Keystore key and are never passed to Rust.
+Android 0.0.24 is a mobile-first Jetpack Compose application. It accesses selected folders directly through the Storage Access Framework, supports SMB2/3 sources, uses a dedicated 3×3 touch map and phone/tablet layouts, and keeps the desktop UI and `config.toml` unchanged. Passwords are encrypted with an Android Keystore key and are never passed to Rust.
 
 Build prerequisites are JDK 17, Android SDK 36, NDK r27c (`27.2.12479018`), the Rust Android targets, and `cargo-ndk`. The repository includes the Gradle 9.1.0 Wrapper and uses AGP 9.0.1.
 
@@ -106,3 +106,4 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 2026-08-30 0.0.21 released, optional native AVIF decoding and CI action updates
 - 2026-10-04 0.0.22 released, desktop UI updates, synchronized filer/navigation, image transitions, recursive manga navigation, and preload/animation fixes
 - 2026-10-10 0.0.23 released, upgraded to crates.io WML2 0.0.33 while preserving bounded and cancellable animation decoding
+- 2026-10-18 0.0.24 released, added EXIF Orientation support and accelerated image navigation in large SMB folders
