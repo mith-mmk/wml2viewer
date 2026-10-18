@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- 内蔵デコーダのEXIF Orientation（1〜8）を表示・サムネイルへ反映し、回転後の縦横サイズとアニメーションの全フレームを統一
+
 ## [0.0.23] - 2026-10-10
 
 ### Changed
