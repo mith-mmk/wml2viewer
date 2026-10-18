@@ -46,6 +46,41 @@ fn make_lha_with_entries(path: &Path, entries: &[(&str, &[u8])]) {
 }
 
 #[test]
+fn recursive_sort_uses_scanned_types_sizes_and_dates_without_reopening_entries() {
+    for sort in [
+        NavigationSortOption::OsName,
+        NavigationSortOption::Size,
+        NavigationSortOption::Date,
+    ] {
+        let root = make_temp_dir();
+        let folder = root.join("zz-folder");
+        let large = root.join("a.webp");
+        let small = root.join("z.webp");
+        fs::create_dir(&folder).unwrap();
+        fs::write(&large, [0; 4]).unwrap();
+        fs::write(&small, [0; 1]).unwrap();
+        set_file_mtime(&large, FileTime::from_unix_time(200, 0)).unwrap();
+        set_file_mtime(&small, FileTime::from_unix_time(100, 0)).unwrap();
+        // Flat and recursive sorts can differ. Preserve the metadata required by both.
+        let mut cache = FilesystemCache {
+            recursive_order: RecursiveOrder {
+                sort,
+                ..RecursiveOrder::default()
+            },
+            ..FilesystemCache::default()
+        };
+        let _ = cache.listing(&root);
+        fs::remove_dir_all(&root).unwrap();
+        let expected = if sort == NavigationSortOption::OsName {
+            vec![folder.clone(), large.clone(), small.clone()]
+        } else {
+            vec![folder.clone(), small.clone(), large.clone()]
+        };
+        assert_eq!(cache.recursive_children(&root), expected, "{sort:?}");
+    }
+}
+
+#[test]
 fn worker_neighbors_follow_navigation_and_refresh_without_moving_current() {
     let root = make_temp_dir();
     let pages =
@@ -211,6 +246,7 @@ fn recursive_spread_at_end_does_not_commit_the_already_displayed_companion() {
             first_file: Some(pages[0].clone()),
             last_file: Some(pages[1].clone()),
             dirs: Vec::new(),
+            entry_metadata: HashMap::new(),
         },
     );
     cache
