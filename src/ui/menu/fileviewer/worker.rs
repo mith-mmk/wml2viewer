@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::time::{Duration, Instant};
 
 pub(crate) enum FilerCommand {
     Cancel {
@@ -209,6 +210,7 @@ fn scan_real_directory_request(
 ) -> Vec<FilerEntry> {
     let mut entries = Vec::new();
     let mut preview_chunk = Vec::new();
+    let mut last_preview_at = Instant::now();
     let Ok(read_dir) = fs::read_dir(dir) else {
         return entries;
     };
@@ -226,7 +228,10 @@ fn scan_real_directory_request(
         let entry = build_real_filer_entry(&dir_entry, path, label, archive_as_container_in_sort);
         preview_chunk.push(entry.clone());
         entries.push(entry);
-        if preview_chunk.len() >= 64 {
+        if entries.len() == 1
+            || preview_chunk.len() >= 64
+            || last_preview_at.elapsed() >= Duration::from_millis(100)
+        {
             if request_is_stale(latest_request_id, request_id) {
                 return Vec::new();
             }
@@ -234,6 +239,7 @@ fn scan_real_directory_request(
                 request_id,
                 entries: std::mem::take(&mut preview_chunk),
             });
+            last_preview_at = Instant::now();
         }
     }
     if request_is_stale(latest_request_id, request_id) {
@@ -281,6 +287,7 @@ fn build_real_filer_entry(
     let sort_as_container = is_dir || is_listed || (archive_as_container_in_sort && is_archive);
     let metadata = metadata
         .map(|metadata| FilerMetadata {
+            is_directory: is_dir,
             size: metadata.is_file().then_some(metadata.len()),
             modified: metadata.modified().ok(),
         })
@@ -346,6 +353,7 @@ fn build_filer_entry(path: PathBuf, archive_as_container_in_sort: bool) -> Filer
     let metadata = fs::metadata(&path)
         .ok()
         .map(|metadata| FilerMetadata {
+            is_directory: metadata.is_dir(),
             size: metadata.is_file().then_some(metadata.len()),
             modified: metadata.modified().ok(),
         })

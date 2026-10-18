@@ -1079,7 +1079,7 @@ impl ViewerApp {
                             rect.center(),
                             egui::vec2(icon_side, icon_side),
                         ),
-                        if entry.path.is_dir() {
+                        if entry.metadata.is_directory {
                             SvgIcon::Folder
                         } else {
                             SvgIcon::Archive

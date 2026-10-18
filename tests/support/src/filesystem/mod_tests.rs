@@ -46,6 +46,82 @@ fn make_lha_with_entries(path: &Path, entries: &[(&str, &[u8])]) {
 }
 
 #[test]
+fn worker_neighbors_follow_navigation_and_refresh_without_moving_current() {
+    let root = make_temp_dir();
+    let pages =
+        ["001.webp", "002.webp", "003.webp", "004.webp", "005.webp"].map(|name| root.join(name));
+    for page in &pages[..4] {
+        fs::write(page, []).unwrap();
+    }
+    let sort = NavigationSortOption::OsName;
+    let (tx, rx) = spawn_filesystem_worker(sort, RecursiveOrder::default());
+    let recv = || rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+    tx.send(FilesystemCommand::Init {
+        request_id: 1,
+        path: pages[2].clone(),
+    })
+    .unwrap();
+    assert!(matches!(
+        recv(),
+        FilesystemResult::NavigatorReady { request_id: 1, .. }
+    ));
+    let FilesystemResult::NeighborsReady(neighbors) = recv() else {
+        panic!("missing neighbors")
+    };
+    assert_eq!(
+        neighbors.adjacent(&pages[2], sort, -2),
+        Some(pages[0].as_path())
+    );
+    assert_eq!(
+        neighbors.adjacent(&pages[2], sort, -1),
+        Some(pages[1].as_path())
+    );
+    assert_eq!(
+        neighbors.adjacent(&pages[2], sort, 1),
+        Some(pages[3].as_path())
+    );
+    assert_eq!(neighbors.adjacent(&pages[2], sort, 2), None);
+    assert_eq!(neighbors.adjacent(&pages[1], sort, 1), None);
+    assert_eq!(
+        neighbors.adjacent(&pages[2], NavigationSortOption::Size, 1),
+        None
+    );
+    fs::write(&pages[4], []).unwrap();
+    tx.send(FilesystemCommand::RefreshNeighbors {
+        path: pages[2].clone(),
+    })
+    .unwrap();
+    let FilesystemResult::NeighborsReady(neighbors) = recv() else {
+        panic!("missing refreshed neighbors")
+    };
+    assert_eq!(
+        neighbors.adjacent(&pages[2], sort, 2),
+        Some(pages[4].as_path())
+    );
+    tx.send(FilesystemCommand::Next {
+        request_id: 2,
+        policy: EndOfFolderOption::Stop,
+    })
+    .unwrap();
+    let FilesystemResult::PathResolved {
+        navigation_path, ..
+    } = recv()
+    else {
+        panic!("missing next path")
+    };
+    assert_eq!(navigation_path, pages[3]);
+    let FilesystemResult::NeighborsReady(neighbors) = recv() else {
+        panic!("missing next neighbors")
+    };
+    assert_eq!(
+        neighbors.adjacent(&pages[3], sort, 1),
+        Some(pages[4].as_path())
+    );
+    drop(tx);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn recursive_navigation_continues_after_current_file_is_removed() {
     for forward in [true, false] {
         let root = make_temp_dir();

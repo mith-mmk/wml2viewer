@@ -101,6 +101,9 @@ enum PendingDirection {
 
 #[derive(Clone, Debug)]
 pub enum FilesystemCommand {
+    RefreshNeighbors {
+        path: PathBuf,
+    },
     Init {
         request_id: u64,
         path: PathBuf,
@@ -130,6 +133,7 @@ pub enum FilesystemCommand {
 }
 
 pub enum FilesystemResult {
+    NeighborsReady(NavigationNeighbors),
     NavigatorReady {
         request_id: u64,
         navigation_path: Option<PathBuf>,
@@ -144,6 +148,48 @@ pub enum FilesystemResult {
     NoPath {
         request_id: u64,
     },
+}
+
+#[derive(Clone, Debug)]
+pub struct NavigationNeighbors {
+    pub path: PathBuf,
+    pub sort: NavigationSortOption,
+    pub directory: Option<PathBuf>,
+    neighbors: [Option<PathBuf>; 4],
+    same_branch: [bool; 4],
+}
+
+impl NavigationNeighbors {
+    pub fn adjacent_in_same_branch(
+        &self,
+        path: &Path,
+        sort: NavigationSortOption,
+        step: isize,
+    ) -> Option<&Path> {
+        let index = match step {
+            -2 => 0,
+            -1 => 1,
+            1 => 2,
+            2 => 3,
+            _ => return None,
+        };
+        self.adjacent(path, sort, step)
+            .filter(|_| self.same_branch[index])
+    }
+
+    pub fn adjacent(&self, path: &Path, sort: NavigationSortOption, step: isize) -> Option<&Path> {
+        if self.path != path || self.sort != sort {
+            return None;
+        }
+        let index = match step {
+            -2 => 0,
+            -1 => 1,
+            1 => 2,
+            2 => 3,
+            _ => return None,
+        };
+        self.neighbors[index].as_deref()
+    }
 }
 
 impl FileNavigator {
@@ -170,6 +216,9 @@ impl FileNavigator {
     }
 
     fn set_current_input(&mut self, path: PathBuf, cache: &mut FilesystemCache) {
+        if self.current_path == path {
+            return;
+        }
         let Some(navigation_path) = resolve_navigation_path(&path, cache) else {
             return;
         };
@@ -202,6 +251,28 @@ impl FileNavigator {
         }
 
         self.files.as_deref().unwrap_or(&[])
+    }
+
+    fn neighbors(&mut self, cache: &mut FilesystemCache) -> NavigationNeighbors {
+        self.ensure_files(cache);
+        let directory = navigation_branch_path(&self.current_path);
+        let neighbors = [-2_isize, -1, 1, 2].map(|step| {
+            self.current
+                .checked_add_signed(step)
+                .and_then(|index| self.files.as_ref()?.get(index).cloned())
+        });
+        let same_branch = std::array::from_fn(|index| {
+            neighbors[index]
+                .as_ref()
+                .is_some_and(|path| navigation_branch_path(path) == directory)
+        });
+        NavigationNeighbors {
+            path: self.current_path.clone(),
+            sort: cache.sort,
+            directory,
+            neighbors,
+            same_branch,
+        }
     }
 
     fn next(&mut self, cache: &mut FilesystemCache) -> Option<PathBuf> {
@@ -665,7 +736,17 @@ pub fn spawn_filesystem_worker(
 
         while let Ok(command) = command_rx.recv() {
             match command {
+                FilesystemCommand::RefreshNeighbors { path } => {
+                    if let Some(nav) = navigator.as_mut().filter(|nav| nav.current() == path) {
+                        if let Some(dir) = flat_container_dir(&path) {
+                            cache.refresh_listing(&dir);
+                            nav.files = None;
+                        }
+                    }
+                }
                 FilesystemCommand::Init { request_id, path } => {
+                    cache.listings_by_dir.clear();
+                    cache.recursive_children_by_dir.clear();
                     log_global_bench_event(
                         "filesystem.init.begin",
                         serde_json::json!({
@@ -784,6 +865,11 @@ pub fn spawn_filesystem_worker(
                         navigation_outcome_to_target(outcome),
                     );
                 }
+            }
+            // Reuse the navigator's listing; the UI must never rescan a slow share
+            // to plan preloads or a manga companion.
+            if let Some(nav) = navigator.as_mut() {
+                let _ = result_tx.send(FilesystemResult::NeighborsReady(nav.neighbors(&mut cache)));
             }
         }
     });

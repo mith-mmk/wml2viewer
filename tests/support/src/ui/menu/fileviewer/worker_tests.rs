@@ -140,12 +140,22 @@ fn real_directory_preview_and_snapshot_keep_entries_and_metadata() {
         "",
         NameSortMode::Os,
     );
+    let first_preview = match rx.try_recv().unwrap() {
+        FilerResult::Append { entries, .. } => entries,
+        _ => panic!("expected immediate preview"),
+    };
+    assert_eq!(
+        first_preview.len(),
+        1,
+        "do not wait for 64 entries on a slow share"
+    );
     let preview = rx
         .try_iter()
         .flat_map(|result| match result {
             FilerResult::Append { entries, .. } => entries,
             _ => Vec::new(),
         })
+        .chain(first_preview)
         .collect::<Vec<_>>();
     assert_eq!(
         entries
@@ -162,5 +172,7 @@ fn real_directory_preview_and_snapshot_keep_entries_and_metadata() {
     assert_eq!(preview_names, vec!["a.png", "folder", "z.png"]);
     assert_eq!(entries[1].metadata.size, Some(1));
     assert_eq!(entries[2].metadata.size, Some(3));
+    assert!(entries[0].metadata.is_directory);
+    assert!(!entries[1].metadata.is_directory);
     std::fs::remove_dir_all(&dir).unwrap();
 }
