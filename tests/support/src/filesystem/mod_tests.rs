@@ -6,7 +6,6 @@ use crate::dependent::plugins::{
 use filetime::{FileTime, set_file_mtime};
 use oxiarc_archive::LzhWriter;
 use std::io::Write;
-use std::sync::{Mutex, OnceLock};
 use zip::write::SimpleFileOptions;
 
 const TINY_PNG: &[u8] = &[
@@ -19,11 +18,6 @@ const TINY_PNG: &[u8] = &[
 
 fn make_temp_dir() -> std::path::PathBuf {
     crate::test_support::make_test_dir("nav")
-}
-
-fn plugin_runtime_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 fn make_zip_with_entries(path: &Path, names: &[&str]) {
@@ -1123,7 +1117,7 @@ fn next_refreshes_stale_directory_listing_before_recursive_branch_change() {
 
 #[test]
 fn plugin_enabled_extensions_are_visible_to_filer() {
-    let _guard = plugin_runtime_lock()
+    let _guard = crate::test_support::plugin_runtime_lock()
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
     set_runtime_plugin_config(PluginConfig {

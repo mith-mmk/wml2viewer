@@ -4,7 +4,8 @@ use std::io;
 use std::path::Path;
 
 use crate::dependent::plugins::{
-    decode_image_from_bytes_with_plugins, decode_image_from_file_with_plugins,
+    decode_format_preference, decode_image_from_bytes_with_plugins,
+    decode_image_from_file_with_plugins, has_format_preferences,
 };
 use crate::wml2_formats::available_save_formats;
 use wml2viewer_core::image::{
@@ -119,6 +120,12 @@ impl std::fmt::Display for SaveFormat {
 }
 
 pub fn load_canvas_from_file(path: &Path) -> Result<LoadedImage> {
+    if has_format_preferences() {
+        let data = std::fs::read(path)?;
+        if let Some(image) = decode_format_preference(&data, Some(path)) {
+            return Ok(image);
+        }
+    }
     load_canvas_from_file_internal(path).or_else(|_| {
         decode_image_from_file_with_plugins(path)
             .ok_or_else(|| Box::new(io::Error::other("no plugin decoder succeeded")) as _)
@@ -134,6 +141,9 @@ pub fn load_canvas_from_bytes_with_hint(
     data: &[u8],
     path_hint: Option<&Path>,
 ) -> Result<LoadedImage> {
+    if let Some(image) = decode_format_preference(data, path_hint) {
+        return Ok(image);
+    }
     load_canvas_from_bytes_internal(data).or_else(|_| {
         decode_image_from_bytes_with_plugins(data, path_hint)
             .ok_or_else(|| Box::new(io::Error::other("no plugin decoder succeeded")) as _)

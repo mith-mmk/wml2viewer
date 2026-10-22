@@ -405,6 +405,96 @@ impl ViewerApp {
     fn settings_plugins_tab(&mut self, ui: &mut egui::Ui, draft_state: &mut SettingsDraftState) {
         let draft = &mut draft_state.config;
         style::settings_card(ui, |ui| {
+            let japanese = self.applied_locale.starts_with("ja");
+            ui.heading(if japanese {
+                "画像形式ごとの優先デコーダー"
+            } else {
+                "Preferred decoder by image format"
+            });
+            let inherit = if japanese {
+                "共通設定を継承"
+            } else {
+                "Inherit global settings"
+            };
+            ui.label(if japanese {
+                "有効なプラグインを優先します。利用できない場合は従来の読込順に戻ります。"
+            } else {
+                "Prefer an enabled plugin. If unavailable, use the existing decode fallback."
+            });
+            egui::Grid::new("format_decoder_overrides")
+                .num_columns(2)
+                .show(ui, |ui| {
+                    for &(label, mime) in crate::dependent::plugins::PLUGIN_FORMATS {
+                        ui.label(label);
+                        let mut selected =
+                            draft.plugins.format_decoder(mime).unwrap_or("").to_string();
+                        let previous = selected.clone();
+                        egui::ComboBox::from_id_salt(("format_decoder", mime))
+                            .selected_text(if selected.is_empty() {
+                                inherit
+                            } else {
+                                &selected
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut selected, String::new(), inherit);
+                                ui.selectable_value(
+                                    &mut selected,
+                                    "internal".to_string(),
+                                    "internal",
+                                );
+                                ui.add_enabled_ui(draft.plugins.ffmpeg.enable, |ui| {
+                                    ui.selectable_value(
+                                        &mut selected,
+                                        "ffmpeg".to_string(),
+                                        "ffmpeg",
+                                    );
+                                });
+                                ui.add_enabled_ui(
+                                    cfg!(target_os = "windows") && draft.plugins.system.enable,
+                                    |ui| {
+                                        ui.selectable_value(
+                                            &mut selected,
+                                            "system".to_string(),
+                                            "system (Windows)",
+                                        );
+                                    },
+                                );
+                                ui.add_enabled_ui(
+                                    cfg!(all(target_os = "windows", target_arch = "x86_64"))
+                                        && draft.plugins.susie64.enable,
+                                    |ui| {
+                                        ui.selectable_value(
+                                            &mut selected,
+                                            "susie64".to_string(),
+                                            "susie64 (Windows x64)",
+                                        );
+                                    },
+                                );
+                            });
+                        if selected != previous {
+                            draft.plugins.set_format_decoder(
+                                mime,
+                                if selected.is_empty() {
+                                    None
+                                } else {
+                                    Some(&selected)
+                                },
+                            );
+                        }
+                        ui.end_row();
+                    }
+                });
+            if ui
+                .button(if japanese {
+                    "形式別設定をすべて解除"
+                } else {
+                    "Reset all format overrides"
+                })
+                .clicked()
+            {
+                draft.plugins.formats.clear();
+            }
+            ui.separator();
             ui.horizontal(|ui| {
                 ui.label("internal priority");
                 ui.add(

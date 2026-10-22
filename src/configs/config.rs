@@ -1296,3 +1296,34 @@ impl From<NavigationSortOption> for NavigationSortConfigFile {
         }
     }
 }
+
+#[cfg(test)]
+mod format_plugin_tests {
+    use super::*;
+
+    #[test]
+    fn old_config_and_format_overrides_roundtrip() {
+        let old: ConfigFile = toml::from_str(
+            "[plugins]\ninternal_priority = 250\n[plugins.ffmpeg]\nenable = true\npriority = 450\n",
+        )
+        .unwrap();
+        assert!(old.plugins.formats.is_empty());
+        assert_eq!(old.plugins.internal_priority, 250);
+        assert!(old.plugins.ffmpeg.enable);
+        let mut app: AppConfig = old.into();
+        app.plugins.set_format_decoder("image/jpeg", Some("ffmpeg"));
+        let serialized = toml::to_string(&ConfigFile::from(app.clone())).unwrap();
+        let restored: AppConfig = toml::from_str::<ConfigFile>(&serialized).unwrap().into();
+        assert_eq!(restored.plugins, app.plugins);
+        app.plugins.set_format_decoder("image/jpeg", None);
+        let serialized = toml::to_string(&ConfigFile::from(app)).unwrap();
+        assert!(!serialized.contains("plugins.formats"));
+        assert!(
+            toml::from_str::<ConfigFile>(&serialized)
+                .unwrap()
+                .plugins
+                .formats
+                .is_empty()
+        );
+    }
+}

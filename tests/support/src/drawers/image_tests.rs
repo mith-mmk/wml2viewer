@@ -14,6 +14,9 @@ fn repo_root() -> PathBuf {
 #[cfg(target_os = "windows")]
 #[test]
 fn plugin_decode_is_visible_from_viewer_load_path() {
+    let _guard = crate::test_support::plugin_runtime_lock()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let config = PluginConfig {
         ffmpeg: PluginProviderConfig {
             enable: true,

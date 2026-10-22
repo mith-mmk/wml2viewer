@@ -4,7 +4,7 @@ mod system;
 
 use crate::drawers::image::LoadedImage;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -13,6 +13,9 @@ use std::sync::{Mutex, OnceLock};
 #[serde(default)]
 pub struct PluginConfig {
     pub internal_priority: i32,
+    /// Preferred decoder per MIME type (or extension alias); absent entries inherit legacy behavior.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub formats: BTreeMap<String, String>,
     pub susie64: PluginProviderConfig,
     pub system: PluginProviderConfig,
     pub ffmpeg: PluginProviderConfig,
@@ -22,6 +25,7 @@ impl Default for PluginConfig {
     fn default() -> Self {
         Self {
             internal_priority: 300,
+            formats: BTreeMap::new(),
             susie64: susie64::default_provider(),
             system: system::default_provider(),
             ffmpeg: ffmpeg::default_provider(),
@@ -95,6 +99,137 @@ struct DecodeCandidate {
 #[derive(Clone)]
 struct DecodeInput {
     mime: Option<&'static str>,
+}
+
+/// Formats supported by the existing plugin MIME/extension routing.
+pub const PLUGIN_FORMATS: &[(&str, &str)] = &[
+    ("PNG", "image/png"),
+    ("JPEG", "image/jpeg"),
+    ("GIF", "image/gif"),
+    ("BMP", "image/bmp"),
+    ("WebP", "image/webp"),
+    ("AVIF", "image/avif"),
+    ("JPEG 2000", "image/jp2"),
+    ("TIFF", "image/tiff"),
+    ("ICO", "image/x-icon"),
+    ("MAG", "image/x-mag"),
+    ("MAKI", "image/x-maki"),
+    ("PI", "image/x-pi"),
+    ("PIC", "image/x-pic"),
+    ("VSP", "image/x-vsp"),
+    ("Photo CD", "image/x-photo-cd"),
+    ("HEIF / HEIC", "image/heif"),
+    ("JPEG XR", "image/jxr"),
+];
+
+fn canonical_format(value: &str) -> Option<&'static str> {
+    let value = value.trim().to_ascii_lowercase();
+    PLUGIN_FORMATS
+        .iter()
+        .find(|(_, mime)| *mime == value)
+        .map(|(_, mime)| *mime)
+        .or_else(|| {
+            mime_from_path(&PathBuf::from(format!(
+                "image.{}",
+                value.trim_start_matches('.')
+            )))
+        })
+}
+
+impl PluginConfig {
+    pub fn format_decoder(&self, mime: &str) -> Option<&str> {
+        self.formats
+            .get(mime)
+            .or_else(|| {
+                self.formats
+                    .iter()
+                    .find(|(key, _)| canonical_format(key) == Some(mime))
+                    .map(|(_, value)| value)
+            })
+            .map(String::as_str)
+    }
+
+    /// Removing all aliases also makes resetting a hand-edited configuration reliable.
+    pub fn set_format_decoder(&mut self, mime: &str, decoder: Option<&str>) {
+        self.formats
+            .retain(|key, _| canonical_format(key) != Some(mime));
+        if let Some(decoder) = decoder {
+            self.formats.insert(mime.to_string(), decoder.to_string());
+        }
+    }
+}
+
+fn detected_mime(data: &[u8], hint: Option<&Path>) -> Option<&'static str> {
+    use wml2::util::{ImageFormat, format_check};
+    // Use the same signature detection as the internal decoder; extension is only a fallback.
+    match format_check(data) {
+        ImageFormat::Png => Some("image/png"),
+        ImageFormat::Jpeg => Some("image/jpeg"),
+        ImageFormat::Gif => Some("image/gif"),
+        ImageFormat::Bmp => Some("image/bmp"),
+        ImageFormat::Webp => Some("image/webp"),
+        ImageFormat::Tiff => Some("image/tiff"),
+        ImageFormat::Ico => Some("image/x-icon"),
+        ImageFormat::Mag => Some("image/x-mag"),
+        ImageFormat::Maki => Some("image/x-maki"),
+        ImageFormat::Pi => Some("image/x-pi"),
+        ImageFormat::Pic => Some("image/x-pic"),
+        ImageFormat::Vsp => Some("image/x-vsp"),
+        ImageFormat::Pcd => Some("image/x-photo-cd"),
+        #[cfg(feature = "avif")]
+        ImageFormat::Avif => Some("image/avif"),
+        _ => hint.and_then(mime_from_path),
+    }
+}
+
+fn preferred_candidates(config: &PluginConfig, mime: &'static str) -> Vec<DecodeCandidate> {
+    let preferred = match config.format_decoder(mime) {
+        Some("internal") => ProviderKind::Internal,
+        Some("system") => ProviderKind::System,
+        Some("ffmpeg") => ProviderKind::Ffmpeg,
+        Some("susie64") => ProviderKind::Susie64,
+        _ => return Vec::new(), // Unknown or removed providers inherit the old behavior.
+    };
+    decode_candidates(config, &DecodeInput { mime: Some(mime) })
+        .into_iter()
+        .filter(|candidate| candidate.provider == preferred)
+        .collect()
+}
+
+pub(crate) fn has_format_preferences() -> bool {
+    runtime_plugin_config()
+        .lock()
+        .map(|config| !config.formats.is_empty())
+        .unwrap_or(false)
+}
+
+/// Try only the explicit preference. The caller retains the existing internal-first fallback.
+pub(crate) fn decode_format_preference(data: &[u8], hint: Option<&Path>) -> Option<LoadedImage> {
+    let config = current_runtime_plugin_config();
+    if config.formats.is_empty() {
+        return None;
+    }
+    let mime = detected_mime(data, hint)?;
+    for candidate in preferred_candidates(&config, mime) {
+        let decoded = match candidate.provider {
+            ProviderKind::Internal => {
+                crate::drawers::image::load_canvas_from_bytes_internal(data).ok()
+            }
+            ProviderKind::System => {
+                system::decode_from_bytes(data, hint, candidate.module.as_ref())
+            }
+            ProviderKind::Ffmpeg => {
+                ffmpeg::decode_from_bytes(data, hint, &config.ffmpeg, candidate.module.as_ref())
+            }
+            ProviderKind::Susie64 => {
+                susie64::decode_from_bytes(data, hint, &config.susie64, candidate.module.as_ref())
+            }
+        };
+        if decoded.is_some() {
+            return decoded;
+        }
+    }
+    None
 }
 
 pub fn set_runtime_plugin_config(config: PluginConfig) {
@@ -439,6 +574,13 @@ fn mime_from_path(path: &Path) -> Option<&'static str> {
         .and_then(OsStr::to_str)
         .map(|value| value.to_ascii_lowercase())?;
     match ext.as_str() {
+        "ico" => Some("image/x-icon"),
+        "mag" => Some("image/x-mag"),
+        "maki" => Some("image/x-maki"),
+        "pi" => Some("image/x-pi"),
+        "pic" => Some("image/x-pic"),
+        "vsp" => Some("image/x-vsp"),
+        "pcd" => Some("image/x-photo-cd"),
         "png" => Some("image/png"),
         "jpg" | "jpeg" => Some("image/jpeg"),
         "gif" => Some("image/gif"),
@@ -447,6 +589,8 @@ fn mime_from_path(path: &Path) -> Option<&'static str> {
         "avif" => Some("image/avif"),
         "jp2" | "j2k" | "jpc" | "j2c" | "jpf" => Some("image/jp2"),
         "tif" | "tiff" => Some("image/tiff"),
+        "heif" | "heic" => Some("image/heif"),
+        "jxr" | "wdp" | "hdp" => Some("image/jxr"),
         _ => None,
     }
 }
