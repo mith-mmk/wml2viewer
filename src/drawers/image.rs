@@ -1,6 +1,5 @@
 //! Helpers for decoding `wml2` images into the viewer-side canvas model.
 
-use std::io;
 use std::path::Path;
 
 use crate::dependent::plugins::{
@@ -119,9 +118,8 @@ impl std::fmt::Display for SaveFormat {
 }
 
 pub fn load_canvas_from_file(path: &Path) -> Result<LoadedImage> {
-    load_canvas_from_file_internal(path).or_else(|_| {
+    with_plugin_fallback(load_canvas_from_file_internal(path), || {
         decode_image_from_file_with_plugins(path)
-            .ok_or_else(|| Box::new(io::Error::other("no plugin decoder succeeded")) as _)
     })
 }
 
@@ -134,10 +132,17 @@ pub fn load_canvas_from_bytes_with_hint(
     data: &[u8],
     path_hint: Option<&Path>,
 ) -> Result<LoadedImage> {
-    load_canvas_from_bytes_internal(data).or_else(|_| {
+    with_plugin_fallback(load_canvas_from_bytes_internal(data), || {
         decode_image_from_bytes_with_plugins(data, path_hint)
-            .ok_or_else(|| Box::new(io::Error::other("no plugin decoder succeeded")) as _)
     })
+}
+
+fn with_plugin_fallback(
+    internal: Result<LoadedImage>,
+    fallback: impl FnOnce() -> Option<LoadedImage>,
+) -> Result<LoadedImage> {
+    // Preserve the original error and its type when plugins cannot decode it.
+    internal.or_else(|error| fallback().ok_or(error))
 }
 
 pub(crate) fn load_canvas_from_file_internal(path: &Path) -> Result<LoadedImage> {

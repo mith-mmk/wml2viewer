@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.0.25] - 2026-10-23
+
+### Changed
+
+- Upgrade the desktop and shared core dependency to published WML2 0.0.39.
+
+### Fixed
+
+- Read JPEG images whose optional EXIF metadata previously stopped the built-in decoder; retain valid Orientation 1-8 and resource/error boundaries from WML2.
+- Preserve the original built-in decode or file error when no plugin succeeds, instead of replacing it with a generic plugin error.
+
 ## [0.0.24] - 2026-10-18
 
 ### Changed

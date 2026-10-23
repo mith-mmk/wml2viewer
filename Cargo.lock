@@ -539,20 +539,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "avif-rust"
-version = "0.0.7"
+name = "avif-image-buffer"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a863edf2a25c3c687063232b641f17d0402724d8cc1c9a6d8a244a335558a3f1"
+checksum = "7f064a888d7b2d2d78426fe473647c14281494f8994d1e4240d83cff37e5eafc"
+
+[[package]]
+name = "avif-rust"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe0b5ee8b4698179b3bbb8b0fd86930846c9eb932451035f02ec2e723b1a4086"
 dependencies = [
+ "avif-image-buffer",
  "bin-rs",
 ]
 
 [[package]]
 name = "avifenc-rust"
-version = "0.0.7"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "581e1b4baea03045698790cc3c838f451e8e4c1f2c95b887894e1f6d1078f24c"
+checksum = "80045541ec22dbe49852c9319d9e194197eba23f84f2977ca80fdeaea908b723"
 dependencies = [
+ "avif-image-buffer",
  "gamut-bitstream",
  "gamut-core 0.1.0",
  "gamut-dsp",
@@ -1884,6 +1892,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "icc-profile"
+version = "0.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f93c7d669607293110355b9aa32c1aafc80d16c99a43f05117efb8faa8b1fdaf"
+dependencies = [
+ "bin-rs",
 ]
 
 [[package]]
@@ -5443,20 +5460,21 @@ dependencies = [
 
 [[package]]
 name = "wml2"
-version = "0.0.33"
+version = "0.0.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b635b3ca749d1262fe83fcf509e76b09966a9bc599dd8b5e391debd995665211"
+checksum = "a9bedb23d04222b93f714043ee414e0b2bbad04ab39e118e941d1cf689f6f1c9"
 dependencies = [
  "avif-rust",
  "avifenc-rust",
  "bin-rs",
+ "icc-profile",
  "miniz_oxide 0.7.4",
  "webp-rust",
 ]
 
 [[package]]
 name = "wml2viewer"
-version = "0.0.24"
+version = "0.0.25"
 dependencies = [
  "chrono",
  "delharc",
@@ -5482,7 +5500,7 @@ dependencies = [
 
 [[package]]
 name = "wml2viewer-android"
-version = "0.0.24"
+version = "0.0.25"
 dependencies = [
  "jni",
  "wml2viewer-mobile-bridge",
@@ -5490,7 +5508,7 @@ dependencies = [
 
 [[package]]
 name = "wml2viewer-core"
-version = "0.0.24"
+version = "0.0.25"
 dependencies = [
  "bin-rs",
  "oxiarc-archive",
@@ -5501,14 +5519,14 @@ dependencies = [
 
 [[package]]
 name = "wml2viewer-ios"
-version = "0.0.24"
+version = "0.0.25"
 dependencies = [
  "wml2viewer-mobile-bridge",
 ]
 
 [[package]]
 name = "wml2viewer-mobile-bridge"
-version = "0.0.24"
+version = "0.0.25"
 dependencies = [
  "wml2viewer-core",
 ]
