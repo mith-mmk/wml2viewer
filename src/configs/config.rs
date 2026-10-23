@@ -1313,7 +1313,14 @@ mod format_plugin_tests {
         let mut app: AppConfig = old.into();
         app.plugins.set_format_decoder("image/jpeg", Some("ffmpeg"));
         let serialized = toml::to_string(&ConfigFile::from(app.clone())).unwrap();
-        let restored: AppConfig = toml::from_str::<ConfigFile>(&serialized).unwrap().into();
+        let dir = crate::test_support::make_test_dir("format-config");
+        let path = dir.join("settings.toml");
+        std::fs::write(&path, &serialized).unwrap();
+        // Recreate AppConfig from disk, as a fresh process does on startup.
+        let restored: AppConfig =
+            toml::from_str::<ConfigFile>(&std::fs::read_to_string(&path).unwrap())
+                .unwrap()
+                .into();
         assert_eq!(restored.plugins, app.plugins);
         app.plugins.set_format_decoder("image/jpeg", None);
         let serialized = toml::to_string(&ConfigFile::from(app)).unwrap();
@@ -1325,5 +1332,6 @@ mod format_plugin_tests {
                 .formats
                 .is_empty()
         );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

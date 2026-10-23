@@ -1,4 +1,4 @@
-# wml2viewer 0.0.24
+# wml2viewer 0.0.25
 
 - `egui` と `wml2` を使った軽量ネイティブ画像ビューアです。
 
@@ -39,7 +39,7 @@ wml2viewer
 
 ### Android 10以降
 
-Android 0.0.24はJetpack Composeで全面再実装したモバイル専用アプリです。Storage Access Frameworkで選択ツリーを直接参照し、SMB2/3、3×3位置タッチ、スマホ/タブレット別UIに対応します。デスクトップUIと`config.toml`は変更しません。SMBパスワードはAndroid Keystore鍵で暗号化し、Rustへ渡しません。
+Android 0.0.25はJetpack Composeで全面再実装したモバイル専用アプリです。Storage Access Frameworkで選択ツリーを直接参照し、SMB2/3、3×3位置タッチ、スマホ/タブレット別UIに対応します。デスクトップUIと`config.toml`は変更しません。SMBパスワードはAndroid Keystore鍵で暗号化し、Rustへ渡しません。
 
 必要環境はJDK 17、Android SDK 36、NDK r27c（`27.2.12479018`）、RustのAndroidターゲット、`cargo-ndk`です。Gradle 9.1.0 WrapperとAGP 9.0.1を使用します。
 
@@ -107,3 +107,4 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 2026-10-04: 0.0.22 公開、デスクトップUI更新、ファイラー・ナビゲーション同期、画像切り替え効果、再帰見開き送り、先読み・アニメーションの不具合修正
 - 2026-10-10: 0.0.23 公開、crates.ioのWML2 0.0.33へ更新し、上限付き・キャンセル可能なアニメーションデコードを維持
 - 2026-10-18: 0.0.24 公開、EXIF Orientation対応とSMB上の大量ファイルでの画像移動を高速化
+- 2026-10-23: 0.0.25, adopt WML2 0.0.39 JPEG/EXIF fixes and preserve original decoder errors

@@ -1,7 +1,8 @@
-use super::load_canvas_from_file;
+use super::{LoadedImage, load_canvas_from_file, with_plugin_fallback};
 use crate::dependent::plugins::{
     PluginConfig, PluginProviderConfig, discover_plugin_modules, set_runtime_plugin_config,
 };
+use crate::drawers::canvas::Canvas;
 use std::path::PathBuf;
 
 fn repo_root() -> PathBuf {
@@ -9,6 +10,43 @@ fn repo_root() -> PathBuf {
         .parent()
         .unwrap()
         .to_path_buf()
+}
+
+fn tiny_image() -> LoadedImage {
+    LoadedImage {
+        canvas: Canvas::new(1, 1),
+        animation: Vec::new(),
+        loop_count: None,
+    }
+}
+
+#[test]
+fn failed_plugin_fallback_preserves_the_original_decoder_error() {
+    let original = wml2viewer_core::CoreError::decode("synthetic decoder failure");
+    let error = with_plugin_fallback(Err(Box::new(original.clone())), || None).unwrap_err();
+    assert_eq!(error.to_string(), original.to_string());
+    assert_eq!(
+        error.downcast_ref::<wml2viewer_core::CoreError>(),
+        Some(&original)
+    );
+}
+
+#[test]
+fn built_in_success_does_not_invoke_plugins() {
+    let image = with_plugin_fallback(Ok(tiny_image()), || panic!("unexpected fallback")).unwrap();
+    assert_eq!((image.canvas.width(), image.canvas.height()), (1, 1));
+}
+
+#[test]
+fn successful_plugin_fallback_still_returns_its_image() {
+    let image = with_plugin_fallback(
+        Err(Box::new(wml2viewer_core::CoreError::decode(
+            "synthetic failure",
+        ))),
+        || Some(tiny_image()),
+    )
+    .unwrap();
+    assert_eq!((image.canvas.width(), image.canvas.height()), (1, 1));
 }
 
 #[cfg(target_os = "windows")]

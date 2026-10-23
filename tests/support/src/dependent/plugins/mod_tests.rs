@@ -252,3 +252,120 @@ fn viewer_file_and_bytes_use_preference_then_fallback() {
     );
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn unavailable_format_preferences_keep_builtin_pixels_and_original_errors() {
+    use crate::drawers::canvas::Canvas;
+    use crate::drawers::image::{
+        SaveFormat, load_canvas_from_bytes_with_hint, load_canvas_from_file, save_loaded_image,
+    };
+    let _guard = crate::test_support::plugin_runtime_lock()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    struct Restore(PluginConfig);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            set_runtime_plugin_config(self.0.clone());
+        }
+    }
+    let _restore = Restore(current_runtime_plugin_config());
+    let dir = crate::test_support::make_test_dir("format-fallback");
+    let input = dir.join("misleading.jpg");
+    save_loaded_image(
+        &input,
+        &LoadedImage {
+            canvas: Canvas::from_rgba(1, 1, vec![255, 0, 0, 255]).unwrap(),
+            animation: vec![],
+            loop_count: None,
+        },
+        SaveFormat::Png,
+    )
+    .unwrap();
+    let bytes = fs::read(&input).unwrap();
+    assert_eq!(detected_mime(&bytes, Some(&input)), Some("image/png"));
+    let mut config = PluginConfig::default();
+    config.system.enable = false;
+    config.susie64.enable = false;
+    config.ffmpeg.enable = false;
+    set_runtime_plugin_config(config.clone());
+    let invalid = dir.join("invalid.png");
+    fs::write(&invalid, b"invalid image").unwrap();
+    let original = load_canvas_from_file(&invalid).unwrap_err();
+    for provider in [
+        "internal",
+        "ffmpeg",
+        "system",
+        "susie64",
+        "removed-provider",
+    ] {
+        config.set_format_decoder("image/png", Some(provider));
+        set_runtime_plugin_config(config.clone());
+        assert_eq!(
+            load_canvas_from_file(&input).unwrap().canvas.buffer(),
+            &[255, 0, 0, 255]
+        );
+        assert_eq!(
+            load_canvas_from_bytes_with_hint(&bytes, None)
+                .unwrap()
+                .canvas
+                .buffer(),
+            &[255, 0, 0, 255]
+        );
+        let error = load_canvas_from_file(&invalid).unwrap_err();
+        assert_eq!(error.to_string(), original.to_string());
+        assert_eq!(
+            error.downcast_ref::<wml2viewer_core::CoreError>(),
+            original.downcast_ref::<wml2viewer_core::CoreError>()
+        );
+    }
+    config.set_format_decoder("image/png", None);
+    assert!(config.formats.is_empty());
+    #[cfg(target_os = "windows")]
+    {
+        config.system.enable = true;
+        config.set_format_decoder("image/png", Some("system"));
+        set_runtime_plugin_config(config.clone());
+        // This entry point tries only the preference: Some proves WIC ran,
+        // rather than a successful builtin fallback masking a routing failure.
+        assert_eq!(
+            decode_format_preference(&bytes, None)
+                .unwrap()
+                .canvas
+                .buffer(),
+            &[255, 0, 0, 255]
+        );
+        assert_eq!(
+            load_canvas_from_file(&input).unwrap().canvas.buffer(),
+            &[255, 0, 0, 255]
+        );
+        assert_eq!(
+            load_canvas_from_bytes_with_hint(&bytes, None)
+                .unwrap()
+                .canvas
+                .buffer(),
+            &[255, 0, 0, 255]
+        );
+        config.system.modules = vec![PluginModuleConfig {
+            enable: true,
+            ext: vec![PluginExtensionConfig {
+                enable: true,
+                mime: vec!["image/jpeg".into()],
+                modules: vec![],
+            }],
+            ..Default::default()
+        }];
+        set_runtime_plugin_config(config.clone());
+        assert!(decode_format_preference(&bytes, None).is_none());
+        assert_eq!(
+            load_canvas_from_file(&input).unwrap().canvas.buffer(),
+            &[255, 0, 0, 255]
+        );
+        config.set_format_decoder("image/png", None);
+    }
+    set_runtime_plugin_config(config);
+    assert_eq!(
+        load_canvas_from_file(&input).unwrap().canvas.buffer(),
+        &[255, 0, 0, 255]
+    );
+    fs::remove_dir_all(dir).unwrap();
+}

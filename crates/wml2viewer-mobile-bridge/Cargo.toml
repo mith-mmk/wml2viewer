@@ -1,6 +1,6 @@
 [package]
 name = "wml2viewer-mobile-bridge"
-version = "0.0.24"
+version = "0.0.25"
 edition = "2024"
 license = "MIT"
 description = "Platform-neutral native bridge state shared by mobile frontends"
