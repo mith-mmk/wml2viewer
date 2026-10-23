@@ -10,7 +10,7 @@ resolver = "2"
 
 [package]
 name = "wml2viewer"
-version = "0.0.24"
+version = "0.0.25"
 edition = "2024"
 
 license = "MIT"
@@ -29,7 +29,7 @@ toml = "0.8"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 oxiarc-archive = "=0.3.6"
 delharc = "0.6"
-wml2 = { version = "=0.0.33", features = ["multithread"] }
+wml2 = { version = "=0.0.39", features = ["multithread"] }
 wml2viewer-core = { path = "crates/wml2viewer-core" }
 directories = "6.0.0"
 encoding_rs = "0.8"
