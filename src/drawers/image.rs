@@ -124,6 +124,14 @@ pub fn load_canvas_from_file(path: &Path) -> Result<LoadedImage> {
         if let Some(image) = decode_format_preference(&data, Some(path)) {
             return Ok(image);
         }
+        // The preference probe already read the whole file. Reuse those bytes for
+        // the builtin fallback so a disabled or failing preference does not double
+        // network I/O or peak encoded-image memory.
+        let internal = load_canvas_from_encoded_bytes_internal(
+            &data,
+            path.extension().and_then(|extension| extension.to_str()),
+        );
+        return with_plugin_fallback(internal, || decode_image_from_file_with_plugins(path));
     }
     with_plugin_fallback(load_canvas_from_file_internal(path), || {
         decode_image_from_file_with_plugins(path)
@@ -157,17 +165,23 @@ fn with_plugin_fallback(
 
 pub(crate) fn load_canvas_from_file_internal(path: &Path) -> Result<LoadedImage> {
     let data = std::fs::read(path)?;
-    let image = decode(DecodeRequest {
-        bytes: &data,
-        format_hint: path.extension().and_then(|extension| extension.to_str()),
-    })?;
-    convert_image(image)
+    load_canvas_from_encoded_bytes_internal(
+        &data,
+        path.extension().and_then(|extension| extension.to_str()),
+    )
 }
 
 pub(crate) fn load_canvas_from_bytes_internal(data: &[u8]) -> Result<LoadedImage> {
+    load_canvas_from_encoded_bytes_internal(data, None)
+}
+
+fn load_canvas_from_encoded_bytes_internal(
+    data: &[u8],
+    format_hint: Option<&str>,
+) -> Result<LoadedImage> {
     let image = decode(DecodeRequest {
         bytes: data,
-        format_hint: None,
+        format_hint,
     })?;
     convert_image(image)
 }
