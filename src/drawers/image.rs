@@ -3,7 +3,8 @@
 use std::path::Path;
 
 use crate::dependent::plugins::{
-    decode_image_from_bytes_with_plugins, decode_image_from_file_with_plugins,
+    decode_format_preference, decode_image_from_bytes_with_plugins,
+    decode_image_from_file_with_plugins, has_format_preferences,
 };
 use crate::wml2_formats::available_save_formats;
 use wml2viewer_core::image::{
@@ -118,6 +119,20 @@ impl std::fmt::Display for SaveFormat {
 }
 
 pub fn load_canvas_from_file(path: &Path) -> Result<LoadedImage> {
+    if has_format_preferences() {
+        let data = std::fs::read(path)?;
+        if let Some(image) = decode_format_preference(&data, Some(path)) {
+            return Ok(image);
+        }
+        // The preference probe already read the whole file. Reuse those bytes for
+        // the builtin fallback so a disabled or failing preference does not double
+        // network I/O or peak encoded-image memory.
+        let internal = load_canvas_from_encoded_bytes_internal(
+            &data,
+            path.extension().and_then(|extension| extension.to_str()),
+        );
+        return with_plugin_fallback(internal, || decode_image_from_file_with_plugins(path));
+    }
     with_plugin_fallback(load_canvas_from_file_internal(path), || {
         decode_image_from_file_with_plugins(path)
     })
@@ -132,6 +147,9 @@ pub fn load_canvas_from_bytes_with_hint(
     data: &[u8],
     path_hint: Option<&Path>,
 ) -> Result<LoadedImage> {
+    if let Some(image) = decode_format_preference(data, path_hint) {
+        return Ok(image);
+    }
     with_plugin_fallback(load_canvas_from_bytes_internal(data), || {
         decode_image_from_bytes_with_plugins(data, path_hint)
     })
@@ -147,17 +165,23 @@ fn with_plugin_fallback(
 
 pub(crate) fn load_canvas_from_file_internal(path: &Path) -> Result<LoadedImage> {
     let data = std::fs::read(path)?;
-    let image = decode(DecodeRequest {
-        bytes: &data,
-        format_hint: path.extension().and_then(|extension| extension.to_str()),
-    })?;
-    convert_image(image)
+    load_canvas_from_encoded_bytes_internal(
+        &data,
+        path.extension().and_then(|extension| extension.to_str()),
+    )
 }
 
 pub(crate) fn load_canvas_from_bytes_internal(data: &[u8]) -> Result<LoadedImage> {
+    load_canvas_from_encoded_bytes_internal(data, None)
+}
+
+fn load_canvas_from_encoded_bytes_internal(
+    data: &[u8],
+    format_hint: Option<&str>,
+) -> Result<LoadedImage> {
     let image = decode(DecodeRequest {
         bytes: data,
-        format_hint: None,
+        format_hint,
     })?;
     convert_image(image)
 }

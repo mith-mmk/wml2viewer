@@ -82,11 +82,22 @@ pub(super) fn decode_from_bytes(
     config: &PluginProviderConfig,
     module: Option<&PluginModuleConfig>,
 ) -> Option<LoadedImage> {
+    decode_preferred_from_bytes(data, path_hint, config, module)
+        .or_else(|| load_canvas_from_path_or_bytes_internal(data, path_hint).ok())
+}
+
+// Let preference routing exhaust matching modules before the caller tries the builtin decoder.
+pub(super) fn decode_preferred_from_bytes(
+    data: &[u8],
+    path_hint: Option<&Path>,
+    config: &PluginProviderConfig,
+    module: Option<&PluginModuleConfig>,
+) -> Option<LoadedImage> {
     let input = temp_input_path(path_hint)?;
     std::fs::write(&input, data).ok()?;
     let decoded = decode_from_file(&input, config, module);
     let _ = std::fs::remove_file(&input);
-    decoded.or_else(|| load_canvas_from_path_or_bytes_internal(data, path_hint).ok())
+    decoded
 }
 
 fn find_ffmpeg_executable(
