@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.0.26] - 2026-10-24
+
+### Added
+
+- Add per-image-format preferred decoder settings for 17 desktop formats, with compatible `config.toml` persistence and automatic fallback when a provider is unavailable or fails.
+
+### Changed
+
+- Reuse the encoded bytes already read for a preferred-decoder probe when falling back to the built-in decoder, avoiding a second file or network read.
+
 ## [0.0.25] - 2026-10-23
 
 ### Changed

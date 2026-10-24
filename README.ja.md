@@ -1,4 +1,4 @@
-# wml2viewer 0.0.25
+# wml2viewer 0.0.26
 
 - `egui` と `wml2` を使った軽量ネイティブ画像ビューアです。
 
@@ -15,6 +15,7 @@
 - マルチプラットフォーム対応
 - zipファイルの直接閲覧
 - プラグイン機能 susie64 plugin(Windows)/os デコーダ(Windows)/ffmpegに対応
+- 画像形式ごとに優先デコーダーを選択でき、利用不能時は従来の読込順へ自動フォールバック
 - リステッドファイル(.wmltxt)によるブラウジング
 - マンガモード
 - 英語/日本語両対応(要フォント)
@@ -39,7 +40,7 @@ wml2viewer
 
 ### Android 10以降
 
-Android 0.0.25はJetpack Composeで全面再実装したモバイル専用アプリです。Storage Access Frameworkで選択ツリーを直接参照し、SMB2/3、3×3位置タッチ、スマホ/タブレット別UIに対応します。デスクトップUIと`config.toml`は変更しません。SMBパスワードはAndroid Keystore鍵で暗号化し、Rustへ渡しません。
+Android 0.0.26はJetpack Composeで全面再実装したモバイル専用アプリです。Storage Access Frameworkで選択ツリーを直接参照し、SMB2/3、3×3位置タッチ、スマホ/タブレット別UIに対応します。デスクトップUIと`config.toml`は変更しません。SMBパスワードはAndroid Keystore鍵で暗号化し、Rustへ渡しません。
 
 必要環境はJDK 17、Android SDK 36、NDK r27c（`27.2.12479018`）、RustのAndroidターゲット、`cargo-ndk`です。Gradle 9.1.0 WrapperとAGP 9.0.1を使用します。
 
@@ -108,3 +109,4 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 2026-10-10: 0.0.23 公開、crates.ioのWML2 0.0.33へ更新し、上限付き・キャンセル可能なアニメーションデコードを維持
 - 2026-10-18: 0.0.24 公開、EXIF Orientation対応とSMB上の大量ファイルでの画像移動を高速化
 - 2026-10-23: 0.0.25, adopt WML2 0.0.39 JPEG/EXIF fixes and preserve original decoder errors
+- 2026-10-24: 0.0.26、画像形式ごとの優先デコーダー設定、安全なフォールバック、内蔵デコードの単一読込化
