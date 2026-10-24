@@ -218,9 +218,12 @@ pub(crate) fn decode_format_preference(data: &[u8], hint: Option<&Path>) -> Opti
             ProviderKind::System => {
                 system::decode_from_bytes(data, hint, candidate.module.as_ref())
             }
-            ProviderKind::Ffmpeg => {
-                ffmpeg::decode_from_bytes(data, hint, &config.ffmpeg, candidate.module.as_ref())
-            }
+            ProviderKind::Ffmpeg => ffmpeg::decode_preferred_from_bytes(
+                data,
+                hint,
+                &config.ffmpeg,
+                candidate.module.as_ref(),
+            ),
             ProviderKind::Susie64 => {
                 susie64::decode_from_bytes(data, hint, &config.susie64, candidate.module.as_ref())
             }

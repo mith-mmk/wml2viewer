@@ -236,6 +236,23 @@ fn viewer_file_and_bytes_use_preference_then_fallback() {
         &[0, 0, 255, 255]
     );
     assert!(marker.exists());
+    let failing_dir = dir.join(".test-failing-decoder");
+    fs::create_dir(&failing_dir).unwrap();
+    let failing_executable = failing_dir.join("ffmpeg");
+    fs::write(&failing_executable, "#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(&failing_executable, fs::Permissions::from_mode(0o755)).unwrap();
+    config.ffmpeg.search_path.clear();
+    config.ffmpeg.modules[0].path = Some(executable.clone());
+    let mut failing_module = config.ffmpeg.modules[0].clone();
+    failing_module.path = Some(failing_executable);
+    config.ffmpeg.modules.insert(0, failing_module);
+    set_runtime_plugin_config(config.clone());
+    for decoded in [
+        load_canvas_from_file(&input).unwrap(),
+        load_canvas_from_bytes_with_hint(&bytes, None).unwrap(),
+    ] {
+        assert_eq!(decoded.canvas.buffer(), &[0, 0, 255, 255]);
+    }
     fs::remove_file(&executable).unwrap();
     assert_eq!(
         load_canvas_from_bytes_with_hint(&bytes, Some(&input))
