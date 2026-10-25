@@ -153,6 +153,52 @@ fn format_preferences_inherit_normalize_and_reset() {
     }
 }
 
+#[test]
+fn maki_extension_aliases_load_preferences_and_select_decoder() {
+    for alias in ["mki", ".MKI", "maki"] {
+        let config: PluginConfig = toml::from_str(&format!(
+            "[plugins.formats]\n\"{alias}\" = \"ffmpeg\"\n[plugins.ffmpeg]\nenable = true\n"
+        ))
+        .and_then(|value: toml::Value| value["plugins"].clone().try_into())
+        .unwrap();
+        assert_eq!(config.format_decoder("image/x-maki"), Some("ffmpeg"));
+        assert_eq!(
+            preferred_candidates(&config, "image/x-maki")
+                .first()
+                .map(|candidate| candidate.provider),
+            Some(ProviderKind::Ffmpeg)
+        );
+    }
+}
+
+#[test]
+fn removing_maki_preference_clears_all_aliases_only() {
+    let mut config = PluginConfig::default();
+    for alias in ["mki", ".MKI", "maki", "image/x-maki"] {
+        config.formats.insert(alias.into(), "ffmpeg".into());
+    }
+    config.formats.insert("image/jpeg".into(), "system".into());
+    config.set_format_decoder("image/x-maki", None);
+    assert_eq!(config.formats.len(), 1);
+    assert_eq!(config.format_decoder("image/x-maki"), None);
+    assert_eq!(config.format_decoder("image/jpeg"), Some("system"));
+}
+
+#[test]
+fn maki_extensions_and_unknown_signatures_use_maki_mime() {
+    for name in ["sample.mki", "sample.MKI", "sample.maki", "sample.MAKI"] {
+        let path = Path::new(name);
+        assert_eq!(mime_from_path(path), Some("image/x-maki"));
+        assert_eq!(
+            detected_mime(b"not an image", Some(path)),
+            Some("image/x-maki")
+        );
+    }
+    for (name, mime) in [("sample.jpg", "image/jpeg"), ("sample.j2k", "image/jp2")] {
+        assert_eq!(mime_from_path(Path::new(name)), Some(mime));
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn viewer_file_and_bytes_use_preference_then_fallback() {
