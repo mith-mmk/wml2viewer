@@ -54,3 +54,7 @@ winres = "0.1"
 
 [dev-dependencies]
 filetime = "0.2"
+
+# Temporary: replace with a compatible registry release after wml2 PR #29 is released.
+[patch.crates-io]
+wml2 = { git = "https://github.com/mith-mmk/wml2-on-rust.git", rev = "f131711ffe9cc28f9fb8a9b6efbab4944ba110c9" }

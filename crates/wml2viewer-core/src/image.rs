@@ -379,7 +379,10 @@ fn decoded_from_wml2_with_limits_and_cancel(
     // Only a well-typed true suppresses the legacy EXIF transform. Missing,
     // false, or malformed values retain the existing behavior.
     let orientation = if matches!(
-        image.metadata.as_ref().and_then(|m| m.get("orientation_applied")),
+        image
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("orientation_applied")),
         Some(DataMap::Bool(true))
     ) {
         1

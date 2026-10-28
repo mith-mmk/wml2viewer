@@ -238,13 +238,31 @@ fn orientation_transform_checks_cancellation() {
 #[test]
 fn applied_marker_controls_exif_fallback_for_all_orientations() {
     for orientation in 1..=8 {
-        for (marker, skip) in [(Some(DataMap::Bool(true)), true), (Some(DataMap::Bool(false)), false), (Some(DataMap::UInt(1)), false), (None, false)] {
+        for (marker, skip) in [
+            (Some(DataMap::Bool(true)), true),
+            (Some(DataMap::Bool(false)), false),
+            (Some(DataMap::UInt(1)), false),
+            (None, false),
+        ] {
             let mut image = ImageBuffer::from_buffer(3, 2, pixels());
-            let mut meta = HashMap::from([("EXIF".to_string(), DataMap::Exif(headers(orientation, Endian::LittleEndian)))]);
-            if let Some(value) = marker { meta.insert("orientation_applied".into(), value); }
+            let mut meta = HashMap::from([(
+                "EXIF".to_string(),
+                DataMap::Exif(headers(orientation, Endian::LittleEndian)),
+            )]);
+            if let Some(value) = marker {
+                meta.insert("orientation_applied".into(), value);
+            }
             image.metadata = Some(meta);
             let decoded = decoded_from_wml2_for_test(image, None).unwrap();
-            assert_eq!(decoded.poster.pixels(), if skip { pixels() } else { expected_pixels(&pixels(), orientation) }, "orientation {orientation}, skip {skip}");
+            assert_eq!(
+                decoded.poster.pixels(),
+                if skip {
+                    pixels()
+                } else {
+                    expected_pixels(&pixels(), orientation)
+                },
+                "orientation {orientation}, skip {skip}"
+            );
         }
     }
 }
@@ -265,11 +283,24 @@ fn jxl_applied_pixels_are_not_rotated_again_by_exif() {
     exif.extend(exif_to_vec(&headers(6, Endian::LittleEndian)).unwrap());
     add_box(b"Exif", &exif);
     let mut image = wml2::draw::image_from(&container).unwrap();
-    assert!(image.metadata.as_ref().unwrap().keys().any(|key| key.contains("45786966")));
+    assert!(
+        image
+            .metadata
+            .as_ref()
+            .unwrap()
+            .keys()
+            .any(|key| key.contains("45786966"))
+    );
     let expected = image.buffer.clone().unwrap();
     let dimensions = (image.width as u32, image.height as u32);
-    image.metadata.as_mut().unwrap().insert("EXIF".into(), DataMap::Exif(headers(6, Endian::LittleEndian)));
+    image.metadata.as_mut().unwrap().insert(
+        "EXIF".into(),
+        DataMap::Exif(headers(6, Endian::LittleEndian)),
+    );
     let decoded = decoded_from_wml2_for_test(image, None).unwrap();
-    assert_eq!((decoded.poster.width(), decoded.poster.height()), dimensions);
+    assert_eq!(
+        (decoded.poster.width(), decoded.poster.height()),
+        dimensions
+    );
     assert_eq!(decoded.poster.pixels(), expected);
 }
