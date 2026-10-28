@@ -376,7 +376,16 @@ fn decoded_from_wml2_with_limits_and_cancel(
     if image.width == 0 || image.height == 0 {
         return Err(CoreError::decode("decoded image has invalid dimensions"));
     }
-    let orientation = exif_orientation(image.metadata.as_ref()).unwrap_or(1);
+    // Only a well-typed true suppresses the legacy EXIF transform. Missing,
+    // false, or malformed values retain the existing behavior.
+    let orientation = if matches!(
+        image.metadata.as_ref().and_then(|m| m.get("orientation_applied")),
+        Some(DataMap::Bool(true))
+    ) {
+        1
+    } else {
+        exif_orientation(image.metadata.as_ref()).unwrap_or(1)
+    };
     let rgba = image
         .buffer
         .take()

@@ -110,3 +110,5 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 2026-10-18 0.0.24 released, added EXIF Orientation support and accelerated image navigation in large SMB folders
 - 2026-10-23: 0.0.25, adopt WML2 0.0.39 JPEG/EXIF fixes and preserve original decoder errors
 - 2026-10-24: 0.0.26, add per-format preferred decoders with safe fallback and single-read built-in decoding
+
+The orientation-applied metadata handling requires the corresponding wml2 orientation contract change; see wml2 `docs/jpeg-xl.md`. Until that change is released, build this branch with a Cargo patch pointing to the matching wml2 checkout.

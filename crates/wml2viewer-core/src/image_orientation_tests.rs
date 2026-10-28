@@ -234,3 +234,42 @@ fn orientation_transform_checks_cancellation() {
     let error = decoded_from_wml2_for_test(image, Some(&probe)).unwrap_err();
     assert_eq!(error.kind(), CoreErrorKind::Cancelled);
 }
+
+#[test]
+fn applied_marker_controls_exif_fallback_for_all_orientations() {
+    for orientation in 1..=8 {
+        for (marker, skip) in [(Some(DataMap::Bool(true)), true), (Some(DataMap::Bool(false)), false), (Some(DataMap::UInt(1)), false), (None, false)] {
+            let mut image = ImageBuffer::from_buffer(3, 2, pixels());
+            let mut meta = HashMap::from([("EXIF".to_string(), DataMap::Exif(headers(orientation, Endian::LittleEndian)))]);
+            if let Some(value) = marker { meta.insert("orientation_applied".into(), value); }
+            image.metadata = Some(meta);
+            let decoded = decoded_from_wml2_for_test(image, None).unwrap();
+            assert_eq!(decoded.poster.pixels(), if skip { pixels() } else { expected_pixels(&pixels(), orientation) }, "orientation {orientation}, skip {skip}");
+        }
+    }
+}
+
+#[test]
+fn jxl_applied_pixels_are_not_rotated_again_by_exif() {
+    let input = include_bytes!("../../fixtures/jxl-orientation6.jxl");
+    // Build a JXL container carrying both codestream orientation and an EXIF box.
+    let mut container = b"\0\0\0\x0cJXL \r\n\x87\n".to_vec();
+    let mut add_box = |kind: &[u8; 4], payload: &[u8]| {
+        container.extend_from_slice(&((payload.len() + 8) as u32).to_be_bytes());
+        container.extend_from_slice(kind);
+        container.extend_from_slice(payload);
+    };
+    add_box(b"ftyp", b"jxl \0\0\0\0jxl ");
+    add_box(b"jxlc", input);
+    let mut exif = vec![0, 0, 0, 0];
+    exif.extend(exif_to_vec(&headers(6, Endian::LittleEndian)).unwrap());
+    add_box(b"Exif", &exif);
+    let mut image = wml2::draw::image_from(&container).unwrap();
+    assert!(image.metadata.as_ref().unwrap().keys().any(|key| key.contains("45786966")));
+    let expected = image.buffer.clone().unwrap();
+    let dimensions = (image.width as u32, image.height as u32);
+    image.metadata.as_mut().unwrap().insert("EXIF".into(), DataMap::Exif(headers(6, Endian::LittleEndian)));
+    let decoded = decoded_from_wml2_for_test(image, None).unwrap();
+    assert_eq!((decoded.poster.width(), decoded.poster.height()), dimensions);
+    assert_eq!(decoded.poster.pixels(), expected);
+}
