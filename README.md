@@ -111,4 +111,11 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 2026-10-23: 0.0.25, adopt WML2 0.0.39 JPEG/EXIF fixes and preserve original decoder errors
 - 2026-10-24: 0.0.26, add per-format preferred decoders with safe fallback and single-read built-in decoding
 
-The orientation-applied metadata handling requires the corresponding wml2 orientation contract change; see wml2 `docs/jpeg-xl.md`. Until that change is released, build this branch with a Cargo patch pointing to the matching wml2 checkout.
+The orientation-applied metadata handling requires wml2 commit `aae7b0ded437b3a367a36591f0dba07731496d73` (contract: wml2 `docs/jpeg-xl.md`). The registry-pinned 0.0.39 does not contain `DataMap::Bool`; this branch cannot compile against it alone. With the two checkouts adjacent, from the Viewer root use:
+
+```sh
+cargo test -p wml2viewer-core --offline --config 'patch.crates-io.wml2.path="../wml2-public/wml2"'
+cargo build --offline --config 'patch.crates-io.wml2.path="../wml2-public/wml2"'
+```
+
+The patch is a command-line override, not a committed local path; Cargo may update `Cargo.lock` for the local source. Replace the dependency and lockfile with a released compatible wml2 version before distributing this Viewer change.
