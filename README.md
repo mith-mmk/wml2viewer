@@ -111,4 +111,4 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 2026-10-23: 0.0.25, adopt WML2 0.0.39 JPEG/EXIF fixes and preserve original decoder errors
 - 2026-10-24: 0.0.26, add per-format preferred decoders with safe fallback and single-read built-in decoding
 
-The orientation-applied metadata handling depends on [wml2 PR #29](https://github.com/mith-mmk/wml2-on-rust/pull/29) and the contract in wml2 `docs/jpeg-xl.md`. Until a compatible release is available, `Cargo.toml` temporarily patches the registry dependency to wml2 commit `f131711ffe9cc28f9fb8a9b6efbab4944ba110c9` for reproducible CI. After that release, remove the patch, update the pinned wml2 version and regenerate `Cargo.lock`. The released 0.0.39 alone lacks `DataMap::Bool`.
+The orientation-applied metadata handling uses WML2 0.0.40 and its JPEG XL orientation contract.

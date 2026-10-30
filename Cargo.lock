@@ -5514,8 +5514,9 @@ dependencies = [
 
 [[package]]
 name = "wml2"
-version = "0.0.39"
-source = "git+https://github.com/mith-mmk/wml2-on-rust.git?rev=f131711ffe9cc28f9fb8a9b6efbab4944ba110c9#f131711ffe9cc28f9fb8a9b6efbab4944ba110c9"
+version = "0.0.40"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c06e4b68e2de74ead939751352e4398ebe5796c4de76677648196bba294f43a"
 dependencies = [
  "avif-rust",
  "avifenc-rust",
