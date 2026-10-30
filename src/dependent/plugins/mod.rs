@@ -579,7 +579,7 @@ fn mime_from_path(path: &Path) -> Option<&'static str> {
     match ext.as_str() {
         "ico" => Some("image/x-icon"),
         "mag" => Some("image/x-mag"),
-        "maki" => Some("image/x-maki"),
+        "maki" | "mki" => Some("image/x-maki"),
         "pi" => Some("image/x-pi"),
         "pic" => Some("image/x-pic"),
         "vsp" => Some("image/x-vsp"),
