@@ -13,6 +13,7 @@ use wml2::limits::DecodeLimits as WmlDecodeLimits;
 use wml2::metadata::exif::parse_exif;
 use wml2::metadata::{DataMap, Metadata};
 use wml2::tiff::header::{DataPack, TiffHeaders};
+use wml2::util::{ImageFormat, format_check};
 
 pub type DecodeCancelProbe<'a> = &'a (dyn Fn() -> bool + Send + Sync);
 
@@ -163,7 +164,14 @@ impl ImageDecoder for Wml2Codec {
     fn decode(&self, request: DecodeRequest<'_>) -> CoreResult<DecodedImage> {
         let _format_hint = request.format_hint;
         let image = catch_unwind(AssertUnwindSafe(|| {
-            image_from_with_limits(request.bytes, WmlDecodeLimits::unlimited())
+            if matches!(format_check(request.bytes), ImageFormat::JpegXl) {
+                wml2::jpegxl::image_from_srgb_with_limits(
+                    request.bytes,
+                    WmlDecodeLimits::unlimited(),
+                )
+            } else {
+                image_from_with_limits(request.bytes, WmlDecodeLimits::unlimited())
+            }
         }))
         .map_err(|_| CoreError::decode("image decoder panicked"))?
         .map_err(|error| CoreError::decode(error.to_string()))?;
@@ -180,6 +188,15 @@ impl Wml2Codec {
     ) -> CoreResult<DecodedImage> {
         let _format_hint = request.format_hint;
         check_cancelled(cancel_probe)?;
+        if matches!(format_check(request.bytes), ImageFormat::JpegXl) {
+            let image = catch_unwind(AssertUnwindSafe(|| {
+                wml2::jpegxl::image_from_srgb_with_limits(request.bytes, wml_decode_limits(limits))
+            }))
+            .map_err(|_| CoreError::decode("image decoder panicked"))?
+            .map_err(map_wml2_decode_error)?;
+            check_cancelled(cancel_probe)?;
+            return decoded_from_wml2_with_limits_and_cancel(image, limits, cancel_probe);
+        }
         let mut target = CancellableImageBuffer::new(cancel_probe);
         let image = catch_unwind(AssertUnwindSafe(|| {
             image_decoder_with_limits(
@@ -376,7 +393,19 @@ fn decoded_from_wml2_with_limits_and_cancel(
     if image.width == 0 || image.height == 0 {
         return Err(CoreError::decode("decoded image has invalid dimensions"));
     }
-    let orientation = exif_orientation(image.metadata.as_ref()).unwrap_or(1);
+    // Only a well-typed true suppresses the legacy EXIF transform. Missing,
+    // false, or malformed values retain the existing behavior.
+    let orientation = if matches!(
+        image
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("orientation_applied")),
+        Some(DataMap::Bool(true))
+    ) {
+        1
+    } else {
+        exif_orientation(image.metadata.as_ref()).unwrap_or(1)
+    };
     let rgba = image
         .buffer
         .take()
