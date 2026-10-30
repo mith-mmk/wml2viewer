@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.0.27] - 2026-10-30
+
+### Added
+
+- Decode JPEG XL still images with WML2 0.0.40, applying the reconstructed ICC profile to sRGB display pixels.
+
+### Fixed
+
+- Avoid applying EXIF orientation twice when the decoder has already oriented the image.
+- Treat `.mki` as the MAKI format when resolving per-format plugin preferences.
+
+### Changed
+
+- Update `Swatinem/rust-cache` to 2.9.3.
+
 ## [0.0.26] - 2026-10-24
 
 ### Added
