@@ -156,6 +156,76 @@ fn bounded_decode_checks_cancellation_at_wml2_callbacks() {
 }
 
 #[test]
+fn jpeg_xl_display_uses_reconstruction_profile_in_both_decode_paths() {
+    // WML2 0.0.40 fixture and independent libjxl/LittleCMS reference; see
+    // crates/fixtures/jxl-icc-fixture.md for provenance and hashes.
+    let bytes = include_bytes!("../../fixtures/jxl-icc-lossless.jxl");
+    let expected = include_bytes!("../../fixtures/jxl-icc-lossless.srgb.rgba");
+    for bounded in [false, true] {
+        let request = DecodeRequest {
+            bytes,
+            format_hint: Some("wrong-extension"),
+        };
+        let image = if bounded {
+            decode_with_limits(request, DecodeLimits::UNLIMITED, None)
+        } else {
+            decode(request)
+        }
+        .unwrap();
+        assert_eq!((image.poster.width(), image.poster.height()), (7, 5));
+        for (actual, reference) in image
+            .poster
+            .pixels()
+            .chunks_exact(4)
+            .zip(expected.chunks_exact(4))
+        {
+            for channel in 0..3 {
+                assert!(
+                    actual[channel].abs_diff(reference[channel]) <= 2,
+                    "{actual:?} vs {reference:?}"
+                );
+            }
+            assert_eq!(actual[3], reference[3]);
+        }
+    }
+}
+
+#[test]
+fn managed_jpeg_xl_respects_pixel_workspace_and_cancellation_limits() {
+    let bytes = include_bytes!("../../fixtures/jxl-icc-lossless.jxl");
+    let request = || DecodeRequest {
+        bytes,
+        format_hint: None,
+    };
+    for limits in [
+        DecodeLimits {
+            maximum_frame_pixels: 34,
+            ..DecodeLimits::UNLIMITED
+        },
+        DecodeLimits {
+            maximum_rgba_bytes: 128,
+            ..DecodeLimits::UNLIMITED
+        },
+    ] {
+        assert_eq!(
+            decode_with_limits(request(), limits, None)
+                .unwrap_err()
+                .kind(),
+            CoreErrorKind::Limit
+        );
+    }
+    let calls = AtomicUsize::new(0);
+    let probe = || calls.fetch_add(1, Ordering::Relaxed) >= 1;
+    assert_eq!(
+        decode_with_limits(request(), DecodeLimits::UNLIMITED, Some(&probe))
+            .unwrap_err()
+            .kind(),
+        CoreErrorKind::Cancelled
+    );
+    assert!(calls.load(Ordering::Relaxed) >= 2);
+}
+
+#[test]
 fn bounded_animation_composition_counts_full_canvas_frames() {
     let mut image = ImageBuffer::from_buffer(2, 2, vec![0, 0, 0, 255].repeat(4));
     image.animation = Some(vec![
