@@ -51,14 +51,36 @@ The two conformance bitstreams originate from
 and were used locally without adding them to this repository. They carry the
 upstream BSD-3-Clause bitstream license, not the source images' CC0 label.
 
+## macOS GUI smoke test
+
+After the test computer was unlocked, the release executable was launched on
+hadrianus using a separate local app wrapper, copied samples and explicit test
+configuration. System, Susie and FFmpeg plugins were disabled, so these checks
+used the internal decoder path. Normal user settings and the pre-existing
+checkout were not modified.
+
+- `animation_icos4d.jxl` and `animation_spline.jxl`: the expected geometry was
+  displayed, and separate screen captures showed different animation frames.
+- Synthetic GrayAlpha8 and XYB/ICC16: grayscale/alpha and color images were
+  displayed, with visible frame changes. The GrayAlpha sample was also viewed
+  at 200% zoom using the context menu.
+- Existing GIF and PNG: both displayed successfully. These local samples each
+  contain one decoded frame, so this is not evidence for GIF/APNG animation.
+- Forward and backward navigation through all six files updated both the
+  displayed image and the window title. Returning to the spline animation
+  resumed animated display.
+- The session log contains successful load commits for all six files, no
+  error/failed/panic-named events, and an empty stderr log. The test app was
+  closed after the checks.
+
+This is a display and navigation smoke test, not frame-rate measurement or
+monitor color calibration. Pixel fidelity and source timing are covered by
+the independent reference and headless checks above.
+
 ## Remaining verification
 
-The macOS UI launch was blocked by the locked test computer before a display
-could be inspected. Actual on-screen animation, image switching, interrupted
-loads, thumbnails and plugin fallback remain unverified for this change.
-A separate test configuration and copied samples are prepared; normal user
-settings and the pre-existing checkout were not modified.
-
+Interactive interruption during a long decode, thumbnails and plugin fallback
+remain unverified. Cooperative cancellation and limits have automated coverage.
 Windows/Linux runtime, Android/iOS app and simulator checks, remote CI and
 release packaging have not been run for this change. No release, merge or
 public PR is implied by these local results.
