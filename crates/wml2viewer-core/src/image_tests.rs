@@ -280,3 +280,147 @@ fn cancellation_is_checked_again_before_animation_composition() {
     assert_eq!(error.kind(), CoreErrorKind::Cancelled);
     assert!(calls.load(Ordering::Relaxed) >= 2);
 }
+
+#[test]
+fn jpeg_xl_animations_preserve_srgb_pixels_timing_and_loops() {
+    // Synthetic MIT-licensed fixtures and independent libjxl pixel oracles.
+    // See crates/fixtures/jxl-animation-fixtures.md.
+    for (name, bytes, reference) in [
+        (
+            "xyb-icc16",
+            include_bytes!("../../fixtures/jxl-animation-xyb-icc16.jxl").as_slice(),
+            include_bytes!("../../fixtures/jxl-animation-xyb-icc16.rgba16le").as_slice(),
+        ),
+        (
+            "grayalpha8",
+            include_bytes!("../../fixtures/jxl-animation-grayalpha8.jxl").as_slice(),
+            include_bytes!("../../fixtures/jxl-animation-grayalpha8.rgba16le").as_slice(),
+        ),
+    ] {
+        for bounded in [false, true] {
+            let request = DecodeRequest {
+                bytes,
+                format_hint: Some("wrong-extension"),
+            };
+            let image = if bounded {
+                decode_with_limits(request, DecodeLimits::UNLIMITED, None)
+            } else {
+                decode(request)
+            }
+            .unwrap();
+            assert_eq!(
+                (image.poster.width(), image.poster.height()),
+                (32, 24),
+                "{name}"
+            );
+            assert_eq!(image.frame_count(), 3, "{name}");
+            assert_eq!(image.loop_count, Some(0), "{name}");
+            assert_eq!(image.poster, image.animation[0].image, "{name}");
+            assert_eq!(
+                image
+                    .animation
+                    .iter()
+                    .map(|frame| frame.duration_ms)
+                    .collect::<Vec<_>>(),
+                [50, 90, 130],
+                "{name}"
+            );
+            assert_eq!(reference.len(), 3 * 32 * 24 * 8);
+            for (frame, oracle) in image
+                .animation
+                .iter()
+                .zip(reference.chunks_exact(32 * 24 * 8))
+            {
+                assert_eq!((frame.image.width(), frame.image.height()), (32, 24));
+                for (index, (actual, word)) in frame
+                    .image
+                    .pixels()
+                    .iter()
+                    .zip(oracle.chunks_exact(2))
+                    .enumerate()
+                {
+                    let expected =
+                        ((u32::from(u16::from_le_bytes([word[0], word[1]])) + 128) / 257) as u8;
+                    let tolerance = if index % 4 == 3 { 0 } else { 1 };
+                    assert!(
+                        actual.abs_diff(expected) <= tolerance,
+                        "{name} channel {index}: {actual} vs {expected}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn jpeg_xl_animation_limits_and_cooperative_cancellation_are_preserved() {
+    let bytes = include_bytes!("../../fixtures/jxl-animation-xyb-icc16.jxl");
+    let request = || DecodeRequest {
+        bytes,
+        format_hint: None,
+    };
+    for limits in [
+        DecodeLimits {
+            maximum_frames: 2,
+            ..DecodeLimits::UNLIMITED
+        },
+        DecodeLimits {
+            maximum_frame_pixels: 32 * 24 - 1,
+            ..DecodeLimits::UNLIMITED
+        },
+        DecodeLimits {
+            maximum_rgba_bytes: 32 * 24 * 4,
+            ..DecodeLimits::UNLIMITED
+        },
+    ] {
+        assert_eq!(
+            decode_with_limits(request(), limits, None)
+                .unwrap_err()
+                .kind(),
+            CoreErrorKind::Limit
+        );
+    }
+    let calls = AtomicUsize::new(0);
+    let probe = || calls.fetch_add(1, Ordering::Relaxed) >= 3;
+    assert_eq!(
+        decode_with_limits(request(), DecodeLimits::UNLIMITED, Some(&probe))
+            .unwrap_err()
+            .kind(),
+        CoreErrorKind::Cancelled
+    );
+    assert!(calls.load(Ordering::Relaxed) >= 4);
+    // Cancellation must not leave shared state that prevents a fresh decode.
+    assert_eq!(
+        decode_with_limits(request(), DecodeLimits::UNLIMITED, None)
+            .unwrap()
+            .frame_count(),
+        3
+    );
+}
+
+#[test]
+fn jpeg_xl_cancellation_reaches_decoder_before_invalid_payload() {
+    // The signature selects the JXL route but the payload cannot decode. The
+    // first probe runs in our wrapper; cancellation on the second call must
+    // reach WML2 before parsing. Post-decode composition checks cannot make
+    // this pass if the decoder probe is accidentally disconnected.
+    let request = || DecodeRequest {
+        bytes: &[0xff, 0x0a],
+        format_hint: None,
+    };
+    assert_eq!(
+        decode_with_limits(request(), DecodeLimits::UNLIMITED, None)
+            .unwrap_err()
+            .kind(),
+        CoreErrorKind::Decode
+    );
+    let calls = AtomicUsize::new(0);
+    let probe = || calls.fetch_add(1, Ordering::Relaxed) >= 1;
+    assert_eq!(
+        decode_with_limits(request(), DecodeLimits::UNLIMITED, Some(&probe))
+            .unwrap_err()
+            .kind(),
+        CoreErrorKind::Cancelled
+    );
+    assert_eq!(calls.load(Ordering::Relaxed), 2);
+}
