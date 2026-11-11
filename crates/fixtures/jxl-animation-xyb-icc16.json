@@ -1,0 +1,37 @@
+{
+  "source": "Deterministic synthetic RGBA16 APNG from generate_jxl_xyb_animation16.py, with standard RGB matrix/TRC ICC; project MIT license",
+  "encoder": "cjxl v0.12.0 4128790 [_AVX2_,SSE4,SSE2] {Clang 22.1.3}\nCopyright (c) the JPEG XL Project; -d 1 -e 7; container stripped without changing codestream",
+  "decoder": "djxl v0.12.0 4128790 [_AVX2_,SSE4,SSE2] {Clang 22.1.3}\nCopyright (c) the JPEG XL Project; --output_frames NPY float32; actual linear-sRGB output ICC checked before standard sRGB transfer and u16 rounding",
+  "release": "https://github.com/libjxl/libjxl/releases/tag/v0.12.0",
+  "source_apng_sha256": "f10c22533dc055481c956990b1ef32abdcd06e4febf6f118dcd20f92b94ae3e2",
+  "codestream_sha256": "bbcf461eb92390a9cdc84b9990e1114084dd807ecb8dc3d646fe369eed028414",
+  "source_icc_sha256": "e66b2b6d309e8869a90bb0eab8e7e5ed17a39d0b0c4725937b0b0b4fd073a238",
+  "libjxl_linear_output_icc_sha256": "68155f2bd3f362ca3a62bdd1620bf3a7bfca7c0554062bb2a5fb5dfddf0d73f4",
+  "libjxl_float_reference_sha256": "2bb03ac6eb3f36afc5ba72b8a6b4fdd0a6a04738c28d8b0138622a24ee0ec81e",
+  "srgb16_reference_sha256": "39502967dd3c7c251593b953e053d6af843a1768d8e3fd8646539cfb0bdfbd86",
+  "dimensions": [
+    32,
+    24
+  ],
+  "frames": 3,
+  "rgb_bits": 16,
+  "alpha_bits": 16,
+  "source_color": "RGB matrix/TRC; gamma 2.0/2.25/2.5; no LUT/HDR",
+  "wml2_output_color": "jxl 0.8 embedded-ICC XYB fallback sRGB; distinct from original ICC",
+  "timing": {
+    "ticks_per_second": [
+      1000,
+      1
+    ],
+    "frame_ticks": [
+      50,
+      90,
+      130
+    ],
+    "loops": 0
+  },
+  "comparison": "Every native and EX u16 sample against independently reconstructed sRGB; ordinary and managed paths after final rounding; alpha never color transformed",
+  "rgb_tolerance_u16": 1,
+  "alpha_tolerance_u16": 0,
+  "not_claimed": "Arbitrary ICC/LUT correctness, HDR, browser-wide color equivalence, or lossless RGB agreement after lossy encoding"
+}

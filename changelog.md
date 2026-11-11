@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Upgrade the desktop and shared core dependency to published WML2 0.0.44, aligning the shared core reader with bin-rs 0.0.11.
+- Decode the supported bounded RGB/XYB and SDR Gray JPEG XL animation subset through the existing sRGB RGBA8 display path. HDR, general Gray ICC profiles and unsupported animation features remain outside this contract.
+- Forward the shared core cancellation probe into the JPEG XL decoder and retain its typed cancellation result instead of reporting a decode failure.
+
+### Tests
+
+- Compare synthetic XYB/ICC16 and GrayAlpha8 animation frames with independent libjxl pixel references, including timing, loops, bounds, cancellation and a fresh decode after cancellation.
+
 ## [0.0.27] - 2026-10-30
 
 ### Added

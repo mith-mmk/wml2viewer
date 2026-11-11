@@ -152,6 +152,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloc-no-stdlib"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2fb6cfd47bf496ff64095c20eaba0c201404ee38714d4142fcfa1dc334fcc7a"
+
+[[package]]
 name = "android-activity"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -552,12 +558,12 @@ checksum = "7f064a888d7b2d2d78426fe473647c14281494f8994d1e4240d83cff37e5eafc"
 
 [[package]]
 name = "avif-rust"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe0b5ee8b4698179b3bbb8b0fd86930846c9eb932451035f02ec2e723b1a4086"
+checksum = "861f04c4633352416e708c05c6577884b518b365350a09edb1d0caf9e1f77214"
 dependencies = [
  "avif-image-buffer",
- "bin-rs",
+ "bin-rs 0.0.11",
 ]
 
 [[package]]
@@ -584,6 +590,12 @@ name = "bin-rs"
 version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23f756521115a60a84bc45722261eaf03aa6a59d886c9c3b41d08ac1c39e3e24"
+
+[[package]]
+name = "bin-rs"
+version = "0.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b28062885c4e7689b7fbf601cc5ed5519efd9e07ae5c33266c41f9e87755e007"
 
 [[package]]
 name = "bit-set"
@@ -656,6 +668,15 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "piper",
+]
+
+[[package]]
+name = "brotli-decompressor"
+version = "6.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34c6783f42c21c952ad7112b354f0ba2f10760e9decea5b1b60523d6e270faaf"
+dependencies = [
+ "alloc-no-stdlib",
 ]
 
 [[package]]
@@ -1912,7 +1933,7 @@ version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f93c7d669607293110355b9aa32c1aafc80d16c99a43f05117efb8faa8b1fdaf"
 dependencies = [
- "bin-rs",
+ "bin-rs 0.0.10",
 ]
 
 [[package]]
@@ -2180,9 +2201,25 @@ checksum = "43b041e4bd5bb931cf73b271bc3304eb135bb473914877d64bf77fdf5b4d4687"
 dependencies = [
  "array-init",
  "byteorder",
- "jxl_macros",
- "jxl_simd",
- "jxl_transforms",
+ "jxl_macros 0.7.4",
+ "jxl_simd 0.7.4",
+ "jxl_transforms 0.7.4",
+ "num-derive",
+ "num-traits",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "jxl"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8379fc83d79477900c9aed78cb8370a556d834081bebcb771c6010381c4e230"
+dependencies = [
+ "array-init",
+ "byteorder",
+ "jxl_macros 0.8.0",
+ "jxl_simd 0.8.0",
+ "jxl_transforms 0.8.0",
  "num-derive",
  "num-traits",
  "thiserror 2.0.18",
@@ -2200,10 +2237,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "jxl_macros"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eeb27c06a9957bd9c8e65d0aeea0db6a555a9e1c85597e284f8304015c410c87"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "jxl_simd"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba1f65c01a3f807385be7a1200f78b9d958bff1321b753b859ecfcba63a0642d"
+
+[[package]]
+name = "jxl_simd"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a645451b4d34b4017caf24110a14eb737e275b5d3d121bc754e67727ee65af0e"
 
 [[package]]
 name = "jxl_transforms"
@@ -2211,7 +2265,16 @@ version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f72e196c6c1e938a4c7e2175d7c83464fa9e7f587224d310cac15d83fc80a37"
 dependencies = [
- "jxl_simd",
+ "jxl_simd 0.7.4",
+]
+
+[[package]]
+name = "jxl_transforms"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21c4b7f8957f5ba578b2e28cd5ebbc97dad58a3ad5ff26765da61e8dab8f1cad"
+dependencies = [
+ "jxl_simd 0.8.0",
 ]
 
 [[package]]
@@ -3561,6 +3624,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "roxmltree"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9da7f59328b09405b181fee1018925fad50f157afb43c0c0f5c522c256dd5907"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4710,11 +4782,11 @@ dependencies = [
 
 [[package]]
 name = "webp-rust"
-version = "0.3.2"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50c858a3ae7a705e41370c569e3317b5e85b167700dc77b3c14e71a9ed077f71"
+checksum = "f4cec5854e9cf008deec3a7699dd009ba393aff42563f47df8c8d2b06976d5ba"
 dependencies = [
- "bin-rs",
+ "bin-rs 0.0.11",
 ]
 
 [[package]]
@@ -5514,16 +5586,19 @@ dependencies = [
 
 [[package]]
 name = "wml2"
-version = "0.0.40"
+version = "0.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c06e4b68e2de74ead939751352e4398ebe5796c4de76677648196bba294f43a"
+checksum = "2a66829f83226f61c2a9a9d53294d51e706b03d68fd305c231f0de67b982bc8f"
 dependencies = [
  "avif-rust",
  "avifenc-rust",
- "bin-rs",
+ "bin-rs 0.0.11",
+ "brotli-decompressor",
  "icc-profile",
- "jxl",
+ "jxl 0.7.4",
+ "jxl 0.8.0",
  "miniz_oxide 0.7.4",
+ "roxmltree",
  "webp-rust",
 ]
 
@@ -5565,7 +5640,7 @@ dependencies = [
 name = "wml2viewer-core"
 version = "0.0.27"
 dependencies = [
- "bin-rs",
+ "bin-rs 0.0.11",
  "oxiarc-archive",
  "oxiarc-lzhuf",
  "wml2",

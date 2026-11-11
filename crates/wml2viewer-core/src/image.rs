@@ -190,7 +190,16 @@ impl Wml2Codec {
         check_cancelled(cancel_probe)?;
         if matches!(format_check(request.bytes), ImageFormat::JpegXl) {
             let image = catch_unwind(AssertUnwindSafe(|| {
-                wml2::jpegxl::image_from_srgb_with_limits(request.bytes, wml_decode_limits(limits))
+                let limits = wml_decode_limits(limits);
+                if let Some(probe) = cancel_probe {
+                    wml2::jpegxl::image_from_srgb_with_limits_and_cancel(
+                        request.bytes,
+                        limits,
+                        probe,
+                    )
+                } else {
+                    wml2::jpegxl::image_from_srgb_with_limits(request.bytes, limits)
+                }
             }))
             .map_err(|_| CoreError::decode("image decoder panicked"))?
             .map_err(map_wml2_decode_error)?;
@@ -243,7 +252,11 @@ pub fn encode(request: EncodeRequest<'_>) -> CoreResult<Vec<u8>> {
 }
 
 fn map_wml2_decode_error(error: Box<dyn std::error::Error>) -> CoreError {
-    if error.downcast_ref::<DecodeCancelled>().is_some() {
+    if error.downcast_ref::<DecodeCancelled>().is_some()
+        || error
+            .downcast_ref::<wml2::jpegxl::DecodeCancelled>()
+            .is_some()
+    {
         CoreError::cancelled(error.to_string())
     } else if is_wml2_limit_error(error.as_ref()) {
         CoreError::limit(error.to_string())
