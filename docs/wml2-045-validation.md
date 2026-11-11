@@ -75,10 +75,9 @@ or establish validation of the other platforms' release archives.
 
 The preliminary candidate's AVIF-enabled debug viewer started with a separate
 configuration and copied samples, with system/Susie/FFmpeg plugins disabled.
-Its window title identified the requested AVIF sample. Screenshot inspection
-stopped when the tool returned `Computer Use app approval timed out` for the
-test `wml2viewer.exe`. No retry was made without new permission; the test
-process was stopped and normal user configuration was not changed.
+Its window title identified the requested AVIF sample. Interactive visual
+inspection was not completed. The test process was stopped and normal user
+configuration was not changed.
 
 No visual correctness, animation playback, interactive navigation/cancellation,
 monitor calibration, thumbnails or plugin fallback pass is claimed. The final
