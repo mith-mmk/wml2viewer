@@ -58,10 +58,12 @@ decoded eight copied inputs using the registry dependencies:
 - ICC still-image JPEG XL fixture: 7 x 5.
 - Orientation-6 JPEG XL fixture: 3 x 2 after orientation handling.
 
-For every sample, bounded/unbounded decode results matched and an already-set
-cancellation probe returned `CoreErrorKind::Cancelled`. Independent pixel
-comparisons and in-decode cancellation are established by the repository tests,
-not inferred from these sample metadata checks. Consumer sources, sample copies,
+For every sample, default `decode` matched `decode_with_limits` configured
+with `DecodeLimits::UNLIMITED`. An already-set cancellation probe returned
+`CoreErrorKind::Cancelled`. This consumer did not exercise finite limits.
+Finite bounds, independent pixel comparisons and in-decode cancellation are
+established separately by the repository tests, not inferred from these sample
+metadata checks. Consumer sources, sample copies,
 JSON results and logs remain local validation artifacts.
 
 The Windows release packaging recipe produced the executable, LICENSE, both
