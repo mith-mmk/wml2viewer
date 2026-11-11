@@ -1,4 +1,4 @@
-# wml2viewer 0.0.28
+# wml2viewer 0.0.29
 
 A lightweight native image viewer built with `egui` and `wml2`.
 
@@ -38,7 +38,7 @@ wml2viewer --clean system Reset configuration
 
 ### Android 10+
 
-Android 0.0.28 is a mobile-first Jetpack Compose application. It accesses selected folders directly through the Storage Access Framework, supports SMB2/3 sources, uses a dedicated 3×3 touch map and phone/tablet layouts, and keeps the desktop UI and `config.toml` unchanged. Passwords are encrypted with an Android Keystore key and are never passed to Rust.
+Android 0.0.29 is a mobile-first Jetpack Compose application. It accesses selected folders directly through the Storage Access Framework, supports SMB2/3 sources, uses a dedicated 3×3 touch map and phone/tablet layouts, and keeps the desktop UI and `config.toml` unchanged. Passwords are encrypted with an Android Keystore key and are never passed to Rust.
 
 Build prerequisites are JDK 17, Android SDK 36, NDK r27c (`27.2.12479018`), the Rust Android targets, and `cargo-ndk`. The repository includes the Gradle 9.1.0 Wrapper and uses AGP 9.0.1.
 
@@ -113,5 +113,6 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 2026-10-24: 0.0.26, add per-format preferred decoders with safe fallback and single-read built-in decoding
 - 2026-10-30: 0.0.27, add colour-managed JPEG XL decoding, correct orientation and MKI plugin routing
 - 2026-11-11: 0.0.28 prepared, align WML2 0.0.44 and bin-rs 0.0.11, add bounded JPEG XL animation decoding and cancellation coverage
+- 2026-11-11: 0.0.29 prepared, align WML2 0.0.45, bin-rs 0.1.0, WebP 0.5.0, AVIF 0.3.0 and ICC 0.0.8 without changing the display pipeline
 
 The orientation-applied metadata handling retains the JPEG XL orientation contract introduced with WML2 0.0.40.

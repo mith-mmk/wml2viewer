@@ -1,5 +1,8 @@
 # WML2 0.0.44 dependency alignment validation
 
+This is the historical 0.0.44 validation record. See the
+[0.0.45 follow-up](wml2-045-validation.md) for the current dependency alignment.
+
 ## Scope
 
 Desktop and shared core pin published WML2 0.0.44. The shared core's direct
