@@ -1,5 +1,8 @@
 # WML2 0.0.43 adoption validation
 
+This is the historical 0.0.43 validation record. See the
+[0.0.44 follow-up](wml2-044-validation.md) for the current dependency alignment.
+
 ## Scope
 
 Desktop and shared core now pin the published `wml2 =0.0.43` crate. The existing

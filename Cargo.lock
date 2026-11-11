@@ -558,12 +558,12 @@ checksum = "7f064a888d7b2d2d78426fe473647c14281494f8994d1e4240d83cff37e5eafc"
 
 [[package]]
 name = "avif-rust"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe0b5ee8b4698179b3bbb8b0fd86930846c9eb932451035f02ec2e723b1a4086"
+checksum = "861f04c4633352416e708c05c6577884b518b365350a09edb1d0caf9e1f77214"
 dependencies = [
  "avif-image-buffer",
- "bin-rs",
+ "bin-rs 0.0.11",
 ]
 
 [[package]]
@@ -590,6 +590,12 @@ name = "bin-rs"
 version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23f756521115a60a84bc45722261eaf03aa6a59d886c9c3b41d08ac1c39e3e24"
+
+[[package]]
+name = "bin-rs"
+version = "0.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b28062885c4e7689b7fbf601cc5ed5519efd9e07ae5c33266c41f9e87755e007"
 
 [[package]]
 name = "bit-set"
@@ -1927,7 +1933,7 @@ version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f93c7d669607293110355b9aa32c1aafc80d16c99a43f05117efb8faa8b1fdaf"
 dependencies = [
- "bin-rs",
+ "bin-rs 0.0.10",
 ]
 
 [[package]]
@@ -4776,11 +4782,11 @@ dependencies = [
 
 [[package]]
 name = "webp-rust"
-version = "0.3.2"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50c858a3ae7a705e41370c569e3317b5e85b167700dc77b3c14e71a9ed077f71"
+checksum = "f4cec5854e9cf008deec3a7699dd009ba393aff42563f47df8c8d2b06976d5ba"
 dependencies = [
- "bin-rs",
+ "bin-rs 0.0.11",
 ]
 
 [[package]]
@@ -5580,13 +5586,13 @@ dependencies = [
 
 [[package]]
 name = "wml2"
-version = "0.0.43"
+version = "0.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c126b4047fd62d72ff9f5c7b8e4b9735a3d6c7f65d7a10e3152a847c6607b00"
+checksum = "2a66829f83226f61c2a9a9d53294d51e706b03d68fd305c231f0de67b982bc8f"
 dependencies = [
  "avif-rust",
  "avifenc-rust",
- "bin-rs",
+ "bin-rs 0.0.11",
  "brotli-decompressor",
  "icc-profile",
  "jxl 0.7.4",
@@ -5634,7 +5640,7 @@ dependencies = [
 name = "wml2viewer-core"
 version = "0.0.27"
 dependencies = [
- "bin-rs",
+ "bin-rs 0.0.11",
  "oxiarc-archive",
  "oxiarc-lzhuf",
  "wml2",
