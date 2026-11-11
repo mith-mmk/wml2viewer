@@ -1,6 +1,6 @@
 [package]
 name = "wml2viewer-core"
-version = "0.0.28"
+version = "0.0.29"
 edition = "2024"
 license = "MIT"
 description = "Platform-independent image and reading-session core for wml2viewer"
@@ -11,9 +11,9 @@ default = []
 avif = ["wml2/avif"]
 
 [dependencies]
-bin-rs = { version = "0.0.11", features = ["util"] }
+bin-rs = { version = "0.1.0", features = ["util"] }
 oxiarc-archive = "=0.3.6"
-wml2 = { version = "=0.0.44", features = ["multithread", "jpeg-xl", "color-management"] }
+wml2 = { version = "=0.0.45", features = ["multithread", "jpeg-xl", "color-management"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]

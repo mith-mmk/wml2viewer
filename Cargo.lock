@@ -558,12 +558,12 @@ checksum = "7f064a888d7b2d2d78426fe473647c14281494f8994d1e4240d83cff37e5eafc"
 
 [[package]]
 name = "avif-rust"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "861f04c4633352416e708c05c6577884b518b365350a09edb1d0caf9e1f77214"
+checksum = "3daa8cfa663a0fc9d75375b069fdf42bddc9965e367515d070f124bbc33828a4"
 dependencies = [
  "avif-image-buffer",
- "bin-rs 0.0.11",
+ "bin-rs",
 ]
 
 [[package]]
@@ -587,15 +587,9 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bin-rs"
-version = "0.0.10"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23f756521115a60a84bc45722261eaf03aa6a59d886c9c3b41d08ac1c39e3e24"
-
-[[package]]
-name = "bin-rs"
-version = "0.0.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b28062885c4e7689b7fbf601cc5ed5519efd9e07ae5c33266c41f9e87755e007"
+checksum = "76470098509d8c31d514e231dfd885a2477a8f6a0e500ec30e0b54f125d0ea49"
 
 [[package]]
 name = "bit-set"
@@ -1929,11 +1923,11 @@ dependencies = [
 
 [[package]]
 name = "icc-profile"
-version = "0.0.7"
+version = "0.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f93c7d669607293110355b9aa32c1aafc80d16c99a43f05117efb8faa8b1fdaf"
+checksum = "137293a8fecc29c42652fbffa9d13bc251781b077d570fdd9b5bc29c43720c0e"
 dependencies = [
- "bin-rs 0.0.10",
+ "bin-rs",
 ]
 
 [[package]]
@@ -4782,11 +4776,11 @@ dependencies = [
 
 [[package]]
 name = "webp-rust"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4cec5854e9cf008deec3a7699dd009ba393aff42563f47df8c8d2b06976d5ba"
+checksum = "6f3d550cc6c1263fe13dab53172d0cbb8251dabb90199c14ab4db6102d94f2f5"
 dependencies = [
- "bin-rs 0.0.11",
+ "bin-rs",
 ]
 
 [[package]]
@@ -5586,13 +5580,13 @@ dependencies = [
 
 [[package]]
 name = "wml2"
-version = "0.0.44"
+version = "0.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a66829f83226f61c2a9a9d53294d51e706b03d68fd305c231f0de67b982bc8f"
+checksum = "6f71a259b025f68a4f372cdc987e9f5cdc14fecf2e31d429b1829fb65a965896"
 dependencies = [
  "avif-rust",
  "avifenc-rust",
- "bin-rs 0.0.11",
+ "bin-rs",
  "brotli-decompressor",
  "icc-profile",
  "jxl 0.7.4",
@@ -5604,7 +5598,7 @@ dependencies = [
 
 [[package]]
 name = "wml2viewer"
-version = "0.0.28"
+version = "0.0.29"
 dependencies = [
  "chrono",
  "delharc",
@@ -5630,7 +5624,7 @@ dependencies = [
 
 [[package]]
 name = "wml2viewer-android"
-version = "0.0.28"
+version = "0.0.29"
 dependencies = [
  "jni",
  "wml2viewer-mobile-bridge",
@@ -5638,9 +5632,9 @@ dependencies = [
 
 [[package]]
 name = "wml2viewer-core"
-version = "0.0.28"
+version = "0.0.29"
 dependencies = [
- "bin-rs 0.0.11",
+ "bin-rs",
  "oxiarc-archive",
  "oxiarc-lzhuf",
  "wml2",
@@ -5649,14 +5643,14 @@ dependencies = [
 
 [[package]]
 name = "wml2viewer-ios"
-version = "0.0.28"
+version = "0.0.29"
 dependencies = [
  "wml2viewer-mobile-bridge",
 ]
 
 [[package]]
 name = "wml2viewer-mobile-bridge"
-version = "0.0.28"
+version = "0.0.29"
 dependencies = [
  "wml2viewer-core",
 ]

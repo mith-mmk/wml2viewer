@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.0.29] - 2026-11-11
+
+### Changed
+
+- Upgrade desktop and shared core to WML2 0.0.45 and align all reader dependencies on bin-rs 0.1.0, including webp-rust 0.5.0, avif-rust 0.3.0 and icc-profile 0.0.8.
+- Preserve the existing sRGB RGBA8 display, animation, orientation and cooperative cancellation contracts. Desktop release builds keep AVIF opt-in.
+
+### Tests
+
+- Revalidate the existing workspace tests and copied sample decodes with the aligned reader/codec dependency graph. See [validation and limitations](docs/wml2-045-validation.md).
+
 ## [0.0.28] - 2026-11-11
 
 ### Changed
