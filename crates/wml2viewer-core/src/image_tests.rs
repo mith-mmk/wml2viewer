@@ -12,6 +12,7 @@ fn sample() -> DecodedImage {
         poster: RgbaImage::new(2, 1, vec![255, 0, 0, 255, 0, 255, 0, 128]).unwrap(),
         animation: Vec::new(),
         loop_count: None,
+        diagnostics: Default::default(),
     }
 }
 
@@ -41,6 +42,7 @@ fn animated_sample() -> DecodedImage {
             },
         ],
         loop_count: Some(2),
+        diagnostics: Default::default(),
     }
 }
 
@@ -173,6 +175,28 @@ fn jpeg_xl_display_uses_reconstruction_profile_in_both_decode_paths() {
         }
         .unwrap();
         assert_eq!((image.poster.width(), image.poster.height()), (7, 5));
+        assert_eq!(
+            image.diagnostics.output_color(0).conversion,
+            wml2::color_outcome::Conversion::AppliedToSrgb
+        );
+        assert_eq!(
+            image.diagnostics.output_color(0).output,
+            wml2::color_outcome::OutputColorSpace::Srgb
+        );
+        for key in [
+            "JPEG XL Source ICC Profile",
+            "JPEG XL Reconstruction ICC Profile",
+            "ICC Profile",
+        ] {
+            assert!(
+                image
+                    .diagnostics
+                    .metadata
+                    .as_ref()
+                    .unwrap()
+                    .contains_key(key)
+            );
+        }
         for (actual, reference) in image
             .poster
             .pixels()
@@ -314,6 +338,14 @@ fn jpeg_xl_animations_preserve_srgb_pixels_timing_and_loops() {
                 "{name}"
             );
             assert_eq!(image.frame_count(), 3, "{name}");
+            for frame in 0..3 {
+                let output = image.diagnostics.display_output_index(frame, true).unwrap();
+                assert_eq!(output, frame + 1);
+                assert_eq!(
+                    image.diagnostics.output_color(output).conversion,
+                    wml2::color_outcome::Conversion::AppliedToSrgb
+                );
+            }
             assert_eq!(image.loop_count, Some(0), "{name}");
             assert_eq!(image.poster, image.animation[0].image, "{name}");
             assert_eq!(
@@ -454,6 +486,23 @@ fn cmyk_jpeg_icc_is_applied_in_both_viewer_decode_paths() {
                 }
                 .unwrap();
                 assert_eq!((image.poster.width(), image.poster.height()), (16, 16));
+                use wml2::color_outcome::{
+                    ApproximationMethod, ApproximationReason, Conversion, OutputColorSpace,
+                };
+                let outcome = image.diagnostics.output_color(0);
+                if managed {
+                    assert_eq!(outcome.conversion, Conversion::AppliedToSrgb);
+                    assert_eq!(outcome.output, OutputColorSpace::Srgb);
+                } else {
+                    assert_eq!(
+                        outcome.conversion,
+                        Conversion::Approximation(
+                            ApproximationReason::MissingProfile,
+                            ApproximationMethod::AdditiveCmyk
+                        )
+                    );
+                    assert_eq!(outcome.output, OutputColorSpace::DeviceApproximation);
+                }
                 for (index, pixel) in image.poster.pixels().chunks_exact(4).enumerate() {
                     let block = (index / 16 / 8 * 2 + index % 16 / 8) as u8;
                     let legacy = [165 + block * 12, 185 - block * 8, 195 - block * 10];
@@ -477,6 +526,174 @@ fn cmyk_jpeg_icc_is_applied_in_both_viewer_decode_paths() {
                     assert_eq!(pixel[3], 255);
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn decode_diagnostics_never_infer_or_inherit_color_records() {
+    use wml2::color_outcome::{ColorOutcome, Conversion, OutputColorSpace, metadata_key};
+    use wml2::metadata::DataMap;
+    let applied = ColorOutcome {
+        conversion: Conversion::AppliedToSrgb,
+        output: OutputColorSpace::Srgb,
+    };
+    let mut raw = ImageBuffer::from_buffer(1, 1, vec![10, 20, 30, 255]);
+    raw.metadata = Some(std::collections::HashMap::from([
+        (metadata_key(0), applied.to_metadata()),
+        (
+            metadata_key(2),
+            DataMap::Raw(vec![b'W', b'C', b'O', 2, 1, 0, 0, 1]),
+        ),
+        (
+            "Source ICC Profile".into(),
+            DataMap::ICCProfile(vec![1, 2, 3]),
+        ),
+        ("Format".into(), DataMap::Ascii("Tiff".into())),
+    ]));
+    let original_metadata = raw.metadata.clone();
+    let image = decoded_from_wml2_for_test(raw, None).unwrap();
+    assert_eq!(image.diagnostics.metadata, original_metadata);
+    assert_eq!(image.poster.pixels(), &[10, 20, 30, 255]);
+    assert_eq!(image.diagnostics.output_color(0), applied);
+    assert_eq!(image.diagnostics.output_color(1), ColorOutcome::default());
+    assert_eq!(image.diagnostics.output_color(2), ColorOutcome::default());
+    assert_eq!(image.diagnostics.display_output_index(0, true), Some(1));
+    assert_eq!(image.diagnostics.display_output_index(1, true), Some(2));
+    assert_eq!(image.diagnostics.display_output_index(0, false), Some(0));
+    let mut diagnostics = image.diagnostics;
+    diagnostics
+        .metadata
+        .as_mut()
+        .unwrap()
+        .remove(&metadata_key(0));
+    diagnostics
+        .warnings
+        .push("ICC conversion applied successfully".into());
+    assert_eq!(diagnostics.output_color(0), ColorOutcome::default());
+    assert_eq!(
+        crate::image::DecodeDiagnostics::default().display_output_index(0, true),
+        None
+    );
+}
+
+#[test]
+fn invalid_cmyk_profile_preserves_warnings_and_fallback_without_pixel_changes() {
+    use wml2::color_outcome::{ApproximationMethod, ApproximationReason, Conversion};
+    let jpeg = include_bytes!("../../fixtures/jpeg-cmyk-blocks.jpg");
+    let mut payload = b"ICC_PROFILE\0\x01\x01".to_vec();
+    payload.extend([0_u8; 128]);
+    let mut tagged = jpeg[..2].to_vec();
+    tagged.extend([255, 0xe2]);
+    tagged.extend(((payload.len() + 2) as u16).to_be_bytes());
+    tagged.extend(payload);
+    tagged.extend(&jpeg[2..]);
+    let legacy = decode(DecodeRequest {
+        bytes: jpeg,
+        format_hint: None,
+    })
+    .unwrap();
+    let mut reference_warnings = None;
+    for bounded in [false, true] {
+        let request = DecodeRequest {
+            bytes: &tagged,
+            format_hint: None,
+        };
+        let image = if bounded {
+            decode_with_limits(request, DecodeLimits::UNLIMITED, None)
+        } else {
+            decode(request)
+        }
+        .unwrap();
+        assert_eq!(image.poster, legacy.poster);
+        assert_eq!(
+            image.diagnostics.output_color(0).conversion,
+            Conversion::Approximation(
+                ApproximationReason::InvalidProfile,
+                ApproximationMethod::AdditiveCmyk
+            )
+        );
+        assert!(!image.diagnostics.warnings.is_empty());
+        if let Some(expected) = &reference_warnings {
+            assert_eq!(&image.diagnostics.warnings, expected);
+        }
+        reference_warnings = Some(image.diagnostics.warnings);
+    }
+}
+
+// Minimal uncompressed little-endian TIFF pages, generated in-memory so the
+// differing page records and the exact callback-to-viewer mapping are testable.
+fn diagnostic_tiff_pages() -> Vec<u8> {
+    let mut bytes = b"II\x2a\x00\x08\x00\x00\x00".to_vec();
+    let mut previous_next = None;
+    for (channels, photometric, pixels) in [
+        (4_u16, 5_u32, vec![1, 2, 3, 4]),
+        (3_u16, 2_u32, vec![9, 8, 7]),
+        (4_u16, 5_u32, vec![10, 20, 30, 40]),
+    ] {
+        let directory = bytes.len();
+        if let Some(offset) = previous_next {
+            bytes[offset..offset + 4].copy_from_slice(&(directory as u32).to_le_bytes());
+        }
+        let bits_offset = directory + 2 + 9 * 12 + 4;
+        let pixel_offset = bits_offset + usize::from(channels) * 2;
+        bytes.extend(9_u16.to_le_bytes());
+        for (tag, kind, count, value) in [
+            (256_u16, 4_u16, 1_u32, 1_u32),
+            (257, 4, 1, 1),
+            (258, 3, u32::from(channels), bits_offset as u32),
+            (259, 3, 1, 1),
+            (262, 3, 1, photometric),
+            (273, 4, 1, pixel_offset as u32),
+            (277, 3, 1, u32::from(channels)),
+            (278, 4, 1, 1),
+            (279, 4, 1, pixels.len() as u32),
+        ] {
+            bytes.extend(tag.to_le_bytes());
+            bytes.extend(kind.to_le_bytes());
+            bytes.extend(count.to_le_bytes());
+            bytes.extend(value.to_le_bytes());
+        }
+        previous_next = Some(bytes.len());
+        bytes.extend(0_u32.to_le_bytes());
+        for _ in 0..channels {
+            bytes.extend(8_u16.to_le_bytes());
+        }
+        bytes.extend(pixels);
+    }
+    bytes
+}
+
+#[test]
+fn tiff_pages_keep_exact_output_records_and_existing_composited_pixels() {
+    use wml2::color_outcome::{ApproximationMethod, ApproximationReason, ColorOutcome, Conversion};
+    let bytes = diagnostic_tiff_pages();
+    for bounded in [false, true] {
+        let request = DecodeRequest {
+            bytes: &bytes,
+            format_hint: None,
+        };
+        let image = if bounded {
+            decode_with_limits(request, DecodeLimits::UNLIMITED, None)
+        } else {
+            decode(request)
+        }
+        .unwrap();
+        assert_eq!(image.animation.len(), 2);
+        // Existing compositor displays the second TIFF page first. Do not silently
+        // relabel it with the first page's valid CMYK conversion record.
+        assert_eq!(image.poster.pixels(), &[9, 8, 7, 255]);
+        assert_eq!(image.diagnostics.display_output_index(0, true), Some(1));
+        assert_eq!(image.diagnostics.output_color(1), ColorOutcome::default());
+        assert_eq!(image.diagnostics.display_output_index(1, true), Some(2));
+        for index in [0, 2] {
+            assert_eq!(
+                image.diagnostics.output_color(index).conversion,
+                Conversion::Approximation(
+                    ApproximationReason::MissingProfile,
+                    ApproximationMethod::MultiplicativeCmyk
+                )
+            );
         }
     }
 }

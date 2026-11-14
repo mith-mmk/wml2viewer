@@ -222,6 +222,7 @@ fn viewer_file_and_bytes_use_preference_then_fallback() {
         canvas: Canvas::from_rgba(1, 1, vec![255, 0, 0, 255]).unwrap(),
         animation: vec![],
         loop_count: None,
+        diagnostics: Default::default(),
     };
     let input = dir.join("input.jpg"); // Actual PNG takes precedence over the misleading extension.
     save_loaded_image(&input, &image, SaveFormat::Png).unwrap();
@@ -340,6 +341,7 @@ fn unavailable_format_preferences_keep_builtin_pixels_and_original_errors() {
             canvas: Canvas::from_rgba(1, 1, vec![255, 0, 0, 255]).unwrap(),
             animation: vec![],
             loop_count: None,
+            diagnostics: Default::default(),
         },
         SaveFormat::Png,
     )
