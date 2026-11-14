@@ -213,6 +213,7 @@ fn blank_image() -> LoadedImage {
         canvas,
         animation: Vec::new(),
         loop_count: None,
+        diagnostics: Default::default(),
     }
 }
 

@@ -446,7 +446,11 @@ impl ViewerApp {
             .open(&mut open)
             .frame(style::dialog_frame(ctx))
             .show(ctx, |ui| {
-                ui.label(dialog.message);
+                egui::ScrollArea::vertical()
+                    .max_height((ctx.content_rect().height() - 120.0).max(80.0))
+                    .show(ui, |ui| {
+                        ui.label(dialog.message);
+                    });
                 if style::button(ui, ButtonKind::Primary, self.text(UiTextKey::Close)).clicked() {
                     close_requested = true;
                 }

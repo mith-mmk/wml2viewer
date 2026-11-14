@@ -192,6 +192,7 @@ fn png_bytes() -> Vec<u8> {
         poster: RgbaImage::new(2, 1, vec![255, 0, 0, 255, 0, 255, 0, 128]).unwrap(),
         animation: Vec::new(),
         loop_count: None,
+        diagnostics: Default::default(),
     };
     encode(EncodeRequest {
         image: &image,
@@ -216,6 +217,7 @@ fn animated_image() -> DecodedImage {
             },
         ],
         loop_count: Some(2),
+        diagnostics: Default::default(),
     }
 }
 
@@ -590,6 +592,7 @@ fn native_image_limits_accept_streaming_frames_and_reject_checked_boundaries() {
             })
             .collect(),
         loop_count: Some(0),
+        diagnostics: Default::default(),
     };
     let parent = bridge.insert_decoded_for_test(streaming_frames).unwrap();
     assert_eq!(bridge.image(parent).unwrap().frame_count(), 65);
@@ -614,6 +617,7 @@ fn native_image_limits_accept_streaming_frames_and_reject_checked_boundaries() {
             })
             .collect(),
         loop_count: Some(0),
+        diagnostics: Default::default(),
     };
     let error = bridge.insert_decoded_for_test(too_many_frames).unwrap_err();
     assert_eq!(error.code(), NativeErrorCode::Limit);

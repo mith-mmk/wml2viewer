@@ -18,6 +18,10 @@ fn resize_uses_the_displayed_source_even_after_a_cache_hit() {
         canvas: Canvas::new(width, height),
         animation: Vec::new(),
         loop_count: None,
+        diagnostics: wml2viewer_core::image::DecodeDiagnostics {
+            warnings: vec!["retained cache diagnostic".into()],
+            ..Default::default()
+        },
     };
     let (tx, rx, join) = spawn_render_worker(image(1, 1));
     tx.send(RenderCommand::ResizeCurrent {
@@ -37,6 +41,10 @@ fn resize_uses_the_displayed_source_even_after_a_cache_hit() {
             ..
         } => {
             assert_eq!(request_id, 42);
+            assert_eq!(
+                source.diagnostics.warnings,
+                vec!["retained cache diagnostic"]
+            );
             assert_eq!((source.canvas.width(), source.canvas.height()), (7, 9));
             let prepared =
                 prepared_texture.expect("resize should prepare the texture off the UI thread");

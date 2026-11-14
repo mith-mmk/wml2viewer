@@ -1,4 +1,4 @@
-# wml2viewer 0.0.27
+# wml2viewer 0.0.30
 
 - `egui` と `wml2` を使った軽量ネイティブ画像ビューアです。
 
@@ -11,7 +11,7 @@
 - JPEG/Webp/BMP/Tiff/PNG/GIF/mag/maki/pi/picのネイティブ対応
 - AVIFは`avif` Cargo featureを有効にした場合だけ内蔵デコーダで対応
 - アニメーションGIF/PNG/webpのネイティブ対応
-- JPEG XL静止画像の内蔵デコードとsRGB色管理
+- JPEG XL静止画像および制限付きRGB/XYB/SDR Grayアニメーションの内蔵デコードとsRGB色管理（WML2 0.0.44）
 - 内蔵デコーダでEXIF Orientationに応じた回転・反転を表示とサムネイルに反映
 - マルチプラットフォーム対応
 - zipファイルの直接閲覧
@@ -41,7 +41,7 @@ wml2viewer
 
 ### Android 10以降
 
-Android 0.0.27はJetpack Composeで全面再実装したモバイル専用アプリです。Storage Access Frameworkで選択ツリーを直接参照し、SMB2/3、3×3位置タッチ、スマホ/タブレット別UIに対応します。デスクトップUIと`config.toml`は変更しません。SMBパスワードはAndroid Keystore鍵で暗号化し、Rustへ渡しません。
+Android 0.0.30はJetpack Composeで全面再実装したモバイル専用アプリです。Storage Access Frameworkで選択ツリーを直接参照し、SMB2/3、3×3位置タッチ、スマホ/タブレット別UIに対応します。デスクトップUIと`config.toml`は変更しません。SMBパスワードはAndroid Keystore鍵で暗号化し、Rustへ渡しません。
 
 必要環境はJDK 17、Android SDK 36、NDK r27c（`27.2.12479018`）、RustのAndroidターゲット、`cargo-ndk`です。Gradle 9.1.0 WrapperとAGP 9.0.1を使用します。
 
@@ -112,3 +112,6 @@ font_paths = ["C:/Windows/Fonts/NotoSansJP-Regular.otf"]
 - 2026-10-23: 0.0.25, adopt WML2 0.0.39 JPEG/EXIF fixes and preserve original decoder errors
 - 2026-10-24: 0.0.26、画像形式ごとの優先デコーダー設定、安全なフォールバック、内蔵デコードの単一読込化
 - 2026-10-30: 0.0.27、JPEG XL静止画像の色管理と向きの対応、MKIプラグイン振り分けの修正
+- 2026-11-11: 0.0.28準備、WML2 0.0.44とbin-rs 0.0.11へ整合、上限付きJPEG XLアニメーションデコードとキャンセル検証を追加
+- 2026-11-11: 0.0.29準備、表示パイプラインを維持してWML2 0.0.45、bin-rs 0.1.0、WebP 0.5.0、AVIF 0.3.0、ICC 0.0.8へ整合
+- 2026-11-14: 0.0.30準備、WML2 0.0.47 / icc-profile 0.1.0へ更新し、decode結果の色管理状態・source ICC情報・警告を保持して表示。

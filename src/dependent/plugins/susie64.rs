@@ -219,6 +219,7 @@ unsafe fn bitmap_handles_to_loaded_image(
         canvas,
         animation: Vec::new(),
         loop_count: None,
+        diagnostics: Default::default(),
     })
 }
 
