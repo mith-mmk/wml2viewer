@@ -424,3 +424,59 @@ fn jpeg_xl_cancellation_reaches_decoder_before_invalid_payload() {
     );
     assert_eq!(calls.load(Ordering::Relaxed), 2);
 }
+
+#[path = "cmyk_test_profile.rs"]
+mod cmyk_test_profile;
+
+#[test]
+fn cmyk_jpeg_icc_is_applied_in_both_viewer_decode_paths() {
+    for jpeg in [
+        include_bytes!("../../fixtures/jpeg-cmyk-blocks.jpg").as_slice(),
+        include_bytes!("../../fixtures/jpeg-cmyk-blocks-progressive.jpg").as_slice(),
+    ] {
+        let mut payload = b"ICC_PROFILE\0\x01\x01".to_vec();
+        payload.extend(cmyk_test_profile::cmyk_profile());
+        let mut tagged = jpeg[..2].to_vec();
+        tagged.extend([255, 0xe2]);
+        tagged.extend(((payload.len() + 2) as u16).to_be_bytes());
+        tagged.extend(payload);
+        tagged.extend(&jpeg[2..]);
+        for bounded in [false, true] {
+            for managed in [false, true] {
+                let request = DecodeRequest {
+                    bytes: if managed { &tagged } else { jpeg },
+                    format_hint: Some("wrong-extension"),
+                };
+                let image = if bounded {
+                    decode_with_limits(request, DecodeLimits::UNLIMITED, None)
+                } else {
+                    decode(request)
+                }
+                .unwrap();
+                assert_eq!((image.poster.width(), image.poster.height()), (16, 16));
+                for (index, pixel) in image.poster.pixels().chunks_exact(4).enumerate() {
+                    let block = (index / 16 / 8 * 2 + index % 16 / 8) as u8;
+                    let legacy = [165 + block * 12, 185 - block * 8, 195 - block * 10];
+                    let inverted_ink = [180 + block * 12, 200 - block * 8, 210 - block * 10];
+                    for channel in 0..3 {
+                        if managed {
+                            // Independent analytic sRGB oracle for the linear-light
+                            // subtractive CMYK fixture, not the ICC implementation.
+                            let linear = f64::from(inverted_ink[channel]) / 255.0 * (240.0 / 255.0);
+                            let expected =
+                                ((1.055 * linear.powf(1.0 / 2.4) - 0.055) * 255.0).round() as u8;
+                            assert!(
+                                pixel[channel].abs_diff(expected) <= 3,
+                                "bounded={bounded}, block={block}, {pixel:?} vs {expected}"
+                            );
+                            assert!(pixel[channel].abs_diff(legacy[channel]) > 10);
+                        } else {
+                            assert_eq!(pixel[channel], legacy[channel]);
+                        }
+                    }
+                    assert_eq!(pixel[3], 255);
+                }
+            }
+        }
+    }
+}
