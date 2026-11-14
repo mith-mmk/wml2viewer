@@ -18,8 +18,8 @@ android {
         applicationId 'io.github.mith_mmk.wml2viewer'
         minSdk 29
         targetSdk 36
-        versionCode 29
-        versionName '0.0.29'
+        versionCode 30
+        versionName '0.0.30'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         vectorDrawables.useSupportLibrary = true
     }

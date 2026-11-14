@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+## [0.0.30] - 2026-11-14
+
+### Changed
+
+- Update desktop and shared core to WML2 0.0.47 and icc-profile 0.1.0, retaining the existing pixel decode, orientation, animation and cancellation paths.
+- Synchronize the five Rust package versions and desktop, Android and iOS application metadata at 0.0.30 (mobile build number 30).
+
+### Added
+
+- Retain successful decode metadata and individual warnings through the desktop image, resize and preload/cache pipeline.
+- Show source ICC metadata, decoded output color space and actual color-processing outcomes separately in Image Information. Missing, malformed and unmapped outcomes remain unknown; profile presence and warning text never imply a successful color conversion.
+- Preserve per-output TIFF/PSD/JPEG XL status mapping and keep external plugin color processing unknown when no result is available. See [color diagnostics](docs/color-diagnostics.md).
+
+### Fixed
+
+- Read EXIF information from the exact successful decode rather than re-decoding the current path.
+- Keep long Image Information content scrollable with the title and Close button reachable.
+
+### Tests
+
+- Cover CMYK managed/missing/invalid-profile outcomes, decoder warnings, TIFF output isolation, JPEG XL animation, cache/resize retention and malformed/future metadata.
+- Verify the diagnostics in the actual Linux Viewer UI, including navigation, reload and scrolling. Application distribution is not part of this version preparation.
+
 ## [0.0.29] - 2026-11-11
 
 ### Changed
