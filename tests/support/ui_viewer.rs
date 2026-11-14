@@ -10,6 +10,7 @@ fn dummy_loaded_image(width: u32, height: u32) -> LoadedImage {
         canvas: Canvas::new(width, height),
         animation: Vec::new(),
         loop_count: None,
+        diagnostics: Default::default(),
     }
 }
 
@@ -261,6 +262,10 @@ fn additional_review_animation_cache_return_uploads_frame_zero() {
             },
         ],
         loop_count: None,
+        diagnostics: wml2viewer_core::image::DecodeDiagnostics {
+            warnings: vec!["original decode warning".into()],
+            ..Default::default()
+        },
     };
     let mut app = make_test_viewer();
     app.source = animated.clone();
@@ -283,9 +288,15 @@ fn additional_review_animation_cache_return_uploads_frame_zero() {
         None,
         None,
     );
+    assert!(app.source.diagnostics.warnings.is_empty());
     let _ = app.egui_ctx.tex_manager().write().take_delta();
     assert!(app.try_take_preloaded(Path::new("a.png")));
     assert_eq!(app.current_frame, 0);
+    assert_eq!(
+        app.source.diagnostics.warnings,
+        vec!["original decode warning"]
+    );
+    assert_eq!(app.rendered.diagnostics, app.source.diagnostics);
     let delta = app.egui_ctx.tex_manager().write().take_delta();
     let (_, update) = delta
         .set

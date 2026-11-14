@@ -39,6 +39,7 @@ pub struct AnimationFrame {
 
 #[derive(Clone, Debug)]
 pub struct LoadedImage {
+    pub diagnostics: wml2viewer_core::image::DecodeDiagnostics,
     pub canvas: Canvas,
     pub animation: Vec<AnimationFrame>,
     pub loop_count: Option<u32>,
@@ -227,6 +228,7 @@ pub fn resize_loaded_image(
         canvas,
         animation,
         loop_count: source.loop_count,
+        diagnostics: source.diagnostics.clone(),
     })
 }
 
@@ -283,6 +285,7 @@ fn convert_image(image: DecodedImage) -> Result<LoadedImage> {
         canvas,
         animation,
         loop_count: image.loop_count,
+        diagnostics: image.diagnostics.clone(),
     })
 }
 
@@ -310,6 +313,7 @@ fn image_to_core(image: &LoadedImage) -> Result<DecodedImage> {
         poster,
         animation,
         loop_count: image.loop_count,
+        diagnostics: image.diagnostics.clone(),
     })
 }
 

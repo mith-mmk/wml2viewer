@@ -144,6 +144,7 @@ fn decode_with_factory(
         canvas,
         animation: Vec::new(),
         loop_count: None,
+        diagnostics: Default::default(),
     })
 }
 
