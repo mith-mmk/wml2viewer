@@ -1,3 +1,4 @@
+mod color_info;
 mod icons;
 pub(crate) mod state;
 pub(crate) mod thumbnail;
@@ -17,7 +18,6 @@ use crate::ui::viewer::options::PaneSide;
 use chrono::{DateTime, Local};
 use eframe::egui;
 use std::time::SystemTime;
-use wml2::draw::image_from_file;
 use wml2::metadata::exif::parse_exif;
 use wml2::metadata::{DataMap, Metadata};
 use wml2::tiff::header::{DataPack, TiffHeader};
@@ -611,9 +611,16 @@ impl ViewerApp {
         }
         lines.push(String::new());
         lines.push("[Color]".to_string());
-        lines.push("Color Profile: (not available)".to_string());
+        let output_index = self
+            .source
+            .diagnostics
+            .display_output_index(self.current_frame, self.source.is_animated());
+        lines.extend(color_info::color_info_lines(
+            &self.source.diagnostics,
+            output_index,
+        ));
 
-        append_exif_sections(&mut lines, &self.current_path);
+        append_exif_sections(&mut lines, self.source.diagnostics.metadata.as_ref());
         lines.join("\n")
     }
 
@@ -1556,10 +1563,10 @@ fn file_format_label(path: &std::path::Path) -> String {
         .unwrap_or_else(|| "UNKNOWN".to_string())
 }
 
-fn append_exif_sections(lines: &mut Vec<String>, path: &std::path::Path) {
+fn append_exif_sections(lines: &mut Vec<String>, metadata: Option<&Metadata>) {
     lines.push(String::new());
     lines.push("[EXIF / Camera]".to_string());
-    let Some(tags) = load_wml2_exif_tags(path) else {
+    let Some(tags) = metadata.and_then(exif_tags_from_metadata) else {
         append_empty_exif_sections(lines);
         return;
     };
@@ -1656,12 +1663,6 @@ struct ExifTagSets {
     primary: Vec<TiffHeader>,
     exif: Vec<TiffHeader>,
     gps: Vec<TiffHeader>,
-}
-
-fn load_wml2_exif_tags(path: &std::path::Path) -> Option<ExifTagSets> {
-    let image = image_from_file(path.to_string_lossy().into_owned()).ok()?;
-    let metadata = image.metadata.as_ref()?;
-    exif_tags_from_metadata(metadata)
 }
 
 fn exif_tags_from_metadata(metadata: &Metadata) -> Option<ExifTagSets> {

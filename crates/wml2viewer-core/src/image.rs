@@ -7,7 +7,8 @@ use wml2::color::RGBA;
 use wml2::draw::{
     AnimationLayer as WmlAnimationLayer, CallbackResponse, DecodeOptions as WmlDecodeOptions,
     DrawCallback, DrawOptions, ImageBuffer, InitOptions, NextBlend, NextDispose, NextOptions,
-    TerminateOptions, VerboseOptions, image_decoder_with_limits, image_from_with_limits, image_to,
+    TerminateOptions, VerboseOptions, image_decoder_with_limits,
+    image_from_with_limits_and_warnings, image_to,
 };
 use wml2::limits::DecodeLimits as WmlDecodeLimits;
 use wml2::metadata::exif::parse_exif;
@@ -89,13 +90,64 @@ pub struct AnimationFrame {
     pub duration_ms: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Observations retained from the successful decode that produced these pixels.
+/// Source ICC metadata is not evidence that color conversion was performed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DecodeDiagnostics {
+    pub metadata: Option<Metadata>,
+    /// Individual recoverable diagnostics, in decoder order. Empty is not a
+    /// validation guarantee and warning text must never be parsed as color state.
+    pub warnings: Vec<String>,
+}
+
+impl DecodeDiagnostics {
+    /// Maps the viewer's composited frame to the decoder's output record.
+    /// The current compositor replaces the poster with the first animation layer.
+    /// Unknown format layouts deliberately have no inferred record association.
+    pub fn display_output_index(&self, frame_index: usize, is_animated: bool) -> Option<usize> {
+        if !is_animated {
+            return Some(0);
+        }
+        // The WML2 0.0.47 JPEG XL animation route emits these typed fields,
+        // but unlike its still route does not emit a Format field.
+        if self.metadata.as_ref().is_some_and(|m| {
+            matches!(m.get("JPEG XL Source Header"), Some(DataMap::Raw(_)))
+                && matches!(
+                    m.get("JPEG XL Animation Ticks Numerator"),
+                    Some(DataMap::UInt(_))
+                )
+        }) {
+            return frame_index.checked_add(1);
+        }
+        match self.metadata.as_ref().and_then(|m| m.get("Format")) {
+            Some(DataMap::Ascii(format))
+                if matches!(format.as_str(), "Tiff" | "PSD" | "JPEG XL") =>
+            {
+                frame_index.checked_add(1)
+            }
+            _ => None,
+        }
+    }
+
+    /// Looks up only this output's record; missing/malformed records are unknown.
+    /// For TIFF, the index is display-page order; PSD uses composite then layers.
+    pub fn output_color(&self, output_index: usize) -> wml2::color_outcome::ColorOutcome {
+        wml2::color_outcome::ColorOutcome::from_metadata(
+            self.metadata.as_ref().and_then(|metadata| {
+                metadata.get(&wml2::color_outcome::metadata_key(output_index))
+            }),
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct DecodedImage {
     /// Display-oriented pixels; EXIF rotation/reflection has already been applied.
     pub poster: RgbaImage,
     /// Composited frames in the same display orientation as the poster.
     pub animation: Vec<AnimationFrame>,
     pub loop_count: Option<u32>,
+    pub diagnostics: DecodeDiagnostics,
 }
 
 impl DecodedImage {
@@ -163,19 +215,22 @@ pub struct Wml2Codec;
 impl ImageDecoder for Wml2Codec {
     fn decode(&self, request: DecodeRequest<'_>) -> CoreResult<DecodedImage> {
         let _format_hint = request.format_hint;
-        let image = catch_unwind(AssertUnwindSafe(|| {
+        let (image, warnings) = catch_unwind(AssertUnwindSafe(|| {
             if matches!(format_check(request.bytes), ImageFormat::JpegXl) {
                 wml2::jpegxl::image_from_srgb_with_limits(
                     request.bytes,
                     WmlDecodeLimits::unlimited(),
                 )
+                .map(|image| (image, None))
             } else {
-                image_from_with_limits(request.bytes, WmlDecodeLimits::unlimited())
+                image_from_with_limits_and_warnings(request.bytes, WmlDecodeLimits::unlimited())
             }
         }))
         .map_err(|_| CoreError::decode("image decoder panicked"))?
         .map_err(|error| CoreError::decode(error.to_string()))?;
-        decoded_from_wml2(image)
+        let mut decoded = decoded_from_wml2(image)?;
+        decoded.diagnostics.warnings = warning_strings(warnings);
+        Ok(decoded)
     }
 }
 
@@ -219,11 +274,19 @@ impl Wml2Codec {
         }))
         .map_err(|_| CoreError::decode("image decoder panicked"))?
         .map_err(map_wml2_decode_error)?;
-        let _warnings = image;
+        let warnings = warning_strings(image);
         let image = target.into_inner();
         check_cancelled(cancel_probe)?;
-        decoded_from_wml2_with_limits_and_cancel(image, limits, cancel_probe)
+        let mut decoded = decoded_from_wml2_with_limits_and_cancel(image, limits, cancel_probe)?;
+        decoded.diagnostics.warnings = warnings;
+        Ok(decoded)
     }
+}
+
+fn warning_strings(warnings: Option<wml2::warning::ImgWarnings>) -> Vec<String> {
+    warnings
+        .map(|warnings| warnings.iter().map(ToString::to_string).collect())
+        .unwrap_or_default()
 }
 
 impl ImageEncoder for Wml2Codec {
@@ -446,6 +509,10 @@ fn decoded_from_wml2_with_limits_and_cancel(
         poster,
         animation,
         loop_count: image.loop_count,
+        diagnostics: DecodeDiagnostics {
+            metadata: image.metadata.take(),
+            warnings: Vec::new(),
+        },
     })
 }
 

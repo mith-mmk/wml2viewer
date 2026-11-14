@@ -766,6 +766,7 @@ impl BridgeState {
                 poster,
                 animation: Vec::new(),
                 loop_count: None,
+                diagnostics: Default::default(),
             },
             format: encode_format,
         }) {

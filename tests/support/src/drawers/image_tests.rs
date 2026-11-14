@@ -17,6 +17,7 @@ fn tiny_image() -> LoadedImage {
         canvas: Canvas::new(1, 1),
         animation: Vec::new(),
         loop_count: None,
+        diagnostics: Default::default(),
     }
 }
 
@@ -71,4 +72,40 @@ fn plugin_decode_is_visible_from_viewer_load_path() {
 
     let decoded = load_canvas_from_file(&repo_root().join("samples").join("WML2Viewer.avif"));
     assert!(decoded.is_ok());
+}
+
+#[test]
+fn conversion_resize_and_core_roundtrip_preserve_decode_diagnostics() {
+    use wml2::color_outcome::{ColorOutcome, Conversion, OutputColorSpace, metadata_key};
+    use wml2viewer_core::image::{DecodeDiagnostics, DecodedImage, RgbaImage};
+    let outcome = ColorOutcome {
+        conversion: Conversion::AppliedToSrgb,
+        output: OutputColorSpace::Srgb,
+    };
+    let diagnostics = DecodeDiagnostics {
+        metadata: Some(std::collections::HashMap::from([(
+            metadata_key(0),
+            outcome.to_metadata(),
+        )])),
+        warnings: vec!["recoverable warning".into()],
+    };
+    let core = DecodedImage {
+        poster: RgbaImage::new(1, 1, vec![20, 30, 40, 255]).unwrap(),
+        animation: vec![],
+        loop_count: None,
+        diagnostics: diagnostics.clone(),
+    };
+    let image = super::convert_image(core).unwrap();
+    assert_eq!(image.diagnostics, diagnostics);
+    let resized = super::resize_loaded_image(
+        &image,
+        2.0,
+        crate::drawers::affine::InterpolationAlgorithm::Bilinear,
+    )
+    .unwrap();
+    assert_eq!(resized.diagnostics, diagnostics);
+    assert_eq!(
+        super::image_to_core(&resized).unwrap().diagnostics,
+        diagnostics
+    );
 }

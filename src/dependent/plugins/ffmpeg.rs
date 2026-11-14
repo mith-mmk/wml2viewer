@@ -71,7 +71,13 @@ pub(super) fn decode_from_file(
         let _ = std::fs::remove_file(&output);
         return None;
     }
-    let decoded = load_canvas_from_file_internal(&output).ok();
+    let decoded = load_canvas_from_file_internal(&output)
+        .ok()
+        .map(|mut image| {
+            // The intermediate BMP cannot describe the original input or ffmpeg CMS.
+            image.diagnostics = Default::default();
+            image
+        });
     let _ = std::fs::remove_file(&output);
     decoded
 }
