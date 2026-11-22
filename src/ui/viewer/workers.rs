@@ -763,6 +763,12 @@ impl ViewerApp {
                             &self.current_navigation_path,
                             failed_navigation_path.as_deref(),
                         );
+                    if failed_during_load {
+                        if let Some(failed_path) = path.as_ref().or(failed_navigation_path.as_ref())
+                        {
+                            self.current_path = failed_path.clone();
+                        }
+                    }
                     let label = path
                         .as_ref()
                         .and_then(|path| path.file_name())
@@ -1469,6 +1475,11 @@ impl ViewerApp {
                 &self.current_navigation_path,
                 timed_out_navigation_path.as_deref(),
             );
+        if timed_out_during_load {
+            if let Some(failed_path) = timed_out_navigation_path.as_ref() {
+                self.current_path = failed_path.clone();
+            }
+        }
 
         self.save_dialog.message = Some("Load timeout: request skipped".to_string());
         self.clear_current_image_display();

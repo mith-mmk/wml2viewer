@@ -439,17 +439,23 @@ impl ViewerApp {
 
         let mut open = true;
         let mut close_requested = false;
+        let max_dialog_width = (ctx.content_rect().width() - 48.0).max(200.0);
+        let max_dialog_height = (ctx.content_rect().height() - 120.0).max(80.0);
         egui::Window::new(dialog.title)
             .collapsible(false)
             .resizable(false)
+            .max_width(max_dialog_width)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .open(&mut open)
             .frame(style::dialog_frame(ctx))
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
-                    .max_height((ctx.content_rect().height() - 120.0).max(80.0))
+                    .max_height(max_dialog_height)
+                    .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        ui.label(dialog.message);
+                        let content_width = (ui.available_width() - 16.0).max(120.0);
+                        ui.set_max_width(content_width);
+                        ui.add(egui::Label::new(dialog.message).wrap());
                     });
                 if style::button(ui, ButtonKind::Primary, self.text(UiTextKey::Close)).clicked() {
                     close_requested = true;
